@@ -62,15 +62,15 @@ export function getUrgencyLevel(category: string): UrgencyLevel {
 export function getRowClasses(level: UrgencyLevel): string {
   switch (level) {
     case "critical":
-      return "bg-red-50 border-l-4 border-l-red-500";
+      return "bg-red-50/70 border-l-4 border-l-red-500";
     case "warning":
-      return "bg-orange-50 border-l-4 border-l-orange-400";
+      return "bg-amber-50/70 border-l-4 border-l-amber-400";
     case "advisory":
-      return "bg-yellow-50 border-l-4 border-l-yellow-400";
+      return "bg-yellow-50/60 border-l-4 border-l-yellow-400";
     case "monitoring":
-      return "bg-blue-50 border-l-4 border-l-blue-400";
+      return "bg-sky-50/60 border-l-4 border-l-sky-400";
     case "system":
-      return "bg-gray-100 border-l-4 border-l-gray-400";
+      return "bg-slate-50 border-l-4 border-l-slate-300";
     case "neutral":
       return "border-l-4 border-l-transparent";
   }
@@ -81,14 +81,14 @@ export function getUrgencyBadgeClasses(level: UrgencyLevel): string {
     case "critical":
       return "bg-red-100 text-red-800";
     case "warning":
-      return "bg-orange-100 text-orange-800";
+      return "bg-amber-100 text-amber-800";
     case "advisory":
       return "bg-yellow-100 text-yellow-800";
     case "monitoring":
-      return "bg-blue-100 text-blue-800";
+      return "bg-sky-100 text-sky-700";
     case "system":
-      return "bg-gray-200 text-gray-700";
+      return "bg-slate-100 text-slate-600";
     case "neutral":
-      return "bg-gray-100 text-gray-600";
+      return "bg-slate-100 text-slate-500";
   }
 }
