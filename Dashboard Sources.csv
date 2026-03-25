@@ -1,0 +1,101 @@
+#,name,category,type,tier,url,notes
+1,Groq,AI/ML,API,Infrastructure,https://api.groq.com/,Primary AI inference (server-side key)
+2,Ollama (local),AI/ML,API,Infrastructure,http://localhost:11434/,Local AI inference (desktop variant)
+3,OpenRouter,AI/ML,API,Infrastructure,https://openrouter.ai/api/v1/,AI routing fallback (server-side key)
+4,Transformers.js (browser),AI/ML,Library,Infrastructure,Browser-side T5 model,Browser ML fallback when cloud unavailable
+5,Upstash Redis,Caching,Service,Infrastructure,https://upstash.com/,3-tier cache: in-memory + Redis + upstream
+6,Vercel Edge Functions (60+),Compute,Service,Infrastructure,https://vercel.com/,60+ edge functions for API handling
+7,ACLED (Armed Conflict Location & Event Data),Conflict,API,Primary,https://api.acleddata.com/,"Protests, riots, strikes, demos; 30-day window; requiredForRisk"
+8,"GDELT (Global Database of Events, Language, Tone)",Conflict,API,Primary,https://api.gdeltproject.org/api/v2/geo/geo,7-day geospatial event feed; requiredForRisk
+9,UCDP (Uppsala Conflict Data Program),Conflict,API,Secondary,https://ucdp.uu.se/apidocs/,Academic conflict data
+10,Liveuamap,Conflict,RSS,Tier 3 - Specialized,https://liveuamap.com/rss,Live conflict mapping
+11,HAPI (Humanitarian API),Conflict/Humanitarian,API,Secondary,https://hapi.humdata.org/,UN OCHA humanitarian data
+12,AbuseIPDB,Cyber Threats,API,Primary,https://api.abuseipdb.com/api/v2/,IP abuse reporting database
+13,AlienVault OTX,Cyber Threats,API,Primary,https://otx.alienvault.com/api/v1/,Open Threat Exchange indicators
+14,URLhaus (abuse.ch),Cyber Threats,API,Primary,https://urlhaus-api.abuse.ch/v1/,Malicious URL tracking
+15,APT Threat Attribution,Cyber Threats,Derived,Secondary,Derived from multiple CTI feeds,Advanced Persistent Threat tracking
+16,Army Recognition,Defense,RSS,Tier 3 - Specialized,https://www.armyrecognition.com/rss,Army equipment & news
+17,Breaking Defense,Defense,RSS,Tier 3 - Specialized,https://breakingdefense.com/feed/,Defense policy
+18,Defense News,Defense,RSS,Tier 3 - Specialized,https://www.defensenews.com/arc/outboundfeeds/rss/,Global defense industry
+19,Defense One,Defense,RSS,Tier 3 - Specialized,https://www.defenseone.com/rss/,US defense news
+20,Jane's / Janes,Defense,RSS,Tier 3 - Specialized,https://www.janes.com/feeds/news,Defense intelligence
+21,Naval News,Defense,RSS,Tier 3 - Specialized,https://www.navalnews.com/feed/,Naval/maritime defense
+22,The War Zone (The Drive),Defense,RSS,Tier 3 - Specialized,https://www.thedrive.com/the-war-zone/feed,Military analysis
+23,WorldPop,Demographics,API/Static,Reference,https://www.worldpop.org/,Population exposure data for risk assessment
+24,US Government Spending Data,Economic,API,Government,https://api.usaspending.gov/,Federal spending tracking
+25,FRED (Federal Reserve Economic Data),Economic,API,Primary,https://api.stlouisfed.org/fred/,"US economic indicators (GDP, unemployment, CPI, etc.)"
+26,CoinGecko,Economic/Crypto,API,Primary,https://api.coingecko.com/api/v3/,Stablecoin monitoring
+27,mempool.space,Economic/Crypto,API,Secondary,https://mempool.space/api/,BTC hashrate monitoring
+28,EIA (Energy Information Administration),Economic/Energy,API,Primary,https://api.eia.gov/v2/,"Oil analytics, energy data"
+29,Finnhub,Economic/Markets,API,Primary,https://finnhub.io/api/v1/,Financial market data (API key server-side)
+30,Yahoo Finance,Economic/Markets,API,Primary,https://query1.finance.yahoo.com/v8/finance/,"Equities, forex, crypto; 92 stock exchanges"
+31,OFAC Sanctions Lists,Economic/Sanctions,API/Static,Government,https://www.treasury.gov/ofac/downloads/,US Treasury sanctions data
+32,alternative.me,Economic/Sentiment,API,Secondary,https://api.alternative.me/fng/,Fear & Greed Index
+33,Foreign Affairs,Geopolitics,RSS,Tier 3 - Specialized,https://www.foreignaffairs.com/rss.xml,Policy analysis
+34,Foreign Policy,Geopolitics,RSS,Tier 3 - Specialized,https://foreignpolicy.com/feed/,International affairs
+35,The Diplomat,Geopolitics,RSS,Tier 3 - Specialized,https://thediplomat.com/feed/,Asia-Pacific geopolitics
+36,Australia DFAT Smartraveller,Government Advisory,RSS/API,Government,https://www.smartraveller.gov.au/api/rss/countries,Australian travel advisories
+37,New Zealand MFAT,Government Advisory,RSS,Government,https://safetravel.govt.nz/feed,NZ travel advisories
+38,UK FCDO Travel Advice,Government Advisory,Atom,Government,https://www.gov.uk/foreign-travel-advice.atom,British travel advisories
+39,US Embassy Alerts (13 countries),Government Advisory,RSS,Government,Various embassy RSS feeds,Country-specific alert feeds from US embassies
+40,US State Dept Travel Advisories,Government Advisory,RSS/API,Government,https://travel.state.gov/content/travel/en/traveladvisories/traveladvisories.rss,Do-Not-Travel adds +15 CII points
+41,CDC Travel Notices,Health,RSS,Government,https://tools.cdc.gov/api/v2/resources/media/403702.rss,US CDC travel health notices
+42,ECDC (European CDC),Health,RSS,Government,https://www.ecdc.europa.eu/en/rss.xml,European disease monitoring
+43,WHO Africa Emergencies,Health,RSS,Government,https://www.afro.who.int/rss.xml,WHO Africa regional emergencies
+44,WHO News,Health,RSS,Government,https://www.who.int/rss-feeds/news-english.xml,World Health Organization
+45,Cloudflare Radar (Internet Outages),Infrastructure,API,Primary,https://radar.cloudflare.com/,Real-time internet outage monitoring
+46,Undersea Cables Database,Infrastructure,Static/API,Reference,https://www.submarinecablemap.com/,Global undersea cable routes
+47,Oil & Gas Pipelines,Infrastructure/Energy,Static,Reference,Static dataset,Global pipeline routes
+48,Critical Mineral Deposits,Infrastructure/Resources,Static,Reference,Static dataset,Strategic mineral deposit locations
+49,AI Datacenter Clusters (111),Infrastructure/Tech,Static,Reference,Static dataset,111 AI datacenter cluster locations
+50,Al Jazeera Live,Live Video,Stream,Tier 2,YouTube Live Stream,24/7 news stream
+51,Bloomberg Live,Live Video,Stream,Tier 2,YouTube Live Stream,Financial news stream
+52,Sky News Live,Live Video,Stream,Tier 2,YouTube Live Stream,24/7 news stream
+53,Additional YouTube Streams (5+),Live Video,Stream,Various,YouTube Live Streams,8 total live YouTube streams embedded
+54,Pikud HaOref (Israel Home Front Command),Military/Alerts,API,Primary,https://www.oref.org.il/,Incoming rocket/missile/drone siren alerts for Israel
+55,OpenSky Network (ADS-B),Military/Aviation,API,Primary,https://opensky-network.org/api/,"Live flight tracking, military aircraft"
+56,Wingbits (ADS-B),Military/Aviation,API,Primary,https://wingbits.com/,ADS-B flight data solution
+57,Military Bases Database (220+),Military/Infrastructure,Static,Reference,Static dataset,220+ global military base locations
+58,AIS (Automatic Identification System),Military/Maritime,API/Relay,Primary,AIS data relay,Naval vessel monitoring via Railway relay
+59,CelesTrak (TLE Satellite Data),Military/Space,API,Primary,https://celestrak.org/NORAD/elements/,80-120 intelligence-relevant satellites tracked in real time
+60,Spaceport Locations,Military/Space,Static,Reference,Static dataset,Global spaceport locations
+61,GDACS (Global Disaster Alert & Coordination),Natural Disaster,RSS/API,Primary,https://www.gdacs.org/xml/rss.xml,UN disaster alert system
+62,NASA EONET (Earth Observatory Natural Events),Natural Disaster,API,Primary,https://eonet.gsfc.nasa.gov/api/v3/events,"Wildfires, volcanoes, floods, storms (quakes excluded — USGS used instead)"
+63,NASA FIRMS (Fire Information for Resource Mgmt),Natural Disaster,API,Primary,https://firms.modaps.eosdis.nasa.gov/api/,VIIRS satellite fire detection; wildfires filtered to 48h
+64,Severe Weather Data,Natural Disaster,API,Primary,Various NWS/meteorological APIs,Severe weather alerts and tracking
+65,USGS Earthquake API,Natural Disaster,API,Primary,https://earthquake.usgs.gov/fdsnws/event/1/query,Real-time earthquake data (preferred over EONET for seismic)
+66,IRNA (Islamic Republic News Agency),News,RSS,State-Affiliated,https://en.irna.ir/rss,Iranian state media — propaganda-flagged
+67,RT (Russia Today),News,RSS,State-Affiliated,https://www.rt.com/rss/,Russian state media — propaganda-flagged
+68,Xinhua News Agency,News,RSS,State-Affiliated,http://www.xinhuanet.com/english/rss/worldrss.xml,Chinese state media — propaganda-flagged
+69,AFP - Agence France-Presse,News,RSS,Tier 1 - Wire Service,https://www.afp.com/en/rss,French wire service
+70,Associated Press - Top News,News,RSS,Tier 1 - Wire Service,https://rsshub.app/apnews/topics/apf-topnews,AP top news wire feed
+71,Reuters - World News,News,RSS,Tier 1 - Wire Service,https://www.reutersagency.com/feed/,Primary wire service feed
+72,Al Jazeera - News,News,RSS,Tier 2 - Major Outlet,https://www.aljazeera.com/xml/rss/all.xml,Al Jazeera English
+73,BBC News - World,News,RSS,Tier 2 - Major Outlet,https://feeds.bbci.co.uk/news/world/rss.xml,BBC World news
+74,CNN - World,News,RSS,Tier 2 - Major Outlet,http://rss.cnn.com/rss/edition_world.rss,CNN international edition
+75,DW News,News,RSS,Tier 2 - Major Outlet,https://rss.dw.com/rdf/rss-en-all,Deutsche Welle English
+76,France 24 - World,News,RSS,Tier 2 - Major Outlet,https://www.france24.com/en/rss,France 24 English
+77,NHK World,News,RSS,Tier 2 - Major Outlet,https://www3.nhk.or.jp/rss/news/cat0.xml,Added in v2.3.9
+78,NPR - World,News,RSS,Tier 2 - Major Outlet,https://feeds.npr.org/1004/rss.xml,NPR world section
+79,New York Times - World,News,RSS,Tier 2 - Major Outlet,https://rss.nytimes.com/services/xml/rss/nyt/World.xml,NYT world desk
+80,Nikkei Asia,News,RSS,Tier 2 - Major Outlet,https://asia.nikkei.com/rss,Added in v2.3.9
+81,Sky News - World,News,RSS,Tier 2 - Major Outlet,https://feeds.skynews.com/feeds/rss/world.xml,Sky News world
+82,The Guardian - World,News,RSS,Tier 2 - Major Outlet,https://www.theguardian.com/world/rss,Guardian world news
+83,Washington Post - World,News,RSS,Tier 2 - Major Outlet,https://feeds.washingtonpost.com/rss/world,WaPo world section
+84,The Intercept,News,RSS,Tier 3 - Specialized,https://theintercept.com/feed/?rss,Investigative journalism
+85,Zero Hedge,News,RSS,Tier 4 - Aggregator/Blog,https://feeds.feedburner.com/zerohedge/feed,Financial/geopolitical aggregator
+86,Bellingcat,OSINT,RSS,Tier 3 - Specialized,https://www.bellingcat.com/feed/,Open-source investigations
+87,Polymarket,Prediction Markets,API,Secondary,https://polymarket.com/,"Geopolitical prediction markets (Ukraine, Iran, China, Taiwan); 5-min cache"
+88,Railway Relay,Proxy,Service,Infrastructure,https://railway.app/,Stateless Node.js proxy for external APIs/RSS
+89,Greek locale feeds,Regional News,RSS,Tier 2/3,Various,Added in v2.5.6
+90,Nigeria feeds (multiple),Regional News,RSS,Tier 2/3,Various,Added in v2.5.6
+91,Telegram Relay,Social/Messaging,API/Relay,Secondary,Telegram relay endpoint,"Topic classification: breaking, conflict, alerts, osint, politics, middleeast"
+92,Bab el-Mandeb Monitoring,Supply Chain,Derived,Primary,AIS + satellite data,Strategic maritime chokepoint
+93,Panama Canal Monitoring,Supply Chain,Derived,Primary,AIS + satellite data,Strategic maritime chokepoint
+94,Strait of Hormuz Monitoring,Supply Chain,Derived,Primary,AIS + satellite data,Strategic maritime chokepoint
+95,Strait of Malacca Monitoring,Supply Chain,Derived,Primary,AIS + satellite data,Strategic maritime chokepoint
+96,Suez Canal Monitoring,Supply Chain,Derived,Primary,AIS + satellite data,One of 6 strategic maritime chokepoints
+97,Taiwan Strait Monitoring,Supply Chain,Derived,Primary,AIS + satellite data,Strategic maritime chokepoint
+98,Brookings,Think Tank,RSS,Tier 3 - Specialized,https://www.brookings.edu/feed/,Brookings Institution
+99,CSIS,Think Tank,RSS,Tier 3 - Specialized,https://www.csis.org/rss.xml,Center for Strategic & Intl Studies
+100,RAND Corporation,Think Tank,RSS,Tier 3 - Specialized,https://www.rand.org/news.xml,Policy research
