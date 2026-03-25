@@ -32,3 +32,16 @@ export type UrgencyLevel =
   | "monitoring"
   | "system"
   | "neutral";
+
+export type EntityType = "country" | "organization" | "region" | "person";
+
+export interface ExtractedEntity {
+  name: string;
+  type: EntityType;
+  mentions: number;
+  itemIds: string[];
+  urgencyBreakdown: Record<UrgencyLevel, number>;
+  lastSeen: string;
+  recentMentions: { hour: number; sixHour: number; day: number };
+  cooccurrences: [string, number][];
+}

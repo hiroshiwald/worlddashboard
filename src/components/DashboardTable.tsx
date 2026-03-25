@@ -8,6 +8,7 @@ import {
   getRowClasses,
   getUrgencyBadgeClasses,
 } from "@/lib/urgency";
+import IntelTab from "./IntelTab";
 
 type ColumnKey = keyof FeedItem;
 
@@ -65,6 +66,7 @@ export default function DashboardTable() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [dark, setDark] = useState(true);
+  const [activeTab, setActiveTab] = useState<"feeds" | "intel">("feeds");
 
   // Persist theme preference
   useEffect(() => {
@@ -266,24 +268,53 @@ export default function DashboardTable() {
           </div>
         </div>
 
-        {/* Urgency legend */}
-        <div className={`max-w-[1920px] mx-auto px-4 pb-1.5 flex items-center gap-5 text-[10px] uppercase tracking-wide ${t.legendText}`}>
-          <span className="flex items-center gap-1">
-            <span className="w-2.5 h-1 bg-red-500" />
-            CRITICAL
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2.5 h-1 bg-amber-500" />
-            WARNING
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2.5 h-1 bg-yellow-500" />
-            ADVISORY
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2.5 h-1 bg-sky-500" />
-            MONITORING
-          </span>
+        {/* Tab bar + Urgency legend */}
+        <div className={`max-w-[1920px] mx-auto px-4 pb-1.5 flex items-center gap-6 text-[10px] uppercase tracking-wide ${t.legendText}`}>
+          {/* Tabs */}
+          <div className="flex items-center gap-0.5 mr-2">
+            <button
+              onClick={() => setActiveTab("feeds")}
+              className={`px-3 py-1 text-xs font-bold uppercase tracking-wider transition-colors ${
+                activeTab === "feeds"
+                  ? "text-white bg-slate-700"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              FEEDS
+            </button>
+            <button
+              onClick={() => setActiveTab("intel")}
+              className={`px-3 py-1 text-xs font-bold uppercase tracking-wider transition-colors ${
+                activeTab === "intel"
+                  ? "text-white bg-slate-700"
+                  : "text-slate-500 hover:text-slate-300"
+              }`}
+            >
+              INTEL
+            </button>
+          </div>
+
+          {/* Urgency legend — show on feeds tab */}
+          {activeTab === "feeds" && (
+            <>
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-1 bg-red-500" />
+                CRITICAL
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-1 bg-amber-500" />
+                WARNING
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-1 bg-yellow-500" />
+                ADVISORY
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-1 bg-sky-500" />
+                MONITORING
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -321,8 +352,20 @@ export default function DashboardTable() {
         </div>
       )}
 
+      {/* ─── INTEL Tab ─── */}
+      {activeTab === "intel" && items.length > 0 && (
+        <IntelTab
+          items={items}
+          dark={dark}
+          onEntityClick={(name) => {
+            setSearchQuery(name);
+            setActiveTab("feeds");
+          }}
+        />
+      )}
+
       {/* ─── Table ─── */}
-      {items.length > 0 && (
+      {activeTab === "feeds" && items.length > 0 && (
         <div className="max-w-[1920px] mx-auto px-2 py-2">
           <div className={`border overflow-auto max-h-[calc(100vh-110px)] ${t.tableBorder}`}>
             <table className="w-full border-collapse text-xs">
