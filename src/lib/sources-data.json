@@ -735,7 +735,7 @@
     "category": "News",
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
-    "url": "http://rss.cnn.com/rss/edition_world.rss",
+    "url": "https://rss.cnn.com/rss/edition_world.rss",
     "notes": "CNN international edition",
     "status": "live"
   },

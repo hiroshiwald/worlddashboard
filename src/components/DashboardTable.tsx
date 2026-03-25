@@ -14,8 +14,17 @@ import IntelTab from "./IntelTab";
 const MapTab = dynamic(() => import("./MapTab"), {
   ssr: false,
   loading: () => (
-    <div className="flex items-center justify-center" style={{ height: "calc(100vh - 120px)" }}>
+    <div className="flex items-center justify-center h-full">
       <p className="text-xs uppercase tracking-wide text-slate-500">LOADING MAP...</p>
+    </div>
+  ),
+});
+
+const NetworkTab = dynamic(() => import("./NetworkTab"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-xs uppercase tracking-wide text-slate-500">LOADING NETWORK...</p>
     </div>
   ),
 });
@@ -77,7 +86,7 @@ export default function DashboardTable() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [dark, setDark] = useState(true);
-  const [activeTab, setActiveTab] = useState<"feeds" | "intel" | "map">("feeds");
+  const [activeTab, setActiveTab] = useState<"feeds" | "intel" | "network" | "map">("feeds");
 
   useEffect(() => {
     const saved = localStorage.getItem("wd-theme");
@@ -193,9 +202,9 @@ export default function DashboardTable() {
   };
 
   return (
-    <div className={`min-h-screen ${t.bg} transition-colors duration-200`}>
+    <div className={`h-screen flex flex-col ${t.bg} transition-colors duration-200`}>
       {/* ─── Header Bar ─── */}
-      <div className={`sticky top-0 z-30 ${t.headerBg}`}>
+      <div className={`shrink-0 z-30 ${t.headerBg}`}>
         {/* Row 1: brand + controls */}
         <div className="max-w-[1920px] mx-auto px-3 md:px-4 py-2.5 flex items-center justify-between gap-2 md:gap-4">
           {/* Left: branding */}
@@ -353,6 +362,16 @@ export default function DashboardTable() {
               INTEL
             </button>
             <button
+              onClick={() => setActiveTab("network")}
+              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
+                activeTab === "network"
+                  ? t.tabActive
+                  : t.tabInactive
+              }`}
+            >
+              NETWORK
+            </button>
+            <button
               onClick={() => setActiveTab("map")}
               className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
                 activeTab === "map"
@@ -399,6 +418,9 @@ export default function DashboardTable() {
           )}
         </div>
       </div>
+
+      {/* ─── Scrollable Content Area ─── */}
+      <div className="flex-1 overflow-auto min-h-0">
 
       {/* ─── Entity Filter Banner ─── */}
       {entityFilter && activeTab === "feeds" && (
@@ -485,6 +507,18 @@ export default function DashboardTable() {
         />
       )}
 
+      {/* ─── NETWORK Tab ─── */}
+      {activeTab === "network" && items.length > 0 && (
+        <NetworkTab
+          items={items}
+          dark={dark}
+          onEntityClick={(name) => {
+            setEntityFilter(name);
+            setActiveTab("feeds");
+          }}
+        />
+      )}
+
       {/* ─── INTEL Tab ─── */}
       {activeTab === "intel" && items.length > 0 && (
         <IntelTab
@@ -502,7 +536,7 @@ export default function DashboardTable() {
         <>
           {/* Desktop table — hidden on mobile */}
           <div className="hidden md:block max-w-[1920px] mx-auto px-2 py-2">
-            <div className={`border overflow-auto max-h-[calc(100vh-110px)] ${t.tableBorder}`}>
+            <div className={`border overflow-auto ${t.tableBorder}`}>
               <table className="w-full border-collapse text-xs">
                 <thead className="sticky top-0 z-10">
                   <tr className={t.theadBg}>
@@ -721,6 +755,8 @@ export default function DashboardTable() {
           </button>
         </div>
       )}
+
+      </div>{/* end scrollable content area */}
     </div>
   );
 }

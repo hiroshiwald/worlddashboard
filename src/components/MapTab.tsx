@@ -131,8 +131,7 @@ export default function MapTab({ items, dark, onEntityClick }: MapTabProps) {
 
   return (
     <div
-      className="w-full"
-      style={{ height: "calc(100vh - 120px)" }}
+      className="w-full h-full"
     >
       <MapContainer
         center={[20, 0]}
