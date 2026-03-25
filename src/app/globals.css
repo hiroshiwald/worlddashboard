@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: #0f172a;
+  transition: background-color 0.2s ease;
+}
+
+/* Scrollbar — dark theme */
+.overflow-auto::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.overflow-auto::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.overflow-auto::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+.overflow-auto::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Row transitions */
+tr {
+  transition: background-color 0.1s ease;
+}
+
+/* Selection highlight for dark theme */
+::selection {
+  background: #334155;
+  color: #f1f5f9;
+}

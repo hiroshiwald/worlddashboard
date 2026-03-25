@@ -75,7 +75,7 @@
 74,CNN - World,News,RSS,Tier 2 - Major Outlet,http://rss.cnn.com/rss/edition_world.rss,CNN international edition
 75,DW News,News,RSS,Tier 2 - Major Outlet,https://rss.dw.com/rdf/rss-en-all,Deutsche Welle English
 76,France 24 - World,News,RSS,Tier 2 - Major Outlet,https://www.france24.com/en/rss,France 24 English
-77,NHK World,News,RSS,Tier 2 - Major Outlet,https://www3.nhk.or.jp/rss/news/cat0.xml,Added in v2.3.9
+77,NHK World-Japan,News,RSS,Tier 2 - Major Outlet,https://www3.nhk.or.jp/nhkworld/data/en/news/backstory/rss.xml,NHK English in-depth news features
 78,NPR - World,News,RSS,Tier 2 - Major Outlet,https://feeds.npr.org/1004/rss.xml,NPR world section
 79,New York Times - World,News,RSS,Tier 2 - Major Outlet,https://rss.nytimes.com/services/xml/rss/nyt/World.xml,NYT world desk
 80,Nikkei Asia,News,RSS,Tier 2 - Major Outlet,https://asia.nikkei.com/rss,Added in v2.3.9
@@ -99,3 +99,50 @@
 98,Brookings,Think Tank,RSS,Tier 3 - Specialized,https://www.brookings.edu/feed/,Brookings Institution
 99,CSIS,Think Tank,RSS,Tier 3 - Specialized,https://www.csis.org/rss.xml,Center for Strategic & Intl Studies
 100,RAND Corporation,Think Tank,RSS,Tier 3 - Specialized,https://www.rand.org/news.xml,Policy research
+101,CISA Cybersecurity Advisories,Cyber Threats,RSS,Government,https://www.cisa.gov/cybersecurity-advisories/all.xml,US Cybersecurity & Infrastructure Security Agency alerts
+102,CISA Known Exploited Vulnerabilities,Cyber Threats,RSS,Government,https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json,KEV catalog — actively exploited vulnerabilities
+103,GPSJAM (GPS Interference Detection),Military/Electronic Warfare,API,Primary,https://gpsjam.org/,GPS jamming/spoofing detection via H3 hexagon grid
+104,AviationStack (Airport Delays),Aviation,API,Primary,https://aviationstack.com/,Global airport delays for 128 airports with NOTAM closure detection
+105,NOTAMs (Notices to Airmen),Aviation,API,Primary,https://api.faa.gov/s/,Airspace closures and flight restrictions worldwide
+106,UNHCR Refugee Data,Displacement/Humanitarian,API,Primary,https://data.unhcr.org/,UN refugee and displacement statistics
+107,IDMC (Internal Displacement Monitoring),Displacement/Humanitarian,API,Primary,https://www.internal-displacement.org/,Global internal displacement tracking
+108,Relief Web,Displacement/Humanitarian,RSS,Primary,https://reliefweb.int/updates/rss.xml,UN OCHA humanitarian updates and disaster reports
+109,IMF PortWatch,Trade/Maritime,API,Primary,https://portwatch.imf.org/,Vessel transit counts for maritime chokepoints; 180-day time-series
+110,AISStream,Trade/Maritime,API,Primary,https://aisstream.io/,Real-time 24h vessel crossing counter
+111,FRED Shipping Indices,Trade/Maritime,API,Secondary,https://api.stlouisfed.org/fred/,"Baltic Dry Index, container freight rates, shipping metrics"
+112,TeleGeography Submarine Cables,Infrastructure/Telecom,API,Reference,https://www.telegeography.com/,86+ submarine cable routes and landing points
+113,BIS (Bank for International Settlements),Economic/Credit,API,Primary,https://www.bis.org/,Global credit data and central bank indicators
+114,CoinPaprika,Economic/Crypto,API,Secondary,https://api.coinpaprika.com/,Crypto/stablecoin fallback data source
+115,EU Sanctions List (European Commission),Sanctions,RSS/API,Government,https://data.europa.eu/data/datasets/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions?locale=en,European Union consolidated sanctions list
+116,UN Security Council Sanctions,Sanctions,API/Static,Government,https://scsanctions.un.org/,UN consolidated sanctions list
+117,EURDEP (European Radiological Data),Radiation,API,Primary,https://remon.jrc.ec.europa.eu/,Real-time radiation monitoring across Europe
+118,Gamma Irradiator Locations,Radiation,Static,Reference,Static dataset,Global gamma irradiator site locations (nuclear risk)
+119,NRC Event Reports (US Nuclear Regulatory Commission),Radiation,RSS,Government,https://www.nrc.gov/reading-rm/doc-collections/event-status/event/event-rss.xml,US nuclear plant event reports and incidents
+120,Windy Webcams,Visual Intelligence,API,Secondary,https://api.windy.com/webcams/,Live webcams near points of interest worldwide
+121,Sentinel Hub (Copernicus),Imagery/Satellite,API,Primary,https://services.sentinel-hub.com/,ESA satellite imagery — wildfire/flood/conflict damage assessment
+122,NOAA Solar Weather,Space Weather,RSS,Government,https://services.swpc.noaa.gov/products/alerts.json,"Solar flare, geomagnetic storm, and radiation alerts"
+123,SpaceTrack,Military/Space,API,Primary,https://www.space-track.org/,US Space Command orbital debris and satellite tracking
+124,TASS (Russian News Agency),News,RSS,State-Affiliated,https://tass.com/rss/v2.xml,Russian state wire service — propaganda-flagged
+125,Yonhap News Agency,News,RSS,Tier 2 - Major Outlet,https://en.yna.co.kr/RSS/news.xml,South Korean wire service — key for Korean Peninsula coverage
+126,Anadolu Agency,News,RSS,Tier 2 - Major Outlet,https://www.aa.com.tr/en/rss/default?cat=world,Turkish state wire service
+127,Times of Israel,News,RSS,Tier 2 - Major Outlet,https://www.timesofisrael.com/feed/,Israeli news — key for Middle East coverage
+128,South China Morning Post,News,RSS,Tier 2 - Major Outlet,https://www.scmp.com/rss/91/feed,Hong Kong/China — key for Asia-Pacific
+129,Kyiv Independent,News,RSS,Tier 2 - Major Outlet,https://kyivindependent.com/feed/,Ukrainian news — key for Ukraine conflict
+130,The Moscow Times,News,RSS,Tier 2 - Major Outlet,https://www.themoscowtimes.com/rss/news,Independent Russian news in English
+131,Telegram OSINT Channels (27),Social/Messaging,API/Relay,Secondary,Telegram MTProto relay,"27 curated OSINT channels: breaking, conflict, alerts, osint, politics, middleeast"
+132,SIPRI (Stockholm Intl Peace Research),Think Tank,RSS,Tier 3 - Specialized,https://www.sipri.org/rss.xml,Arms trade and conflict research
+133,International Crisis Group,Think Tank,RSS,Tier 3 - Specialized,https://www.crisisgroup.org/rss.xml,Conflict prevention and resolution
+134,Atlantic Council,Think Tank,RSS,Tier 3 - Specialized,https://www.atlanticcouncil.org/feed/,US foreign policy and security
+135,Chatham House,Think Tank,RSS,Tier 3 - Specialized,https://www.chathamhouse.org/rss,UK international affairs
+136,Carnegie Endowment,Think Tank,RSS,Tier 3 - Specialized,https://carnegieendowment.org/rss/solr.xml,International peace research
+137,Corridor Risk (Maritime),Supply Chain/Maritime,API,Primary,https://corridorrisk.com/,Risk intelligence for maritime transit corridors
+138,Global Fishing Watch,Supply Chain/Maritime,API,Secondary,https://globalfishingwatch.org/,Vessel tracking and illegal fishing detection
+139,CorridorWatch (Panama/Suez/Hormuz),Supply Chain/Maritime,Derived,Primary,AIS + satellite data,Chokepoint-specific transit risk scoring
+140,IAEA News,Radiation/Nuclear,RSS,Government,https://www.iaea.org/feeds/news,International Atomic Energy Agency updates
+141,NTI Nuclear Security Index,Radiation/Nuclear,Static,Reference,https://www.ntiindex.org/,Nuclear threat initiative country rankings
+142,IEA (International Energy Agency),Economic/Energy,RSS,Primary,https://www.iea.org/rss/,Global energy market reports and forecasts
+143,OPEC Monthly Report,Economic/Energy,Static,Primary,https://www.opec.org/,OPEC oil market outlook and production data
+144,World Bank Open Data,Economic/Development,API,Primary,https://data.worldbank.org/,Global development indicators and poverty data
+145,IMF World Economic Outlook,Economic/Forecasts,API,Primary,https://www.imf.org/,Global economic forecasts and country reports
+146,Positive Events Feed,Humanitarian,Derived,Secondary,Derived from multiple feeds,"Ceasefire announcements, peace agreements, humanitarian aid deliveries"
+147,ACAPS (Assessment Capacities Project),Displacement/Humanitarian,RSS,Primary,https://www.acaps.org/en/countries/rss,Humanitarian crisis severity assessments and risk monitoring
