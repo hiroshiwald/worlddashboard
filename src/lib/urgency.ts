@@ -3,36 +3,55 @@ import { UrgencyLevel } from "./types";
 export function getUrgencyLevel(category: string): UrgencyLevel {
   const cat = category.toLowerCase();
 
+  // Critical — immediate threat to life or security
   if (
     cat.startsWith("conflict") ||
     cat.startsWith("cyber") ||
-    cat.startsWith("military")
+    cat.startsWith("military") ||
+    cat.startsWith("radiation") ||
+    cat.startsWith("space weather")
   ) {
     return "critical";
   }
 
-  if (cat.startsWith("natural disaster") || cat.startsWith("health")) {
+  // Warning — natural hazards, health emergencies, displacement
+  if (
+    cat.startsWith("natural disaster") ||
+    cat.startsWith("health") ||
+    cat.startsWith("displacement")
+  ) {
     return "warning";
   }
 
-  if (cat.startsWith("government")) {
+  // Advisory — government alerts, sanctions, travel warnings
+  if (
+    cat.startsWith("government") ||
+    cat.startsWith("sanctions") ||
+    cat.startsWith("aviation")
+  ) {
     return "advisory";
   }
 
+  // Monitoring — economic, trade, supply chain, markets
   if (
     cat.startsWith("economic") ||
     cat.startsWith("supply chain") ||
-    cat.startsWith("prediction")
+    cat.startsWith("prediction") ||
+    cat.startsWith("trade") ||
+    cat.startsWith("humanitarian")
   ) {
     return "monitoring";
   }
 
+  // System — infrastructure, tools, AI
   if (
     cat.startsWith("infrastructure") ||
     cat.startsWith("ai/ml") ||
     cat.startsWith("caching") ||
     cat.startsWith("compute") ||
-    cat.startsWith("proxy")
+    cat.startsWith("proxy") ||
+    cat.startsWith("imagery") ||
+    cat.startsWith("visual")
   ) {
     return "system";
   }

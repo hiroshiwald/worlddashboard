@@ -1,41 +1,82 @@
 import { FeedItem, SourceMeta } from "./types";
 
 // --- Ad / spam filter ---
-const AD_PATTERNS = [
+const AD_TITLE_PATTERNS = [
   /^ad:/i,
   /^sponsored/i,
   /^promoted/i,
   /^advertisement/i,
-  /paid (content|partner|post)/i,
   /^underscored/i,
   /cnn underscored/i,
+  // Commerce / affiliate content
   /best .{0,30} deals/i,
   /best .{0,30} to buy/i,
   /best .{0,30} for 20\d\d/i,
   /best .{0,30} we'?ve tested/i,
   /our favorite .{0,40} of 20\d\d/i,
+  /top \d+ .{0,30} (deals|products|gifts)/i,
   /shop .{0,30} sale/i,
-  /% off .{0,30} (at|from)/i,
+  /\d+% off .{0,30}/i,
   /coupon code/i,
   /promo code/i,
-  /affiliate/i,
   /gift guide/i,
   /deals of the day/i,
   /sale alert/i,
   /save \$?\d+/i,
   /discount code/i,
+  /black friday/i,
+  /cyber monday/i,
+  /prime day/i,
+  /where to buy/i,
+  /buying guide/i,
+  /price drop/i,
+  // Newsletter / subscription nags
+  /subscribe (now|today|to)/i,
+  /sign up for .{0,20} newsletter/i,
+  /download our app/i,
+  // Horoscopes, lifestyle filler
+  /^horoscope/i,
+  /^daily horoscope/i,
+  /^your .{0,15} horoscope/i,
+  /^crossword/i,
+  /^wordle/i,
+  /^today.s puzzle/i,
+];
+
+const AD_LINK_PATTERNS = [
+  "/cnn-underscored",
+  "/deals/",
+  "/shopping/",
+  "/ad/",
+  "/sponsored/",
+  "/partner-content/",
+  "/brandcontent/",
+  "/paid-partner/",
+  "/commerce/",
+  "/coupons/",
+  "/product-reviews/",
+  "affiliate",
+  "/buy/",
+  "/shop/",
 ];
 
 function isAdContent(title: string, summary: string, link: string): boolean {
-  const text = `${title} ${summary}`.toLowerCase();
-  // CNN Underscored is their affiliate/commerce arm
-  if (link.includes("cnn.com/cnn-underscored")) return true;
-  if (link.includes("/deals/")) return true;
-  if (link.includes("/shopping/")) return true;
-  if (link.includes("/ad/")) return true;
-  for (const pattern of AD_PATTERNS) {
-    if (pattern.test(title) || pattern.test(text)) return true;
+  // Check link patterns
+  const linkLower = link.toLowerCase();
+  for (const pattern of AD_LINK_PATTERNS) {
+    if (linkLower.includes(pattern)) return true;
   }
+
+  // Check title patterns
+  for (const pattern of AD_TITLE_PATTERNS) {
+    if (pattern.test(title)) return true;
+  }
+
+  // Check combined text for paid content markers
+  const text = `${title} ${summary}`.toLowerCase();
+  if (/paid (content|partner|post|promotion)/i.test(text)) return true;
+  if (/\baffiliate\b/i.test(text) && /\b(link|commission|earn)\b/i.test(text)) return true;
+
   return false;
 }
 

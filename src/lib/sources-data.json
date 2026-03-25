@@ -998,5 +998,475 @@
     "url": "https://www.rand.org/news.xml",
     "notes": "Policy research",
     "status": "live"
+  },
+  {
+    "id": 101,
+    "name": "CISA Cybersecurity Advisories",
+    "category": "Cyber Threats",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+    "notes": "US Cybersecurity & Infrastructure Security Agency alerts",
+    "status": "live"
+  },
+  {
+    "id": 102,
+    "name": "CISA Known Exploited Vulnerabilities",
+    "category": "Cyber Threats",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+    "notes": "KEV catalog — actively exploited vulnerabilities",
+    "status": "live"
+  },
+  {
+    "id": 103,
+    "name": "GPSJAM (GPS Interference Detection)",
+    "category": "Military/Electronic Warfare",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://gpsjam.org/",
+    "notes": "GPS jamming/spoofing detection via H3 hexagon grid",
+    "status": "live"
+  },
+  {
+    "id": 104,
+    "name": "AviationStack (Airport Delays)",
+    "category": "Aviation",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://aviationstack.com/",
+    "notes": "Global airport delays for 128 airports with NOTAM closure detection",
+    "status": "live"
+  },
+  {
+    "id": 105,
+    "name": "NOTAMs (Notices to Airmen)",
+    "category": "Aviation",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://api.faa.gov/s/",
+    "notes": "Airspace closures and flight restrictions worldwide",
+    "status": "live"
+  },
+  {
+    "id": 106,
+    "name": "UNHCR Refugee Data",
+    "category": "Displacement/Humanitarian",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://data.unhcr.org/",
+    "notes": "UN refugee and displacement statistics",
+    "status": "live"
+  },
+  {
+    "id": 107,
+    "name": "IDMC (Internal Displacement Monitoring)",
+    "category": "Displacement/Humanitarian",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://www.internal-displacement.org/",
+    "notes": "Global internal displacement tracking",
+    "status": "live"
+  },
+  {
+    "id": 108,
+    "name": "Relief Web",
+    "category": "Displacement/Humanitarian",
+    "type": "RSS",
+    "tier": "Primary",
+    "url": "https://reliefweb.int/updates/rss.xml",
+    "notes": "UN OCHA humanitarian updates and disaster reports",
+    "status": "live"
+  },
+  {
+    "id": 109,
+    "name": "IMF PortWatch",
+    "category": "Trade/Maritime",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://portwatch.imf.org/",
+    "notes": "Vessel transit counts for maritime chokepoints; 180-day time-series",
+    "status": "live"
+  },
+  {
+    "id": 110,
+    "name": "AISStream",
+    "category": "Trade/Maritime",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://aisstream.io/",
+    "notes": "Real-time 24h vessel crossing counter",
+    "status": "live"
+  },
+  {
+    "id": 111,
+    "name": "FRED Shipping Indices",
+    "category": "Trade/Maritime",
+    "type": "API",
+    "tier": "Secondary",
+    "url": "https://api.stlouisfed.org/fred/",
+    "notes": "Baltic Dry Index, container freight rates, shipping metrics",
+    "status": "live"
+  },
+  {
+    "id": 112,
+    "name": "TeleGeography Submarine Cables",
+    "category": "Infrastructure/Telecom",
+    "type": "API",
+    "tier": "Reference",
+    "url": "https://www.telegeography.com/",
+    "notes": "86+ submarine cable routes and landing points",
+    "status": "live"
+  },
+  {
+    "id": 113,
+    "name": "BIS (Bank for International Settlements)",
+    "category": "Economic/Credit",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://www.bis.org/",
+    "notes": "Global credit data and central bank indicators",
+    "status": "live"
+  },
+  {
+    "id": 114,
+    "name": "CoinPaprika",
+    "category": "Economic/Crypto",
+    "type": "API",
+    "tier": "Secondary",
+    "url": "https://api.coinpaprika.com/",
+    "notes": "Crypto/stablecoin fallback data source",
+    "status": "live"
+  },
+  {
+    "id": 115,
+    "name": "EU Sanctions List (European Commission)",
+    "category": "Sanctions",
+    "type": "RSS/API",
+    "tier": "Government",
+    "url": "https://data.europa.eu/data/datasets/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions?locale=en",
+    "notes": "European Union consolidated sanctions list",
+    "status": "live"
+  },
+  {
+    "id": 116,
+    "name": "UN Security Council Sanctions",
+    "category": "Sanctions",
+    "type": "API/Static",
+    "tier": "Government",
+    "url": "https://scsanctions.un.org/",
+    "notes": "UN consolidated sanctions list",
+    "status": "static"
+  },
+  {
+    "id": 117,
+    "name": "EURDEP (European Radiological Data)",
+    "category": "Radiation",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://remon.jrc.ec.europa.eu/",
+    "notes": "Real-time radiation monitoring across Europe",
+    "status": "live"
+  },
+  {
+    "id": 118,
+    "name": "Gamma Irradiator Locations",
+    "category": "Radiation",
+    "type": "Static",
+    "tier": "Reference",
+    "url": "Static dataset",
+    "notes": "Global gamma irradiator site locations (nuclear risk)",
+    "status": "static"
+  },
+  {
+    "id": 119,
+    "name": "NRC Event Reports (US Nuclear Regulatory Commission)",
+    "category": "Radiation",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://www.nrc.gov/reading-rm/doc-collections/event-status/event/event-rss.xml",
+    "notes": "US nuclear plant event reports and incidents",
+    "status": "live"
+  },
+  {
+    "id": 120,
+    "name": "Windy Webcams",
+    "category": "Visual Intelligence",
+    "type": "API",
+    "tier": "Secondary",
+    "url": "https://api.windy.com/webcams/",
+    "notes": "Live webcams near points of interest worldwide",
+    "status": "live"
+  },
+  {
+    "id": 121,
+    "name": "Sentinel Hub (Copernicus)",
+    "category": "Imagery/Satellite",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://services.sentinel-hub.com/",
+    "notes": "ESA satellite imagery — wildfire/flood/conflict damage assessment",
+    "status": "live"
+  },
+  {
+    "id": 122,
+    "name": "NOAA Solar Weather",
+    "category": "Space Weather",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://services.swpc.noaa.gov/products/alerts.json",
+    "notes": "Solar flare, geomagnetic storm, and radiation alerts",
+    "status": "live"
+  },
+  {
+    "id": 123,
+    "name": "SpaceTrack",
+    "category": "Military/Space",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://www.space-track.org/",
+    "notes": "US Space Command orbital debris and satellite tracking",
+    "status": "live"
+  },
+  {
+    "id": 124,
+    "name": "TASS (Russian News Agency)",
+    "category": "News",
+    "type": "RSS",
+    "tier": "State-Affiliated",
+    "url": "https://tass.com/rss/v2.xml",
+    "notes": "Russian state wire service — propaganda-flagged",
+    "status": "live"
+  },
+  {
+    "id": 125,
+    "name": "Yonhap News Agency",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://en.yna.co.kr/RSS/news.xml",
+    "notes": "South Korean wire service — key for Korean Peninsula coverage",
+    "status": "live"
+  },
+  {
+    "id": 126,
+    "name": "Anadolu Agency",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://www.aa.com.tr/en/rss/default?cat=world",
+    "notes": "Turkish state wire service",
+    "status": "live"
+  },
+  {
+    "id": 127,
+    "name": "Times of Israel",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://www.timesofisrael.com/feed/",
+    "notes": "Israeli news — key for Middle East coverage",
+    "status": "live"
+  },
+  {
+    "id": 128,
+    "name": "South China Morning Post",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://www.scmp.com/rss/91/feed",
+    "notes": "Hong Kong/China — key for Asia-Pacific",
+    "status": "live"
+  },
+  {
+    "id": 129,
+    "name": "Kyiv Independent",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://kyivindependent.com/feed/",
+    "notes": "Ukrainian news — key for Ukraine conflict",
+    "status": "live"
+  },
+  {
+    "id": 130,
+    "name": "The Moscow Times",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://www.themoscowtimes.com/rss/news",
+    "notes": "Independent Russian news in English",
+    "status": "live"
+  },
+  {
+    "id": 131,
+    "name": "Telegram OSINT Channels (27)",
+    "category": "Social/Messaging",
+    "type": "API/Relay",
+    "tier": "Secondary",
+    "url": "Telegram MTProto relay",
+    "notes": "27 curated OSINT channels: breaking, conflict, alerts, osint, politics, middleeast",
+    "status": "unknown"
+  },
+  {
+    "id": 132,
+    "name": "SIPRI (Stockholm Intl Peace Research)",
+    "category": "Think Tank",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.sipri.org/rss.xml",
+    "notes": "Arms trade and conflict research",
+    "status": "live"
+  },
+  {
+    "id": 133,
+    "name": "International Crisis Group",
+    "category": "Think Tank",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.crisisgroup.org/rss.xml",
+    "notes": "Conflict prevention and resolution",
+    "status": "live"
+  },
+  {
+    "id": 134,
+    "name": "Atlantic Council",
+    "category": "Think Tank",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.atlanticcouncil.org/feed/",
+    "notes": "US foreign policy and security",
+    "status": "live"
+  },
+  {
+    "id": 135,
+    "name": "Chatham House",
+    "category": "Think Tank",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.chathamhouse.org/rss",
+    "notes": "UK international affairs",
+    "status": "live"
+  },
+  {
+    "id": 136,
+    "name": "Carnegie Endowment",
+    "category": "Think Tank",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://carnegieendowment.org/rss/solr.xml",
+    "notes": "International peace research",
+    "status": "live"
+  },
+  {
+    "id": 137,
+    "name": "Corridor Risk (Maritime)",
+    "category": "Supply Chain/Maritime",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://corridorrisk.com/",
+    "notes": "Risk intelligence for maritime transit corridors",
+    "status": "live"
+  },
+  {
+    "id": 138,
+    "name": "Global Fishing Watch",
+    "category": "Supply Chain/Maritime",
+    "type": "API",
+    "tier": "Secondary",
+    "url": "https://globalfishingwatch.org/",
+    "notes": "Vessel tracking and illegal fishing detection",
+    "status": "live"
+  },
+  {
+    "id": 139,
+    "name": "CorridorWatch (Panama/Suez/Hormuz)",
+    "category": "Supply Chain/Maritime",
+    "type": "Derived",
+    "tier": "Primary",
+    "url": "AIS + satellite data",
+    "notes": "Chokepoint-specific transit risk scoring",
+    "status": "unknown"
+  },
+  {
+    "id": 140,
+    "name": "IAEA News",
+    "category": "Radiation/Nuclear",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://www.iaea.org/feeds/news",
+    "notes": "International Atomic Energy Agency updates",
+    "status": "live"
+  },
+  {
+    "id": 141,
+    "name": "NTI Nuclear Security Index",
+    "category": "Radiation/Nuclear",
+    "type": "Static",
+    "tier": "Reference",
+    "url": "https://www.ntiindex.org/",
+    "notes": "Nuclear threat initiative country rankings",
+    "status": "static"
+  },
+  {
+    "id": 142,
+    "name": "IEA (International Energy Agency)",
+    "category": "Economic/Energy",
+    "type": "RSS",
+    "tier": "Primary",
+    "url": "https://www.iea.org/rss/",
+    "notes": "Global energy market reports and forecasts",
+    "status": "live"
+  },
+  {
+    "id": 143,
+    "name": "OPEC Monthly Report",
+    "category": "Economic/Energy",
+    "type": "Static",
+    "tier": "Primary",
+    "url": "https://www.opec.org/",
+    "notes": "OPEC oil market outlook and production data",
+    "status": "static"
+  },
+  {
+    "id": 144,
+    "name": "World Bank Open Data",
+    "category": "Economic/Development",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://data.worldbank.org/",
+    "notes": "Global development indicators and poverty data",
+    "status": "live"
+  },
+  {
+    "id": 145,
+    "name": "IMF World Economic Outlook",
+    "category": "Economic/Forecasts",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://www.imf.org/",
+    "notes": "Global economic forecasts and country reports",
+    "status": "live"
+  },
+  {
+    "id": 146,
+    "name": "Positive Events Feed",
+    "category": "Humanitarian",
+    "type": "Derived",
+    "tier": "Secondary",
+    "url": "Derived from multiple feeds",
+    "notes": "Ceasefire announcements, peace agreements, humanitarian aid deliveries",
+    "status": "unknown"
+  },
+  {
+    "id": 147,
+    "name": "ACAPS (Assessment Capacities Project)",
+    "category": "Displacement/Humanitarian",
+    "type": "RSS",
+    "tier": "Primary",
+    "url": "https://www.acaps.org/en/countries/rss",
+    "notes": "Humanitarian crisis severity assessments and risk monitoring",
+    "status": "live"
   }
 ]
