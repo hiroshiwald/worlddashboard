@@ -15,7 +15,10 @@ type SortKey =
   | "type"
   | "mentions"
   | "recentHour"
-  | "lastSeen";
+  | "lastSeen"
+  | "urgency"
+  | "cooccurrences"
+  | "sentiment";
 
 function timeAgo(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
@@ -42,6 +45,35 @@ function typeLabel(t: EntityType): string {
     case "person":
       return "PERSON";
   }
+}
+
+function SentimentBadge({ value, dark }: { value: number; dark: boolean }) {
+  const abs = Math.abs(value);
+  let label: string;
+  let colorClass: string;
+
+  if (value <= -0.3) {
+    label = "NEG";
+    colorClass = dark ? "text-red-400 bg-red-500/15" : "text-red-700 bg-red-100";
+  } else if (value <= -0.1) {
+    label = "NEG";
+    colorClass = dark ? "text-red-300 bg-red-500/10" : "text-red-600 bg-red-50";
+  } else if (value >= 0.3) {
+    label = "POS";
+    colorClass = dark ? "text-emerald-400 bg-emerald-500/15" : "text-emerald-700 bg-emerald-100";
+  } else if (value >= 0.1) {
+    label = "POS";
+    colorClass = dark ? "text-emerald-300 bg-emerald-500/10" : "text-emerald-600 bg-emerald-50";
+  } else {
+    label = "NEU";
+    colorClass = dark ? "text-slate-400 bg-slate-500/10" : "text-stone-500 bg-stone-100";
+  }
+
+  return (
+    <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${colorClass}`} title={`Sentiment: ${value.toFixed(2)}`}>
+      {label}
+    </span>
+  );
 }
 
 function UrgencyBar({
@@ -115,6 +147,15 @@ export default function IntelTab({
     const arr = [...filtered];
     arr.sort((a, b) => {
       let cmp: number;
+      const urgencyPriority: Record<string, number> = {
+        critical: 6, warning: 5, advisory: 4, monitoring: 3, system: 2, neutral: 1,
+      };
+      const getMaxUrgency = (e: ExtractedEntity) => {
+        for (const level of ["critical", "warning", "advisory", "monitoring", "system", "neutral"] as const) {
+          if (e.urgencyBreakdown[level] > 0) return urgencyPriority[level];
+        }
+        return 0;
+      };
       switch (sortKey) {
         case "name":
           cmp = a.name.localeCompare(b.name);
@@ -131,6 +172,15 @@ export default function IntelTab({
         case "lastSeen":
           cmp =
             new Date(a.lastSeen).getTime() - new Date(b.lastSeen).getTime();
+          break;
+        case "urgency":
+          cmp = getMaxUrgency(a) - getMaxUrgency(b);
+          break;
+        case "cooccurrences":
+          cmp = a.cooccurrences.length - b.cooccurrences.length;
+          break;
+        case "sentiment":
+          cmp = a.sentiment - b.sentiment;
           break;
         default:
           cmp = 0;
@@ -245,7 +295,7 @@ export default function IntelTab({
 
       {/* ─── Desktop: Entity table ─── */}
       <div
-        className={`hidden md:block border overflow-auto max-h-[calc(100vh-160px)] ${t.tableBorder}`}
+        className={`hidden md:block border overflow-auto ${t.tableBorder}`}
       >
         <table className="w-full border-collapse text-xs">
           <thead className="sticky top-0 z-10">
@@ -269,9 +319,10 @@ export default function IntelTab({
                 MENTIONS{getSortArrow("mentions")}
               </th>
               <th
-                className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap ${dark ? "text-slate-300" : "text-stone-700"}`}
+                onClick={() => handleSort("urgency")}
+                className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
               >
-                URGENCY
+                URGENCY{getSortArrow("urgency")}
               </th>
               <th
                 onClick={() => handleSort("recentHour")}
@@ -280,15 +331,22 @@ export default function IntelTab({
                 1H{getSortArrow("recentHour")}
               </th>
               <th
+                onClick={() => handleSort("sentiment")}
+                className={`w-20 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+              >
+                TONE{getSortArrow("sentiment")}
+              </th>
+              <th
                 onClick={() => handleSort("lastSeen")}
                 className={`w-28 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
               >
                 LAST SEEN{getSortArrow("lastSeen")}
               </th>
               <th
-                className={`min-w-[200px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap ${dark ? "text-slate-300" : "text-stone-700"}`}
+                onClick={() => handleSort("cooccurrences")}
+                className={`min-w-[200px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
               >
-                CO-OCCURS WITH
+                CO-OCCURS WITH{getSortArrow("cooccurrences")}
               </th>
             </tr>
           </thead>
@@ -333,6 +391,9 @@ export default function IntelTab({
                     <span className={t.textMuted}>—</span>
                   )}
                 </td>
+                <td className="px-3 py-2 text-xs">
+                  <SentimentBadge value={entity.sentiment} dark={dark} />
+                </td>
                 <td
                   className={`px-3 py-2 text-xs whitespace-nowrap ${t.textMuted}`}
                 >
@@ -364,7 +425,7 @@ export default function IntelTab({
       </div>
 
       {/* ─── Mobile: Entity cards ─── */}
-      <div className="md:hidden space-y-1.5 max-h-[calc(100vh-160px)] overflow-auto">
+      <div className="md:hidden space-y-1.5">
         {sorted.map((entity) => (
           <div
             key={entity.name}
@@ -400,6 +461,7 @@ export default function IntelTab({
                   +{entity.recentMentions.hour} 1H
                 </span>
               )}
+              <SentimentBadge value={entity.sentiment} dark={dark} />
               <span className={`text-[10px] ml-auto ${t.textMuted}`}>
                 {timeAgo(entity.lastSeen)}
               </span>

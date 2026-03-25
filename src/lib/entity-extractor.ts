@@ -120,6 +120,50 @@ function matchPersonNames(
   return found;
 }
 
+// Lightweight sentiment scoring for news headlines
+const NEG_WORDS = new Set([
+  "kill","killed","killing","dead","death","dies","died","war","attack","bomb","bombing",
+  "strike","missile","terror","terrorist","terrorism","explosion","crash","crisis","threat",
+  "threaten","conflict","violence","violent","destroy","destroyed","destruction","collapse",
+  "sanctions","sanction","condemn","condemned","arrest","arrested","fraud","corruption",
+  "scandal","protest","riots","riot","flee","fled","refugees","famine","drought","flood",
+  "earthquake","hurricane","tornado","devastat","catastroph","emergency","victim","victims",
+  "shoot","shooting","shot","hostage","kidnap","torture","abuse","massacre","genocide",
+  "invasion","invaded","nuclear","weapon","casualties","wounded","injured","suffer",
+  "fail","failed","failure","recession","downturn","unemployment","poverty","hunger",
+  "disease","pandemic","epidemic","outbreak","infection","contamination",
+]);
+const POS_WORDS = new Set([
+  "peace","ceasefire","agreement","deal","treaty","accord","cooperation","aid","help",
+  "rescue","rescued","relief","recovery","recover","growth","prosper","success",
+  "elect","elected","democratic","freedom","liberat","reform","progress","improve",
+  "breakthrough","milestone","achievement","victory","win","won","celebrate","hope",
+  "safe","secure","security","protect","humanitarian","donate","donation","support",
+  "build","rebuild","develop","development","summit","diplomacy","diplomatic","negotiate",
+  "resolution","resolve","reconciliation","reunite","alliance","partner","partnership",
+]);
+
+function scoreSentiment(text: string): number {
+  const words = text.toLowerCase().split(/\W+/);
+  let score = 0;
+  for (const w of words) {
+    if (NEG_WORDS.has(w)) score -= 1;
+    else if (POS_WORDS.has(w)) score += 1;
+    else {
+      // Check prefix matches for stemmed words
+      for (const neg of NEG_WORDS) {
+        if (neg.length >= 6 && w.startsWith(neg)) { score -= 1; break; }
+      }
+      for (const pos of POS_WORDS) {
+        if (pos.length >= 6 && w.startsWith(pos)) { score += 1; break; }
+      }
+    }
+  }
+  // Normalize to -1..+1
+  if (words.length === 0) return 0;
+  return Math.max(-1, Math.min(1, score / Math.max(1, Math.sqrt(words.length))));
+}
+
 export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
   const now = Date.now();
   const ONE_HOUR = 60 * 60 * 1000;
@@ -139,6 +183,8 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
       recentHour: number;
       recentSixHour: number;
       recentDay: number;
+      sentimentSum: number;
+      sentimentCount: number;
     }
   >();
 
@@ -150,6 +196,7 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
     const urgency = getUrgencyLevel(item.sourceCategory);
     const itemTime = new Date(item.published).getTime();
     const age = now - itemTime;
+    const itemSentiment = scoreSentiment(text);
 
     // Dictionary matches
     const dictMatches = matchDictionary(text);
@@ -171,6 +218,8 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
         if (age <= ONE_HOUR) entry.recentHour++;
         if (age <= SIX_HOURS) entry.recentSixHour++;
         if (age <= ONE_DAY) entry.recentDay++;
+        entry.sentimentSum += itemSentiment;
+        entry.sentimentCount++;
       } else {
         const lookup = LOOKUP_MAP.get(name.toLowerCase());
         entityMap.set(name, {
@@ -183,6 +232,8 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
           recentHour: age <= ONE_HOUR ? 1 : 0,
           recentSixHour: age <= SIX_HOURS ? 1 : 0,
           recentDay: age <= ONE_DAY ? 1 : 0,
+          sentimentSum: itemSentiment,
+          sentimentCount: 1,
         });
       }
     }
@@ -198,6 +249,8 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
         if (age <= ONE_HOUR) entry.recentHour++;
         if (age <= SIX_HOURS) entry.recentSixHour++;
         if (age <= ONE_DAY) entry.recentDay++;
+        entry.sentimentSum += itemSentiment;
+        entry.sentimentCount++;
       } else {
         entityMap.set(name, {
           name,
@@ -209,6 +262,8 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
           recentHour: age <= ONE_HOUR ? 1 : 0,
           recentSixHour: age <= SIX_HOURS ? 1 : 0,
           recentDay: age <= ONE_DAY ? 1 : 0,
+          sentimentSum: itemSentiment,
+          sentimentCount: 1,
         });
       }
     }
@@ -261,6 +316,9 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
         day: entry.recentDay,
       },
       cooccurrences: topCooccurrences,
+      sentiment: entry.sentimentCount > 0
+        ? Math.round((entry.sentimentSum / entry.sentimentCount) * 100) / 100
+        : 0,
     });
   }
 

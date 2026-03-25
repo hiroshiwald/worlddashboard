@@ -44,4 +44,5 @@ export interface ExtractedEntity {
   lastSeen: string;
   recentMentions: { hour: number; sixHour: number; day: number };
   cooccurrences: [string, number][];
+  sentiment: number; // -1 (negative) to +1 (positive)
 }
