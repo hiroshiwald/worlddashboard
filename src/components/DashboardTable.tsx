@@ -18,12 +18,13 @@ interface Column {
 }
 
 const COLUMNS: Column[] = [
-  { key: "published", label: "Published", width: "w-40" },
-  { key: "sourceName", label: "Source", width: "min-w-[150px]" },
-  { key: "sourceCategory", label: "Category", width: "min-w-[140px]" },
+  { key: "published", label: "Published", width: "w-36" },
+  { key: "imageUrl", label: "", width: "w-16" },
+  { key: "sourceName", label: "Source", width: "min-w-[140px]" },
+  { key: "sourceCategory", label: "Category", width: "min-w-[130px]" },
   { key: "title", label: "Headline", width: "min-w-[320px]" },
-  { key: "summary", label: "Summary", width: "min-w-[280px]" },
-  { key: "sourceTier", label: "Tier", width: "w-36" },
+  { key: "summary", label: "Summary", width: "min-w-[260px]" },
+  { key: "sourceTier", label: "Tier", width: "w-32" },
 ];
 
 function timeAgo(isoString: string): string {
@@ -293,6 +294,38 @@ export default function DashboardTable() {
                       {/* Published */}
                       <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap font-mono">
                         {formatDate(item.published)}
+                      </td>
+
+                      {/* Thumbnail */}
+                      <td className="px-1 py-1">
+                        {item.imageUrl ? (
+                          <img
+                            src={item.imageUrl}
+                            alt=""
+                            className="w-12 h-9 object-cover rounded-sm bg-gray-100"
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display =
+                                "none";
+                            }}
+                          />
+                        ) : (
+                          <div className="w-12 h-9 rounded-sm bg-gray-100 flex items-center justify-center">
+                            <svg
+                              className="w-4 h-4 text-gray-300"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={1.5}
+                                d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z"
+                              />
+                            </svg>
+                          </div>
+                        )}
                       </td>
 
                       {/* Source */}

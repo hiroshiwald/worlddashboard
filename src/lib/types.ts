@@ -7,6 +7,7 @@ export interface FeedItem {
   sourceName: string;
   sourceCategory: string;
   sourceTier: string;
+  imageUrl: string;
 }
 
 export interface SourceMeta {

@@ -1,5 +1,45 @@
 import { FeedItem, SourceMeta } from "./types";
 
+// --- Ad / spam filter ---
+const AD_PATTERNS = [
+  /^ad:/i,
+  /^sponsored/i,
+  /^promoted/i,
+  /^advertisement/i,
+  /paid (content|partner|post)/i,
+  /^underscored/i,
+  /cnn underscored/i,
+  /best .{0,30} deals/i,
+  /best .{0,30} to buy/i,
+  /best .{0,30} for 20\d\d/i,
+  /best .{0,30} we'?ve tested/i,
+  /our favorite .{0,40} of 20\d\d/i,
+  /shop .{0,30} sale/i,
+  /% off .{0,30} (at|from)/i,
+  /coupon code/i,
+  /promo code/i,
+  /affiliate/i,
+  /gift guide/i,
+  /deals of the day/i,
+  /sale alert/i,
+  /save \$?\d+/i,
+  /discount code/i,
+];
+
+function isAdContent(title: string, summary: string, link: string): boolean {
+  const text = `${title} ${summary}`.toLowerCase();
+  // CNN Underscored is their affiliate/commerce arm
+  if (link.includes("cnn.com/cnn-underscored")) return true;
+  if (link.includes("/deals/")) return true;
+  if (link.includes("/shopping/")) return true;
+  if (link.includes("/ad/")) return true;
+  for (const pattern of AD_PATTERNS) {
+    if (pattern.test(title) || pattern.test(text)) return true;
+  }
+  return false;
+}
+
+// --- HTML / XML helpers ---
 function stripHtml(html: string): string {
   return html
     .replace(/<[^>]*>/g, "")
@@ -36,41 +76,100 @@ function extractAttr(xml: string, tag: string, attr: string): string {
   return match ? match[1].trim() : "";
 }
 
+// --- Image extraction ---
+function extractImageUrl(block: string): string {
+  // 1. <media:content url="...">
+  const mediaContent = block.match(
+    /<media:content[^>]+url="([^"]+\.(jpg|jpeg|png|webp|gif)[^"]*)"/i
+  );
+  if (mediaContent) return mediaContent[1];
+
+  // 2. <media:thumbnail url="...">
+  const mediaThumbnail = block.match(
+    /<media:thumbnail[^>]+url="([^"]+)"/i
+  );
+  if (mediaThumbnail) return mediaThumbnail[1];
+
+  // 3. <enclosure url="..." type="image/...">
+  const enclosure = block.match(
+    /<enclosure[^>]+url="([^"]+)"[^>]+type="image\/[^"]+"/i
+  );
+  if (enclosure) return enclosure[1];
+  // Also try reversed attribute order
+  const enclosure2 = block.match(
+    /<enclosure[^>]+type="image\/[^"]+"[^>]+url="([^"]+)"/i
+  );
+  if (enclosure2) return enclosure2[1];
+
+  // 4. <image><url>...</url></image>
+  const imageTag = extractTag(block, "image");
+  if (imageTag) {
+    const imgUrl = extractTag(imageTag, "url");
+    if (imgUrl && imgUrl.startsWith("http")) return imgUrl;
+  }
+
+  // 5. First <img src="..."> inside description/content
+  const description =
+    extractTag(block, "description") ||
+    extractTag(block, "content:encoded") ||
+    extractTag(block, "content") ||
+    extractTag(block, "summary");
+  const imgMatch = description.match(/<img[^>]+src="([^"]+)"/i);
+  if (imgMatch && imgMatch[1].startsWith("http")) return imgMatch[1];
+
+  return "";
+}
+
+// --- RSS 2.0 parser ---
 function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
   const items: FeedItem[] = [];
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
-  // RSS 2.0: <item>...</item>
   const rssItemRegex = /<item[\s>]([\s\S]*?)<\/item>/gi;
   let match;
   while ((match = rssItemRegex.exec(xml)) !== null) {
     const block = match[1];
     const title = stripHtml(extractTag(block, "title"));
     let link = extractTag(block, "link");
-    // Sometimes <link> is empty and URL is just text after tag
     if (!link) {
       const linkMatch = block.match(/<link[^>]*\/?\s*>\s*([^<\s]+)/i);
       if (linkMatch) link = linkMatch[1].trim();
     }
-    const pubDate = extractTag(block, "pubDate") || extractTag(block, "dc:date");
+    const pubDate =
+      extractTag(block, "pubDate") || extractTag(block, "dc:date");
     const description =
-      extractTag(block, "description") || extractTag(block, "content:encoded");
+      extractTag(block, "description") ||
+      extractTag(block, "content:encoded");
 
     const published = pubDate ? new Date(pubDate) : null;
-    if (published && !isNaN(published.getTime()) && published.getTime() < sevenDaysAgo) {
+    if (
+      published &&
+      !isNaN(published.getTime()) &&
+      published.getTime() < sevenDaysAgo
+    ) {
       continue;
     }
+
+    // Skip ads and promotional content
+    if (isAdContent(title, stripHtml(description), link || "")) {
+      continue;
+    }
+
+    const imageUrl = extractImageUrl(block);
 
     if (title) {
       items.push({
         id: `${source.name}-${title.slice(0, 40)}-${pubDate || Math.random()}`,
         title,
         link: link || source.url,
-        published: published ? published.toISOString() : new Date().toISOString(),
+        published: published
+          ? published.toISOString()
+          : new Date().toISOString(),
         summary: stripHtml(description).slice(0, 300),
         sourceName: source.name,
         sourceCategory: source.category,
         sourceTier: source.tier,
+        imageUrl,
       });
     }
   }
@@ -78,6 +177,7 @@ function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
   return items;
 }
 
+// --- Atom parser ---
 function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
   const items: FeedItem[] = [];
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -89,24 +189,40 @@ function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
     const title = stripHtml(extractTag(block, "title"));
     let link = extractAttr(block, "link", "href");
     if (!link) link = extractTag(block, "link");
-    const updated = extractTag(block, "updated") || extractTag(block, "published");
-    const summary = extractTag(block, "summary") || extractTag(block, "content");
+    const updated =
+      extractTag(block, "updated") || extractTag(block, "published");
+    const summary =
+      extractTag(block, "summary") || extractTag(block, "content");
 
     const published = updated ? new Date(updated) : null;
-    if (published && !isNaN(published.getTime()) && published.getTime() < sevenDaysAgo) {
+    if (
+      published &&
+      !isNaN(published.getTime()) &&
+      published.getTime() < sevenDaysAgo
+    ) {
       continue;
     }
+
+    // Skip ads
+    if (isAdContent(title, stripHtml(summary), link || "")) {
+      continue;
+    }
+
+    const imageUrl = extractImageUrl(block);
 
     if (title) {
       items.push({
         id: `${source.name}-${title.slice(0, 40)}-${updated || Math.random()}`,
         title,
         link: link || source.url,
-        published: published ? published.toISOString() : new Date().toISOString(),
+        published: published
+          ? published.toISOString()
+          : new Date().toISOString(),
         summary: stripHtml(summary).slice(0, 300),
         sourceName: source.name,
         sourceCategory: source.category,
         sourceTier: source.tier,
+        imageUrl,
       });
     }
   }
@@ -115,7 +231,6 @@ function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
 }
 
 function parseFeedXml(xml: string, source: SourceMeta): FeedItem[] {
-  // Detect if Atom or RSS
   if (xml.includes("<feed") && xml.includes("<entry")) {
     return parseAtomEntries(xml, source);
   }
@@ -131,7 +246,8 @@ async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
       signal: controller.signal,
       headers: {
         "User-Agent": "WorldDashboard/1.0 (RSS Feed Reader)",
-        Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+        Accept:
+          "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
       },
     });
 
@@ -150,7 +266,6 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
   feedsAttempted: number;
   feedsSucceeded: number;
 }> {
-  // Filter to only RSS/Atom feeds with valid HTTP URLs
   const rssFeeds = sources.filter(
     (s) =>
       (s.type.includes("RSS") || s.type.includes("Atom")) &&
@@ -171,9 +286,10 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
     }
   }
 
-  // Sort by published date, newest first
+  // Sort newest first
   allItems.sort(
-    (a, b) => new Date(b.published).getTime() - new Date(a.published).getTime()
+    (a, b) =>
+      new Date(b.published).getTime() - new Date(a.published).getTime()
   );
 
   return {
