@@ -68,7 +68,6 @@ export default function DashboardTable() {
   const [dark, setDark] = useState(true);
   const [activeTab, setActiveTab] = useState<"feeds" | "intel">("feeds");
 
-  // Persist theme preference
   useEffect(() => {
     const saved = localStorage.getItem("wd-theme");
     if (saved === "light") setDark(false);
@@ -138,7 +137,7 @@ export default function DashboardTable() {
     return sort.direction === "asc" ? " ↑" : " ↓";
   };
 
-  // Theme-dependent classes
+  // Theme classes
   const t = {
     bg: dark ? "bg-slate-950" : "bg-stone-100",
     headerBg: dark ? "bg-slate-900 border-b border-slate-700" : "bg-stone-900 border-b border-stone-700",
@@ -164,26 +163,29 @@ export default function DashboardTable() {
     imgPlaceholder: dark ? "bg-slate-800" : "bg-stone-200",
     loadingText: dark ? "text-slate-400" : "text-stone-500",
     loadingSub: dark ? "text-slate-600" : "text-stone-400",
+    cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-stone-200",
+    cardBorder: dark ? "border-slate-800" : "border-stone-200",
   };
 
   return (
     <div className={`min-h-screen ${t.bg} transition-colors duration-200`}>
       {/* ─── Header Bar ─── */}
       <div className={`sticky top-0 z-30 ${t.headerBg}`}>
-        <div className="max-w-[1920px] mx-auto px-4 py-2 flex items-center justify-between gap-4">
-          {/* Left: branding + status */}
-          <div className="flex items-center gap-4 shrink-0">
-            <h1 className={`text-xs font-bold tracking-[0.25em] ${t.headerText} uppercase`}>
+        {/* Row 1: brand + controls */}
+        <div className="max-w-[1920px] mx-auto px-3 md:px-4 py-2 flex items-center justify-between gap-2 md:gap-4">
+          {/* Left: branding */}
+          <div className="flex items-center gap-2 md:gap-4 shrink-0">
+            <h1 className={`text-[10px] md:text-xs font-bold tracking-[0.2em] md:tracking-[0.25em] ${t.headerText} uppercase`}>
               WORLD DASHBOARD
             </h1>
             {feedsSucceeded > 0 && (
-              <span className={`flex items-center gap-1.5 text-xs ${t.feedBadge}`}>
+              <span className={`hidden sm:flex items-center gap-1.5 text-xs ${t.feedBadge}`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                {feedsSucceeded}/{feedsAttempted} FEEDS
+                {feedsSucceeded}/{feedsAttempted}
               </span>
             )}
             {totalItems > 0 && (
-              <span className={`text-xs ${t.itemCount}`}>
+              <span className={`hidden md:inline text-xs ${t.itemCount}`}>
                 {filteredItems.length !== totalItems
                   ? `${filteredItems.length}/${totalItems}`
                   : totalItems}{" "}
@@ -192,8 +194,8 @@ export default function DashboardTable() {
             )}
           </div>
 
-          {/* Center: search */}
-          <div className="flex-1 max-w-lg mx-4">
+          {/* Center: search — hidden on very small, shown sm+ */}
+          <div className="hidden sm:block flex-1 max-w-lg mx-2 md:mx-4">
             <div className="relative">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">
                 /
@@ -202,7 +204,7 @@ export default function DashboardTable() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="SEARCH HEADLINES, SOURCES..."
+                placeholder="SEARCH..."
                 className={`w-full pl-7 pr-8 py-1.5 text-xs border focus:outline-none uppercase ${t.searchBg}`}
               />
               {searchQuery && (
@@ -217,20 +219,19 @@ export default function DashboardTable() {
           </div>
 
           {/* Right: controls */}
-          <div className="flex items-center gap-3 shrink-0">
-            {/* Light/Dark toggle */}
+          <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
             <button
               onClick={toggleTheme}
-              className={`px-2 py-1.5 text-xs border transition-colors ${t.btnBg} uppercase tracking-wide`}
+              className={`px-1.5 md:px-2 py-1.5 text-[10px] md:text-xs border transition-colors ${t.btnBg} uppercase tracking-wide`}
               title={dark ? "Switch to light mode" : "Switch to dark mode"}
             >
-              {dark ? "LIGHT" : "DARK"}
+              {dark ? "LT" : "DK"}
             </button>
 
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className={`px-2 py-1.5 text-xs border focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
+              className={`hidden md:block px-2 py-1.5 text-xs border focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
             >
               {categories.map((cat) => (
                 <option key={cat} value={cat}>
@@ -240,7 +241,7 @@ export default function DashboardTable() {
             </select>
 
             {fetchedAt && (
-              <span className="text-xs text-slate-500 hidden sm:inline">
+              <span className="hidden lg:inline text-xs text-slate-500">
                 {timeAgo(fetchedAt)}
               </span>
             )}
@@ -248,10 +249,10 @@ export default function DashboardTable() {
             <button
               onClick={refresh}
               disabled={loading}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border transition-colors disabled:opacity-40 uppercase tracking-wide ${t.btnBg}`}
+              className={`inline-flex items-center gap-1 md:gap-1.5 px-2 md:px-3 py-1.5 text-[10px] md:text-xs font-bold border transition-colors disabled:opacity-40 uppercase tracking-wide ${t.btnBg}`}
             >
               <svg
-                className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
+                className={`w-3 h-3 md:w-3.5 md:h-3.5 ${loading ? "animate-spin" : ""}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -263,18 +264,41 @@ export default function DashboardTable() {
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                 />
               </svg>
-              REFRESH
+              <span className="hidden sm:inline">REFRESH</span>
             </button>
           </div>
         </div>
 
-        {/* Tab bar + Urgency legend */}
-        <div className={`max-w-[1920px] mx-auto px-4 pb-1.5 flex items-center gap-6 text-[10px] uppercase tracking-wide ${t.legendText}`}>
-          {/* Tabs */}
-          <div className="flex items-center gap-0.5 mr-2">
+        {/* Row 2 mobile: search bar (shown on small screens only) */}
+        <div className="sm:hidden max-w-[1920px] mx-auto px-3 pb-1.5">
+          <div className="relative">
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">
+              /
+            </span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="SEARCH..."
+              className={`w-full pl-7 pr-8 py-1.5 text-xs border focus:outline-none uppercase ${t.searchBg}`}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 text-xs"
+              >
+                CLR
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Row 3: tabs + legend */}
+        <div className={`max-w-[1920px] mx-auto px-3 md:px-4 pb-1.5 flex items-center gap-3 md:gap-6 text-[10px] uppercase tracking-wide ${t.legendText}`}>
+          <div className="flex items-center gap-0.5 mr-1 md:mr-2">
             <button
               onClick={() => setActiveTab("feeds")}
-              className={`px-3 py-1 text-xs font-bold uppercase tracking-wider transition-colors ${
+              className={`px-2 md:px-3 py-1 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-colors ${
                 activeTab === "feeds"
                   ? "text-white bg-slate-700"
                   : "text-slate-500 hover:text-slate-300"
@@ -284,7 +308,7 @@ export default function DashboardTable() {
             </button>
             <button
               onClick={() => setActiveTab("intel")}
-              className={`px-3 py-1 text-xs font-bold uppercase tracking-wider transition-colors ${
+              className={`px-2 md:px-3 py-1 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-colors ${
                 activeTab === "intel"
                   ? "text-white bg-slate-700"
                   : "text-slate-500 hover:text-slate-300"
@@ -294,9 +318,21 @@ export default function DashboardTable() {
             </button>
           </div>
 
-          {/* Urgency legend — show on feeds tab */}
+          {/* Mobile: category filter inline with tabs */}
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className={`md:hidden px-1.5 py-0.5 text-[10px] border focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
+          >
+            {categories.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat === "all" ? "ALL" : cat.toUpperCase()}
+              </option>
+            ))}
+          </select>
+
           {activeTab === "feeds" && (
-            <>
+            <div className="hidden sm:flex items-center gap-3 md:gap-5">
               <span className="flex items-center gap-1">
                 <span className="w-2.5 h-1 bg-red-500" />
                 CRITICAL
@@ -313,14 +349,14 @@ export default function DashboardTable() {
                 <span className="w-2.5 h-1 bg-sky-500" />
                 MONITORING
               </span>
-            </>
+            </div>
           )}
         </div>
       </div>
 
       {/* ─── Error Banner ─── */}
       {error && (
-        <div className="max-w-[1920px] mx-auto px-4 py-3">
+        <div className="max-w-[1920px] mx-auto px-3 py-3">
           <div className="bg-red-950 border border-red-700 text-red-300 text-xs px-4 py-2 uppercase">
             ERROR: {error}
           </div>
@@ -364,132 +400,191 @@ export default function DashboardTable() {
         />
       )}
 
-      {/* ─── Table ─── */}
+      {/* ─── FEEDS: Desktop Table ─── */}
       {activeTab === "feeds" && items.length > 0 && (
-        <div className="max-w-[1920px] mx-auto px-2 py-2">
-          <div className={`border overflow-auto max-h-[calc(100vh-110px)] ${t.tableBorder}`}>
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 z-10">
-                <tr className={t.theadBg}>
-                  <th
-                    onClick={() => handleSort("published")}
-                    className={`w-28 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-                  >
-                    DTG{getSortArrow("published")}
-                  </th>
-                  <th
-                    onClick={() => handleSort("sourceName")}
-                    className={`min-w-[130px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-                  >
-                    SOURCE{getSortArrow("sourceName")}
-                  </th>
-                  <th
-                    onClick={() => handleSort("sourceCategory")}
-                    className={`min-w-[110px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-                  >
-                    CATEGORY{getSortArrow("sourceCategory")}
-                  </th>
-                  <th
-                    onClick={() => handleSort("title")}
-                    className={`min-w-[400px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-                  >
-                    HEADLINE{getSortArrow("title")}
-                  </th>
-                  <th
-                    onClick={() => handleSort("summary")}
-                    className={`min-w-[240px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-                  >
-                    SUMMARY{getSortArrow("summary")}
-                  </th>
-                  <th
-                    onClick={() => handleSort("sourceTier")}
-                    className={`w-28 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-                  >
-                    TIER{getSortArrow("sourceTier")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedItems.map((item, idx) => {
-                  const level = getUrgencyLevel(item.sourceCategory);
-                  const rowColor = getRowClasses(level, dark);
-
-                  return (
-                    <tr
-                      key={item.id + idx}
-                      className={`${rowColor} ${
-                        level === "neutral"
-                          ? idx % 2 === 0
-                            ? t.rowAltA
-                            : t.rowAltB
-                          : ""
-                      } ${t.rowHover} transition-colors ${t.rowBorder}`}
+        <>
+          {/* Desktop table — hidden on mobile */}
+          <div className="hidden md:block max-w-[1920px] mx-auto px-2 py-2">
+            <div className={`border overflow-auto max-h-[calc(100vh-110px)] ${t.tableBorder}`}>
+              <table className="w-full border-collapse text-xs">
+                <thead className="sticky top-0 z-10">
+                  <tr className={t.theadBg}>
+                    <th
+                      onClick={() => handleSort("published")}
+                      className={`w-28 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
                     >
-                      {/* DTG */}
-                      <td className={`px-3 py-2 text-xs whitespace-nowrap ${t.dtgText}`}>
-                        {formatDate(item.published)}
-                      </td>
+                      DTG{getSortArrow("published")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("sourceName")}
+                      className={`min-w-[130px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                    >
+                      SOURCE{getSortArrow("sourceName")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("sourceCategory")}
+                      className={`min-w-[110px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                    >
+                      CATEGORY{getSortArrow("sourceCategory")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("title")}
+                      className={`min-w-[400px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                    >
+                      HEADLINE{getSortArrow("title")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("summary")}
+                      className={`min-w-[240px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                    >
+                      SUMMARY{getSortArrow("summary")}
+                    </th>
+                    <th
+                      onClick={() => handleSort("sourceTier")}
+                      className={`w-28 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                    >
+                      TIER{getSortArrow("sourceTier")}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedItems.map((item, idx) => {
+                    const level = getUrgencyLevel(item.sourceCategory);
+                    const rowColor = getRowClasses(level, dark);
 
-                      {/* Source */}
-                      <td className={`px-3 py-2 text-xs font-semibold whitespace-nowrap ${t.sourceText}`}>
-                        {item.sourceName}
-                      </td>
-
-                      {/* Category */}
-                      <td className="px-3 py-2 text-xs">
-                        <span className={getUrgencyBadgeClasses(level, dark)}>
-                          {item.sourceCategory.toUpperCase()}
-                        </span>
-                      </td>
-
-                      {/* Headline with inline photo */}
-                      <td className="px-3 py-2 max-w-[500px]">
-                        <div className="flex items-start gap-2.5">
-                          {item.imageUrl ? (
-                            <img
-                              src={item.imageUrl}
-                              alt=""
-                              className={`w-16 h-11 object-cover shrink-0 mt-0.5 ${t.imgPlaceholder}`}
-                              loading="lazy"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display =
-                                  "none";
-                              }}
-                            />
-                          ) : (
-                            <div className={`w-16 h-11 shrink-0 mt-0.5 ${t.imgPlaceholder}`} />
-                          )}
-                          <a
-                            href={item.link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={`text-xs font-semibold hover:underline leading-snug line-clamp-2 ${t.headlineText}`}
-                            title={item.title}
-                          >
-                            {item.title}
-                          </a>
-                        </div>
-                      </td>
-
-                      {/* Summary */}
-                      <td
-                        className={`px-3 py-2 text-xs max-w-[300px] ${t.summaryText}`}
-                        title={item.summary}
+                    return (
+                      <tr
+                        key={item.id + idx}
+                        className={`${rowColor} ${
+                          level === "neutral"
+                            ? idx % 2 === 0
+                              ? t.rowAltA
+                              : t.rowAltB
+                            : ""
+                        } ${t.rowHover} transition-colors ${t.rowBorder}`}
                       >
-                        <span className="line-clamp-2">{item.summary}</span>
-                      </td>
-
-                      {/* Tier */}
-                      <td className={`px-3 py-2 text-xs whitespace-nowrap uppercase ${t.tierText}`}>
-                        {item.sourceTier}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        <td className={`px-3 py-2 text-xs whitespace-nowrap ${t.dtgText}`}>
+                          {formatDate(item.published)}
+                        </td>
+                        <td className={`px-3 py-2 text-xs font-semibold whitespace-nowrap ${t.sourceText}`}>
+                          {item.sourceName}
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          <span className={getUrgencyBadgeClasses(level, dark)}>
+                            {item.sourceCategory.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 max-w-[500px]">
+                          <div className="flex items-start gap-2.5">
+                            {item.imageUrl ? (
+                              <img
+                                src={item.imageUrl}
+                                alt=""
+                                className={`w-16 h-11 object-cover shrink-0 mt-0.5 ${t.imgPlaceholder}`}
+                                loading="lazy"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display =
+                                    "none";
+                                }}
+                              />
+                            ) : (
+                              <div className={`w-16 h-11 shrink-0 mt-0.5 ${t.imgPlaceholder}`} />
+                            )}
+                            <a
+                              href={item.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`text-xs font-semibold hover:underline leading-snug line-clamp-2 ${t.headlineText}`}
+                              title={item.title}
+                            >
+                              {item.title}
+                            </a>
+                          </div>
+                        </td>
+                        <td
+                          className={`px-3 py-2 text-xs max-w-[300px] ${t.summaryText}`}
+                          title={item.summary}
+                        >
+                          <span className="line-clamp-2">{item.summary}</span>
+                        </td>
+                        <td className={`px-3 py-2 text-xs whitespace-nowrap uppercase ${t.tierText}`}>
+                          {item.sourceTier}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          {/* ─── FEEDS: Mobile Cards ─── */}
+          <div className="md:hidden max-w-[1920px] mx-auto px-2 py-2 space-y-1.5 max-h-[calc(100vh-140px)] overflow-auto">
+            {sortedItems.map((item, idx) => {
+              const level = getUrgencyLevel(item.sourceCategory);
+              const rowColor = getRowClasses(level, dark);
+
+              return (
+                <div
+                  key={item.id + idx}
+                  className={`${rowColor} ${
+                    level === "neutral" ? t.cardBg : ""
+                  } border ${t.cardBorder} px-3 py-2.5`}
+                >
+                  {/* Top line: source + time */}
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className={`text-[10px] font-bold uppercase ${t.sourceText}`}>
+                      {item.sourceName}
+                    </span>
+                    <span className={`text-[10px] ${t.dtgText}`}>
+                      {formatDate(item.published)}
+                    </span>
+                  </div>
+
+                  {/* Headline with image */}
+                  <div className="flex items-start gap-2.5 mb-1.5">
+                    {item.imageUrl && (
+                      <img
+                        src={item.imageUrl}
+                        alt=""
+                        className={`w-14 h-10 object-cover shrink-0 ${t.imgPlaceholder}`}
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    )}
+                    <a
+                      href={item.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`text-xs font-semibold hover:underline leading-snug ${t.headlineText}`}
+                    >
+                      {item.title}
+                    </a>
+                  </div>
+
+                  {/* Summary */}
+                  {item.summary && (
+                    <p className={`text-[10px] leading-snug line-clamp-2 mb-1.5 ${t.summaryText}`}>
+                      {item.summary}
+                    </p>
+                  )}
+
+                  {/* Bottom: category + tier */}
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[10px] ${getUrgencyBadgeClasses(level, dark)}`}>
+                      {item.sourceCategory.toUpperCase()}
+                    </span>
+                    <span className={`text-[10px] uppercase ${t.tierText}`}>
+                      {item.sourceTier}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {/* ─── Empty State ─── */}
@@ -508,7 +603,7 @@ export default function DashboardTable() {
       )}
 
       {/* ─── Search empty state ─── */}
-      {!loading && items.length > 0 && sortedItems.length === 0 && (
+      {!loading && items.length > 0 && sortedItems.length === 0 && activeTab === "feeds" && (
         <div className="max-w-[1920px] mx-auto px-4 py-12 text-center">
           <p className={`text-xs uppercase ${t.loadingText}`}>
             NO RESULTS FOR &ldquo;{searchQuery}&rdquo;

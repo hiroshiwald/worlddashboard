@@ -67,9 +67,10 @@ function UrgencyBar({
 
   return (
     <div className="flex items-center gap-1">
-      <div className="flex h-2.5 w-20 overflow-hidden" title={
-        segments.map((s) => `${s.key}: ${s.count}`).join(", ")
-      }>
+      <div
+        className="flex h-2.5 w-16 md:w-20 overflow-hidden"
+        title={segments.map((s) => `${s.key}: ${s.count}`).join(", ")}
+      >
         {segments.map((seg) => (
           <div
             key={seg.key}
@@ -78,12 +79,15 @@ function UrgencyBar({
           />
         ))}
       </div>
-      <span className="text-[10px] opacity-60">{total}</span>
     </div>
   );
 }
 
-export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) {
+export default function IntelTab({
+  items,
+  dark,
+  onEntityClick,
+}: IntelTabProps) {
   const entities = useMemo(() => extractEntities(items), [items]);
 
   const [sortKey, setSortKey] = useState<SortKey>("mentions");
@@ -141,7 +145,6 @@ export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) 
     return sortDir === "asc" ? " ↑" : " ↓";
   };
 
-  // Summary counts
   const counts = useMemo(() => {
     const c = { country: 0, organization: 0, region: 0, person: 0 };
     for (const e of entities) {
@@ -174,17 +177,25 @@ export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) 
     typeBadge: (type: EntityType) => {
       if (dark) {
         switch (type) {
-          case "country": return "text-emerald-400";
-          case "organization": return "text-violet-400";
-          case "region": return "text-cyan-400";
-          case "person": return "text-orange-400";
+          case "country":
+            return "text-emerald-400";
+          case "organization":
+            return "text-violet-400";
+          case "region":
+            return "text-cyan-400";
+          case "person":
+            return "text-orange-400";
         }
       } else {
         switch (type) {
-          case "country": return "text-emerald-700";
-          case "organization": return "text-violet-700";
-          case "region": return "text-cyan-700";
-          case "person": return "text-orange-700";
+          case "country":
+            return "text-emerald-700";
+          case "organization":
+            return "text-violet-700";
+          case "region":
+            return "text-cyan-700";
+          case "person":
+            return "text-orange-700";
         }
       }
     },
@@ -193,49 +204,48 @@ export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) 
     filterBg: dark
       ? "bg-slate-800 border-slate-600 text-slate-200"
       : "bg-stone-800 border-stone-600 text-stone-200",
+    cardBg: dark
+      ? "bg-slate-900 border-slate-700"
+      : "bg-white border-stone-200",
   };
 
   return (
     <div className="max-w-[1920px] mx-auto px-2 py-2">
       {/* Summary strip */}
       <div
-        className={`flex items-center gap-6 px-4 py-2.5 mb-2 text-xs uppercase tracking-wide ${t.summaryBg} ${t.summaryText} border ${dark ? "border-slate-700" : "border-stone-300"}`}
+        className={`flex flex-wrap items-center gap-3 md:gap-6 px-3 md:px-4 py-2 md:py-2.5 mb-2 text-[10px] md:text-xs uppercase tracking-wide ${t.summaryBg} ${t.summaryText} border ${dark ? "border-slate-700" : "border-stone-300"}`}
       >
-        <span className="font-bold">
-          {entities.length} ENTITIES TRACKED
+        <span className="font-bold">{entities.length} ENTITIES</span>
+        <span>
+          <span className="text-emerald-500">{counts.country}</span> CTRY
         </span>
         <span>
-          <span className="text-emerald-500">{counts.country}</span> COUNTRIES
+          <span className="text-violet-500">{counts.organization}</span> ORG
         </span>
         <span>
-          <span className="text-violet-500">{counts.organization}</span> ORGS
+          <span className="text-orange-500">{counts.person}</span> PERS
         </span>
         <span>
-          <span className="text-orange-500">{counts.person}</span> PERSONS
+          <span className="text-cyan-500">{counts.region}</span> REG
         </span>
-        <span>
-          <span className="text-cyan-500">{counts.region}</span> REGIONS
-        </span>
-        <span className="ml-auto">
-          <select
-            value={typeFilter}
-            onChange={(e) =>
-              setTypeFilter(e.target.value as EntityType | "all")
-            }
-            className={`px-2 py-1 text-xs border focus:outline-none cursor-pointer uppercase ${t.filterBg}`}
-          >
-            <option value="all">ALL TYPES</option>
-            <option value="country">COUNTRIES</option>
-            <option value="organization">ORGS</option>
-            <option value="person">PERSONS</option>
-            <option value="region">REGIONS</option>
-          </select>
-        </span>
+        <select
+          value={typeFilter}
+          onChange={(e) =>
+            setTypeFilter(e.target.value as EntityType | "all")
+          }
+          className={`ml-auto px-1.5 md:px-2 py-0.5 md:py-1 text-[10px] md:text-xs border focus:outline-none cursor-pointer uppercase ${t.filterBg}`}
+        >
+          <option value="all">ALL TYPES</option>
+          <option value="country">COUNTRIES</option>
+          <option value="organization">ORGS</option>
+          <option value="person">PERSONS</option>
+          <option value="region">REGIONS</option>
+        </select>
       </div>
 
-      {/* Entity table */}
+      {/* ─── Desktop: Entity table ─── */}
       <div
-        className={`border overflow-auto max-h-[calc(100vh-160px)] ${t.tableBorder}`}
+        className={`hidden md:block border overflow-auto max-h-[calc(100vh-160px)] ${t.tableBorder}`}
       >
         <table className="w-full border-collapse text-xs">
           <thead className="sticky top-0 z-10">
@@ -290,7 +300,6 @@ export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) 
                   idx % 2 === 0 ? t.rowAltA : t.rowAltB
                 } ${t.rowHover} transition-colors ${t.rowBorder}`}
               >
-                {/* Entity name — clickable */}
                 <td className="px-3 py-2">
                   <button
                     onClick={() => onEntityClick(entity.name)}
@@ -300,18 +309,14 @@ export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) 
                     {entity.name}
                   </button>
                 </td>
-
-                {/* Type */}
-                <td className={`px-3 py-2 text-xs font-semibold ${t.typeBadge(entity.type)}`}>
+                <td
+                  className={`px-3 py-2 text-xs font-semibold ${t.typeBadge(entity.type)}`}
+                >
                   {typeLabel(entity.type)}
                 </td>
-
-                {/* Mentions */}
                 <td className={`px-3 py-2 text-xs font-bold ${t.text}`}>
                   {entity.mentions}
                 </td>
-
-                {/* Urgency bar */}
                 <td className="px-3 py-2">
                   <UrgencyBar
                     breakdown={entity.urgencyBreakdown}
@@ -319,8 +324,6 @@ export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) 
                     dark={dark}
                   />
                 </td>
-
-                {/* 1H trend */}
                 <td className={`px-3 py-2 text-xs ${t.text}`}>
                   {entity.recentMentions.hour > 0 ? (
                     <span className="text-amber-500 font-bold">
@@ -330,13 +333,11 @@ export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) 
                     <span className={t.textMuted}>—</span>
                   )}
                 </td>
-
-                {/* Last seen */}
-                <td className={`px-3 py-2 text-xs whitespace-nowrap ${t.textMuted}`}>
+                <td
+                  className={`px-3 py-2 text-xs whitespace-nowrap ${t.textMuted}`}
+                >
                   {timeAgo(entity.lastSeen)}
                 </td>
-
-                {/* Co-occurrences */}
                 <td className={`px-3 py-2 text-xs ${t.textMuted}`}>
                   {entity.cooccurrences.length > 0
                     ? entity.cooccurrences
@@ -360,6 +361,66 @@ export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) 
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* ─── Mobile: Entity cards ─── */}
+      <div className="md:hidden space-y-1.5 max-h-[calc(100vh-160px)] overflow-auto">
+        {sorted.map((entity) => (
+          <div
+            key={entity.name}
+            className={`border px-3 py-2.5 ${t.cardBg}`}
+          >
+            {/* Row 1: entity name + type badge */}
+            <div className="flex items-center justify-between mb-1.5">
+              <button
+                onClick={() => onEntityClick(entity.name)}
+                className={`text-xs font-bold uppercase cursor-pointer hover:underline ${t.entityName}`}
+              >
+                {entity.name}
+              </button>
+              <span
+                className={`text-[10px] font-semibold ${t.typeBadge(entity.type)}`}
+              >
+                {typeLabel(entity.type)}
+              </span>
+            </div>
+
+            {/* Row 2: mentions, urgency bar, trend */}
+            <div className="flex items-center gap-3 mb-1.5">
+              <span className={`text-xs font-bold ${t.text}`}>
+                {entity.mentions} MENTIONS
+              </span>
+              <UrgencyBar
+                breakdown={entity.urgencyBreakdown}
+                total={entity.mentions}
+                dark={dark}
+              />
+              {entity.recentMentions.hour > 0 && (
+                <span className="text-amber-500 text-xs font-bold">
+                  +{entity.recentMentions.hour} 1H
+                </span>
+              )}
+              <span className={`text-[10px] ml-auto ${t.textMuted}`}>
+                {timeAgo(entity.lastSeen)}
+              </span>
+            </div>
+
+            {/* Row 3: co-occurrences */}
+            {entity.cooccurrences.length > 0 && (
+              <div className={`flex flex-wrap gap-2 text-[10px] ${t.textMuted}`}>
+                {entity.cooccurrences.slice(0, 3).map(([name, count]) => (
+                  <button
+                    key={name}
+                    onClick={() => onEntityClick(name)}
+                    className={`cursor-pointer hover:underline ${t.entityName}`}
+                  >
+                    {name.toUpperCase()} ({count})
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
 
       {sorted.length === 0 && (
