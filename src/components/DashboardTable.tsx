@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { FeedItem, SortConfig } from "@/lib/types";
 import { useFeed } from "@/hooks/useSources";
 import {
@@ -9,6 +10,15 @@ import {
   getUrgencyBadgeClasses,
 } from "@/lib/urgency";
 import IntelTab from "./IntelTab";
+
+const MapTab = dynamic(() => import("./MapTab"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center" style={{ height: "calc(100vh - 120px)" }}>
+      <p className="text-xs uppercase tracking-wide text-slate-500">LOADING MAP...</p>
+    </div>
+  ),
+});
 
 type ColumnKey = keyof FeedItem;
 
@@ -67,7 +77,7 @@ export default function DashboardTable() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [dark, setDark] = useState(true);
-  const [activeTab, setActiveTab] = useState<"feeds" | "intel">("feeds");
+  const [activeTab, setActiveTab] = useState<"feeds" | "intel" | "map">("feeds");
 
   useEffect(() => {
     const saved = localStorage.getItem("wd-theme");
@@ -342,6 +352,16 @@ export default function DashboardTable() {
             >
               INTEL
             </button>
+            <button
+              onClick={() => setActiveTab("map")}
+              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
+                activeTab === "map"
+                  ? t.tabActive
+                  : t.tabInactive
+              }`}
+            >
+              MAP
+            </button>
           </div>
 
           {/* Mobile: category filter inline with tabs */}
@@ -357,7 +377,7 @@ export default function DashboardTable() {
             ))}
           </select>
 
-          {activeTab === "feeds" && (
+          {(activeTab === "feeds" || activeTab === "map") && (
             <div className="hidden sm:flex items-center gap-3 md:gap-5">
               <span className="flex items-center gap-1">
                 <span className="w-2.5 h-1 bg-red-500" />
@@ -451,6 +471,18 @@ export default function DashboardTable() {
             STAND BY — 10-15 SECONDS
           </p>
         </div>
+      )}
+
+      {/* ─── MAP Tab ─── */}
+      {activeTab === "map" && items.length > 0 && (
+        <MapTab
+          items={filteredItems}
+          dark={dark}
+          onEntityClick={(name) => {
+            setEntityFilter(name);
+            setActiveTab("feeds");
+          }}
+        />
       )}
 
       {/* ─── INTEL Tab ─── */}
