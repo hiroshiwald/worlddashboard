@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { FeedItem, SortConfig } from "@/lib/types";
 import { useFeed } from "@/hooks/useSources";
 import {
@@ -10,22 +10,6 @@ import {
 } from "@/lib/urgency";
 
 type ColumnKey = keyof FeedItem;
-
-interface Column {
-  key: ColumnKey;
-  label: string;
-  width: string;
-}
-
-const COLUMNS: Column[] = [
-  { key: "published", label: "DTG", width: "w-32" },
-  { key: "imageUrl", label: "", width: "w-14" },
-  { key: "sourceName", label: "Source", width: "min-w-[140px]" },
-  { key: "sourceCategory", label: "Category", width: "min-w-[120px]" },
-  { key: "title", label: "Headline", width: "min-w-[320px]" },
-  { key: "summary", label: "Summary", width: "min-w-[260px]" },
-  { key: "sourceTier", label: "Tier", width: "w-28" },
-];
 
 function timeAgo(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
@@ -80,6 +64,20 @@ export default function DashboardTable() {
   });
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [dark, setDark] = useState(true);
+
+  // Persist theme preference
+  useEffect(() => {
+    const saved = localStorage.getItem("wd-theme");
+    if (saved === "light") setDark(false);
+  }, []);
+
+  const toggleTheme = () => {
+    setDark((prev) => {
+      localStorage.setItem("wd-theme", prev ? "light" : "dark");
+      return !prev;
+    });
+  };
 
   const handleSort = (key: ColumnKey) => {
     setSort((prev) => ({
@@ -138,24 +136,52 @@ export default function DashboardTable() {
     return sort.direction === "asc" ? " ↑" : " ↓";
   };
 
+  // Theme-dependent classes
+  const t = {
+    bg: dark ? "bg-slate-950" : "bg-stone-100",
+    headerBg: dark ? "bg-slate-900 border-b border-slate-700" : "bg-stone-900 border-b border-stone-700",
+    headerText: "text-stone-100",
+    feedBadge: "text-emerald-400",
+    itemCount: dark ? "text-slate-400" : "text-stone-400",
+    searchBg: dark ? "bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500 focus:border-slate-400" : "bg-stone-800 border-stone-600 text-stone-100 placeholder-stone-500 focus:border-stone-400",
+    selectBg: dark ? "bg-slate-800 border-slate-600 text-slate-200 focus:border-slate-400" : "bg-stone-800 border-stone-600 text-stone-200 focus:border-stone-400",
+    btnBg: dark ? "bg-slate-700 hover:bg-slate-600 border-slate-600 text-slate-200" : "bg-stone-700 hover:bg-stone-600 border-stone-600 text-stone-200",
+    legendText: dark ? "text-slate-500" : "text-stone-500",
+    tableBorder: dark ? "border-slate-700 bg-slate-900" : "border-stone-300 bg-white",
+    theadBg: dark ? "bg-slate-800 border-b border-slate-600" : "bg-stone-200 border-b border-stone-300",
+    theadText: dark ? "text-slate-300 hover:text-white" : "text-stone-700 hover:text-stone-900",
+    rowAltA: dark ? "bg-slate-900" : "bg-white",
+    rowAltB: dark ? "bg-slate-900/60" : "bg-stone-50",
+    rowHover: dark ? "hover:bg-slate-800" : "hover:bg-stone-100",
+    rowBorder: dark ? "border-b border-slate-800" : "border-b border-stone-200",
+    dtgText: dark ? "text-slate-300" : "text-stone-600",
+    sourceText: dark ? "text-slate-100" : "text-stone-900",
+    headlineText: dark ? "text-white hover:text-amber-300" : "text-stone-900 hover:text-blue-700",
+    summaryText: dark ? "text-slate-400" : "text-stone-500",
+    tierText: dark ? "text-slate-400" : "text-stone-500",
+    imgPlaceholder: dark ? "bg-slate-800" : "bg-stone-200",
+    loadingText: dark ? "text-slate-400" : "text-stone-500",
+    loadingSub: dark ? "text-slate-600" : "text-stone-400",
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950">
+    <div className={`min-h-screen ${t.bg} transition-colors duration-200`}>
       {/* ─── Header Bar ─── */}
-      <div className="sticky top-0 z-30 bg-slate-900 border-b border-slate-700">
+      <div className={`sticky top-0 z-30 ${t.headerBg}`}>
         <div className="max-w-[1920px] mx-auto px-4 py-2 flex items-center justify-between gap-4">
           {/* Left: branding + status */}
           <div className="flex items-center gap-4 shrink-0">
-            <h1 className="text-xs font-bold tracking-[0.25em] text-slate-100 uppercase">
+            <h1 className={`text-xs font-bold tracking-[0.25em] ${t.headerText} uppercase`}>
               WORLD DASHBOARD
             </h1>
             {feedsSucceeded > 0 && (
-              <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+              <span className={`flex items-center gap-1.5 text-xs ${t.feedBadge}`}>
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 {feedsSucceeded}/{feedsAttempted} FEEDS
               </span>
             )}
             {totalItems > 0 && (
-              <span className="text-xs text-slate-400">
+              <span className={`text-xs ${t.itemCount}`}>
                 {filteredItems.length !== totalItems
                   ? `${filteredItems.length}/${totalItems}`
                   : totalItems}{" "}
@@ -175,7 +201,7 @@ export default function DashboardTable() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="SEARCH HEADLINES, SOURCES..."
-                className="w-full pl-7 pr-8 py-1.5 text-xs bg-slate-800 border border-slate-600 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-slate-400 uppercase"
+                className={`w-full pl-7 pr-8 py-1.5 text-xs border focus:outline-none uppercase ${t.searchBg}`}
               />
               {searchQuery && (
                 <button
@@ -190,10 +216,19 @@ export default function DashboardTable() {
 
           {/* Right: controls */}
           <div className="flex items-center gap-3 shrink-0">
+            {/* Light/Dark toggle */}
+            <button
+              onClick={toggleTheme}
+              className={`px-2 py-1.5 text-xs border transition-colors ${t.btnBg} uppercase tracking-wide`}
+              title={dark ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {dark ? "LIGHT" : "DARK"}
+            </button>
+
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-2 py-1.5 text-xs bg-slate-800 border border-slate-600 text-slate-200 focus:outline-none focus:border-slate-400 cursor-pointer uppercase"
+              className={`px-2 py-1.5 text-xs border focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
             >
               {categories.map((cat) => (
                 <option key={cat} value={cat}>
@@ -211,7 +246,7 @@ export default function DashboardTable() {
             <button
               onClick={refresh}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-200 bg-slate-700 hover:bg-slate-600 border border-slate-600 transition-colors disabled:opacity-40 uppercase tracking-wide"
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border transition-colors disabled:opacity-40 uppercase tracking-wide ${t.btnBg}`}
             >
               <svg
                 className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
@@ -232,7 +267,7 @@ export default function DashboardTable() {
         </div>
 
         {/* Urgency legend */}
-        <div className="max-w-[1920px] mx-auto px-4 pb-1.5 flex items-center gap-5 text-[10px] text-slate-500 uppercase tracking-wide">
+        <div className={`max-w-[1920px] mx-auto px-4 pb-1.5 flex items-center gap-5 text-[10px] uppercase tracking-wide ${t.legendText}`}>
           <span className="flex items-center gap-1">
             <span className="w-2.5 h-1 bg-red-500" />
             CRITICAL
@@ -277,10 +312,10 @@ export default function DashboardTable() {
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
             />
           </svg>
-          <p className="text-slate-400 text-xs uppercase tracking-wide">
+          <p className={`text-xs uppercase tracking-wide ${t.loadingText}`}>
             FETCHING LIVE FEEDS FROM {feedsAttempted || "140+"} SOURCES...
           </p>
-          <p className="text-slate-600 text-xs mt-1">
+          <p className={`text-xs mt-1 ${t.loadingSub}`}>
             STAND BY — 10-15 SECONDS
           </p>
         </div>
@@ -289,26 +324,52 @@ export default function DashboardTable() {
       {/* ─── Table ─── */}
       {items.length > 0 && (
         <div className="max-w-[1920px] mx-auto px-2 py-2">
-          <div className="border border-slate-700 bg-slate-900 overflow-auto max-h-[calc(100vh-110px)]">
+          <div className={`border overflow-auto max-h-[calc(100vh-110px)] ${t.tableBorder}`}>
             <table className="w-full border-collapse text-xs">
               <thead className="sticky top-0 z-10">
-                <tr className="bg-slate-800 border-b border-slate-600">
-                  {COLUMNS.map((col) => (
-                    <th
-                      key={col.key}
-                      onClick={() => handleSort(col.key)}
-                      className={`${col.width} px-3 py-2 text-left text-xs font-bold text-slate-300 uppercase tracking-wider cursor-pointer select-none hover:text-white transition-colors whitespace-nowrap`}
-                    >
-                      {col.label}
-                      {getSortArrow(col.key)}
-                    </th>
-                  ))}
+                <tr className={t.theadBg}>
+                  <th
+                    onClick={() => handleSort("published")}
+                    className={`w-28 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                  >
+                    DTG{getSortArrow("published")}
+                  </th>
+                  <th
+                    onClick={() => handleSort("sourceName")}
+                    className={`min-w-[130px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                  >
+                    SOURCE{getSortArrow("sourceName")}
+                  </th>
+                  <th
+                    onClick={() => handleSort("sourceCategory")}
+                    className={`min-w-[110px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                  >
+                    CATEGORY{getSortArrow("sourceCategory")}
+                  </th>
+                  <th
+                    onClick={() => handleSort("title")}
+                    className={`min-w-[400px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                  >
+                    HEADLINE{getSortArrow("title")}
+                  </th>
+                  <th
+                    onClick={() => handleSort("summary")}
+                    className={`min-w-[240px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                  >
+                    SUMMARY{getSortArrow("summary")}
+                  </th>
+                  <th
+                    onClick={() => handleSort("sourceTier")}
+                    className={`w-28 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                  >
+                    TIER{getSortArrow("sourceTier")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {sortedItems.map((item, idx) => {
                   const level = getUrgencyLevel(item.sourceCategory);
-                  const rowColor = getRowClasses(level);
+                  const rowColor = getRowClasses(level, dark);
 
                   return (
                     <tr
@@ -316,69 +377,67 @@ export default function DashboardTable() {
                       className={`${rowColor} ${
                         level === "neutral"
                           ? idx % 2 === 0
-                            ? "bg-slate-900"
-                            : "bg-slate-900/60"
+                            ? t.rowAltA
+                            : t.rowAltB
                           : ""
-                      } hover:bg-slate-800 transition-colors border-b border-slate-800`}
+                      } ${t.rowHover} transition-colors ${t.rowBorder}`}
                     >
-                      {/* DTG (Date-Time Group) */}
-                      <td className="px-3 py-1.5 text-xs text-slate-300 whitespace-nowrap">
+                      {/* DTG */}
+                      <td className={`px-3 py-2 text-xs whitespace-nowrap ${t.dtgText}`}>
                         {formatDate(item.published)}
                       </td>
 
-                      {/* Thumbnail */}
-                      <td className="px-1 py-1">
-                        {item.imageUrl ? (
-                          <img
-                            src={item.imageUrl}
-                            alt=""
-                            className="w-10 h-7 object-cover bg-slate-800"
-                            loading="lazy"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display =
-                                "none";
-                            }}
-                          />
-                        ) : (
-                          <div className="w-10 h-7 bg-slate-800" />
-                        )}
-                      </td>
-
                       {/* Source */}
-                      <td className="px-3 py-1.5 text-xs font-semibold text-slate-100 whitespace-nowrap">
+                      <td className={`px-3 py-2 text-xs font-semibold whitespace-nowrap ${t.sourceText}`}>
                         {item.sourceName}
                       </td>
 
                       {/* Category */}
-                      <td className="px-3 py-1.5 text-xs">
-                        <span className={getUrgencyBadgeClasses(level)}>
+                      <td className="px-3 py-2 text-xs">
+                        <span className={getUrgencyBadgeClasses(level, dark)}>
                           {item.sourceCategory.toUpperCase()}
                         </span>
                       </td>
 
-                      {/* Headline */}
-                      <td className="px-3 py-1.5 max-w-[420px]">
-                        <a
-                          href={item.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-semibold text-white hover:text-amber-300 hover:underline leading-snug line-clamp-2"
-                          title={item.title}
-                        >
-                          {item.title}
-                        </a>
+                      {/* Headline with inline photo */}
+                      <td className="px-3 py-2 max-w-[500px]">
+                        <div className="flex items-start gap-2.5">
+                          {item.imageUrl ? (
+                            <img
+                              src={item.imageUrl}
+                              alt=""
+                              className={`w-16 h-11 object-cover shrink-0 mt-0.5 ${t.imgPlaceholder}`}
+                              loading="lazy"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display =
+                                  "none";
+                              }}
+                            />
+                          ) : (
+                            <div className={`w-16 h-11 shrink-0 mt-0.5 ${t.imgPlaceholder}`} />
+                          )}
+                          <a
+                            href={item.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`text-xs font-semibold hover:underline leading-snug line-clamp-2 ${t.headlineText}`}
+                            title={item.title}
+                          >
+                            {item.title}
+                          </a>
+                        </div>
                       </td>
 
                       {/* Summary */}
                       <td
-                        className="px-3 py-1.5 text-xs text-slate-400 max-w-[300px]"
+                        className={`px-3 py-2 text-xs max-w-[300px] ${t.summaryText}`}
                         title={item.summary}
                       >
                         <span className="line-clamp-2">{item.summary}</span>
                       </td>
 
                       {/* Tier */}
-                      <td className="px-3 py-1.5 text-xs text-slate-400 whitespace-nowrap uppercase">
+                      <td className={`px-3 py-2 text-xs whitespace-nowrap uppercase ${t.tierText}`}>
                         {item.sourceTier}
                       </td>
                     </tr>
@@ -393,7 +452,7 @@ export default function DashboardTable() {
       {/* ─── Empty State ─── */}
       {!loading && items.length === 0 && !error && (
         <div className="max-w-[1920px] mx-auto px-4 py-20 text-center">
-          <p className="text-slate-500 text-xs uppercase">
+          <p className={`text-xs uppercase ${t.loadingText}`}>
             NO FEED ITEMS — PAST 7 DAYS
           </p>
           <button
@@ -408,7 +467,7 @@ export default function DashboardTable() {
       {/* ─── Search empty state ─── */}
       {!loading && items.length > 0 && sortedItems.length === 0 && (
         <div className="max-w-[1920px] mx-auto px-4 py-12 text-center">
-          <p className="text-slate-500 text-xs uppercase">
+          <p className={`text-xs uppercase ${t.loadingText}`}>
             NO RESULTS FOR &ldquo;{searchQuery}&rdquo;
             {categoryFilter !== "all"
               ? ` IN ${categoryFilter.toUpperCase()}`
