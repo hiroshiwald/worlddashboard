@@ -73,20 +73,3 @@ export function getUrgencyBadgeClasses(level: UrgencyLevel): string {
       return "bg-gray-100 text-gray-600";
   }
 }
-
-export function getUrgencyLabel(level: UrgencyLevel): string {
-  switch (level) {
-    case "critical":
-      return "CRITICAL";
-    case "warning":
-      return "WARNING";
-    case "advisory":
-      return "ADVISORY";
-    case "monitoring":
-      return "MONITORING";
-    case "system":
-      return "SYSTEM";
-    case "neutral":
-      return "";
-  }
-}

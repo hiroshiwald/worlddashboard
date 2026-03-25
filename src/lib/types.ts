@@ -1,18 +1,26 @@
-export interface DashboardSource {
-  id: number;
+export interface FeedItem {
+  id: string;
+  title: string;
+  link: string;
+  published: string;
+  summary: string;
+  sourceName: string;
+  sourceCategory: string;
+  sourceTier: string;
+}
+
+export interface SourceMeta {
   name: string;
   category: string;
-  type: string;
   tier: string;
   url: string;
-  notes: string;
-  status: "live" | "static" | "unknown";
+  type: string;
 }
 
 export type SortDirection = "asc" | "desc";
 
 export interface SortConfig {
-  key: keyof DashboardSource;
+  key: keyof FeedItem;
   direction: SortDirection;
 }
 

@@ -1,16 +1,15 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { DashboardSource, SortConfig, SortDirection } from "@/lib/types";
-import { useSources } from "@/hooks/useSources";
+import { FeedItem, SortConfig } from "@/lib/types";
+import { useFeed } from "@/hooks/useSources";
 import {
   getUrgencyLevel,
   getRowClasses,
   getUrgencyBadgeClasses,
-  getUrgencyLabel,
 } from "@/lib/urgency";
 
-type ColumnKey = keyof DashboardSource;
+type ColumnKey = keyof FeedItem;
 
 interface Column {
   key: ColumnKey;
@@ -19,97 +18,146 @@ interface Column {
 }
 
 const COLUMNS: Column[] = [
-  { key: "id", label: "#", width: "w-14" },
-  { key: "name", label: "Name", width: "min-w-[220px]" },
-  { key: "category", label: "Category", width: "min-w-[160px]" },
-  { key: "type", label: "Type", width: "w-28" },
-  { key: "tier", label: "Tier", width: "min-w-[140px]" },
-  { key: "url", label: "URL", width: "min-w-[180px]" },
-  { key: "notes", label: "Notes", width: "min-w-[260px]" },
-  { key: "status", label: "Status", width: "w-24" },
+  { key: "published", label: "Published", width: "w-40" },
+  { key: "sourceName", label: "Source", width: "min-w-[150px]" },
+  { key: "sourceCategory", label: "Category", width: "min-w-[140px]" },
+  { key: "title", label: "Headline", width: "min-w-[320px]" },
+  { key: "summary", label: "Summary", width: "min-w-[280px]" },
+  { key: "sourceTier", label: "Tier", width: "w-36" },
 ];
 
 function timeAgo(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
   const secs = Math.floor(diff / 1000);
+  if (secs < 0) return "just now";
   if (secs < 5) return "just now";
   if (secs < 60) return `${secs}s ago`;
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
-  return `${hrs}h ago`;
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function formatDate(isoString: string): string {
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return "—";
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffHrs = diffMs / (1000 * 60 * 60);
+
+  if (diffHrs < 1) return timeAgo(isoString);
+  if (diffHrs < 24) return `${Math.floor(diffHrs)}h ago`;
+
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export default function DashboardTable() {
-  const { sources, loading, error, fetchedAt, refresh } = useSources();
+  const {
+    items,
+    loading,
+    error,
+    fetchedAt,
+    feedsAttempted,
+    feedsSucceeded,
+    totalItems,
+    refresh,
+  } = useFeed();
+
   const [sort, setSort] = useState<SortConfig>({
-    key: "id",
-    direction: "asc",
+    key: "published",
+    direction: "desc",
   });
-  const [filter7Days, setFilter7Days] = useState(true);
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
   const handleSort = (key: ColumnKey) => {
     setSort((prev) => ({
       key,
       direction:
-        prev.key === key && prev.direction === "asc" ? "desc" : "asc",
+        prev.key === key && prev.direction === "desc" ? "asc" : "desc",
     }));
   };
 
-  const sortedSources = useMemo(() => {
-    const arr = [...sources];
+  const categories = useMemo(() => {
+    const cats = new Set(items.map((i) => i.sourceCategory));
+    return ["all", ...Array.from(cats).sort()];
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    if (categoryFilter === "all") return items;
+    return items.filter((i) => i.sourceCategory === categoryFilter);
+  }, [items, categoryFilter]);
+
+  const sortedItems = useMemo(() => {
+    const arr = [...filteredItems];
     arr.sort((a, b) => {
       const aVal = a[sort.key];
       const bVal = b[sort.key];
       let cmp: number;
-      if (typeof aVal === "number" && typeof bVal === "number") {
-        cmp = aVal - bVal;
+      if (sort.key === "published") {
+        cmp =
+          new Date(aVal as string).getTime() -
+          new Date(bVal as string).getTime();
       } else {
         cmp = String(aVal).localeCompare(String(bVal));
       }
       return sort.direction === "asc" ? cmp : -cmp;
     });
     return arr;
-  }, [sources, sort]);
+  }, [filteredItems, sort]);
 
   const getSortArrow = (key: ColumnKey): string => {
     if (sort.key !== key) return "↕";
     return sort.direction === "asc" ? "↑" : "↓";
   };
 
-  const isStaticSource = (source: DashboardSource) =>
-    source.status === "static" || source.tier === "Reference";
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Top Toolbar */}
       <div className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-[1800px] mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+        <div className="max-w-[1900px] mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
           {/* Left side */}
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-bold text-gray-900">
-              World Dashboard Sources
+              World Dashboard
             </h1>
-            {sources.length > 0 && (
+            <span className="text-xs text-gray-400">LIVE FEED</span>
+            {totalItems > 0 && (
               <span className="px-2 py-0.5 text-xs font-medium bg-gray-200 text-gray-700 rounded-full">
-                {sources.length} sources
+                {filteredItems.length}
+                {categoryFilter !== "all"
+                  ? ` / ${totalItems}`
+                  : ""}{" "}
+                items
+              </span>
+            )}
+            {feedsSucceeded > 0 && (
+              <span className="px-2 py-0.5 text-[10px] font-medium bg-green-100 text-green-700 rounded-full">
+                {feedsSucceeded}/{feedsAttempted} feeds online
               </span>
             )}
           </div>
 
           {/* Right side */}
           <div className="flex items-center gap-3">
-            {/* 7-day filter toggle */}
-            <button
-              onClick={() => setFilter7Days(!filter7Days)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
-                filter7Days
-                  ? "bg-indigo-50 text-indigo-700 border-indigo-300"
-                  : "bg-white text-gray-500 border-gray-300 hover:bg-gray-50"
-              }`}
+            {/* Category filter */}
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="px-2 py-1.5 text-xs border border-gray-300 rounded-md bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
             >
-              Last 7 Days
-            </button>
+              {categories.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat === "all" ? "All Categories" : cat}
+                </option>
+              ))}
+            </select>
 
             {/* Last fetched */}
             {fetchedAt && (
@@ -143,44 +191,40 @@ export default function DashboardTable() {
         </div>
 
         {/* Urgency legend */}
-        <div className="max-w-[1800px] mx-auto px-4 pb-2 flex items-center gap-3 text-[10px] font-medium">
+        <div className="max-w-[1900px] mx-auto px-4 pb-2 flex items-center gap-4 text-[10px] font-medium text-gray-500">
           <span className="flex items-center gap-1">
             <span className="w-2.5 h-2.5 rounded-sm bg-red-400" />
-            Critical
+            Conflict / Cyber / Military
           </span>
           <span className="flex items-center gap-1">
             <span className="w-2.5 h-2.5 rounded-sm bg-orange-400" />
-            Warning
+            Disaster / Health
           </span>
           <span className="flex items-center gap-1">
             <span className="w-2.5 h-2.5 rounded-sm bg-yellow-400" />
-            Advisory
+            Gov Advisory
           </span>
           <span className="flex items-center gap-1">
             <span className="w-2.5 h-2.5 rounded-sm bg-blue-400" />
-            Monitoring
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-sm bg-gray-400" />
-            System
+            Economic / Supply Chain
           </span>
         </div>
       </div>
 
       {/* Error banner */}
       {error && (
-        <div className="max-w-[1800px] mx-auto px-4 py-3">
+        <div className="max-w-[1900px] mx-auto px-4 py-3">
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-md px-4 py-2">
-            Error loading sources: {error}
+            Error: {error}
           </div>
         </div>
       )}
 
-      {/* Loading skeleton */}
-      {loading && sources.length === 0 && (
-        <div className="max-w-[1800px] mx-auto px-4 py-12 text-center text-gray-400">
+      {/* Loading state */}
+      {loading && items.length === 0 && (
+        <div className="max-w-[1900px] mx-auto px-4 py-16 text-center">
           <svg
-            className="w-8 h-8 mx-auto mb-3 animate-spin text-indigo-500"
+            className="w-10 h-10 mx-auto mb-4 animate-spin text-indigo-500"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -192,13 +236,18 @@ export default function DashboardTable() {
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
             />
           </svg>
-          Loading dashboard sources...
+          <p className="text-gray-500 text-sm">
+            Fetching live feeds from {feedsAttempted || "40+"} sources...
+          </p>
+          <p className="text-gray-400 text-xs mt-1">
+            This may take 10-15 seconds on first load
+          </p>
         </div>
       )}
 
       {/* Table */}
-      {sources.length > 0 && (
-        <div className="max-w-[1800px] mx-auto px-4 py-4">
+      {items.length > 0 && (
+        <div className="max-w-[1900px] mx-auto px-4 py-4">
           <div className="border border-gray-200 rounded-lg shadow-sm bg-white overflow-auto max-h-[calc(100vh-160px)]">
             <table className="w-full border-collapse text-sm">
               <thead className="sticky top-0 z-10">
@@ -226,94 +275,66 @@ export default function DashboardTable() {
                 </tr>
               </thead>
               <tbody>
-                {sortedSources.map((source, idx) => {
-                  const level = getUrgencyLevel(source.category);
+                {sortedItems.map((item, idx) => {
+                  const level = getUrgencyLevel(item.sourceCategory);
                   const rowColor = getRowClasses(level);
-                  const isStatic = isStaticSource(source);
-                  const dimmed = filter7Days && isStatic;
 
                   return (
                     <tr
-                      key={source.id}
+                      key={item.id + idx}
                       className={`${rowColor} ${
                         level === "neutral"
                           ? idx % 2 === 0
                             ? "bg-white"
                             : "bg-gray-50/50"
                           : ""
-                      } hover:brightness-95 transition-all border-b border-gray-100 ${
-                        dimmed ? "opacity-50" : ""
-                      }`}
+                      } hover:brightness-[0.97] transition-all border-b border-gray-100`}
                     >
-                      {/* # */}
-                      <td className="px-3 py-2 text-gray-400 text-right font-mono text-xs tabular-nums">
-                        {source.id}
+                      {/* Published */}
+                      <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap font-mono">
+                        {formatDate(item.published)}
                       </td>
 
-                      {/* Name */}
-                      <td
-                        className="px-3 py-2 font-medium text-gray-900 truncate max-w-[280px]"
-                        title={source.name}
-                      >
-                        {source.name}
+                      {/* Source */}
+                      <td className="px-3 py-2 font-medium text-gray-700 text-xs whitespace-nowrap">
+                        {item.sourceName}
                       </td>
 
                       {/* Category */}
                       <td className="px-3 py-2">
                         <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${getUrgencyBadgeClasses(
+                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${getUrgencyBadgeClasses(
                             level
                           )}`}
                         >
-                          {getUrgencyLabel(level) && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
-                          )}
-                          {source.category}
+                          {item.sourceCategory}
                         </span>
                       </td>
 
-                      {/* Type */}
-                      <td className="px-3 py-2 text-gray-600">
-                        {source.type}
+                      {/* Title / Headline */}
+                      <td className="px-3 py-2 max-w-[400px]">
+                        <a
+                          href={item.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-gray-900 hover:text-indigo-700 hover:underline font-medium text-sm leading-snug line-clamp-2"
+                          title={item.title}
+                        >
+                          {item.title}
+                        </a>
+                      </td>
+
+                      {/* Summary */}
+                      <td
+                        className="px-3 py-2 text-gray-500 text-xs max-w-[320px]"
+                        title={item.summary}
+                      >
+                        <span className="line-clamp-2">{item.summary}</span>
                       </td>
 
                       {/* Tier */}
-                      <td className="px-3 py-2 text-gray-600 text-xs">
-                        {source.tier}
-                      </td>
-
-                      {/* URL */}
-                      <td
-                        className="px-3 py-2 max-w-[220px] truncate"
-                        title={source.url}
-                      >
-                        {source.url.startsWith("http") ? (
-                          <a
-                            href={source.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-indigo-600 hover:text-indigo-800 hover:underline text-xs"
-                          >
-                            {source.url.replace(/^https?:\/\/(www\.)?/, "")}
-                          </a>
-                        ) : (
-                          <span className="text-gray-400 text-xs italic">
-                            {source.url}
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Notes */}
-                      <td
-                        className="px-3 py-2 text-gray-500 text-xs truncate max-w-[320px]"
-                        title={source.notes}
-                      >
-                        {source.notes}
-                      </td>
-
-                      {/* Status */}
-                      <td className="px-3 py-2">
-                        <StatusPill status={source.status} />
+                      <td className="px-3 py-2 text-gray-400 text-xs whitespace-nowrap">
+                        {item.sourceTier}
                       </td>
                     </tr>
                   );
@@ -323,39 +344,21 @@ export default function DashboardTable() {
           </div>
         </div>
       )}
+
+      {/* Empty state after loading */}
+      {!loading && items.length === 0 && !error && (
+        <div className="max-w-[1900px] mx-auto px-4 py-16 text-center">
+          <p className="text-gray-500 text-sm">
+            No feed items found from the past 7 days.
+          </p>
+          <button
+            onClick={refresh}
+            className="mt-3 text-indigo-600 text-sm hover:underline"
+          >
+            Try refreshing
+          </button>
+        </div>
+      )}
     </div>
-  );
-}
-
-function StatusPill({ status }: { status: DashboardSource["status"] }) {
-  const config = {
-    live: {
-      dot: "bg-green-500",
-      bg: "bg-green-50 text-green-700 ring-green-200",
-      label: "Live",
-    },
-    static: {
-      dot: "bg-gray-400",
-      bg: "bg-gray-50 text-gray-500 ring-gray-200",
-      label: "Static",
-    },
-    unknown: {
-      dot: "bg-yellow-400",
-      bg: "bg-yellow-50 text-yellow-700 ring-yellow-200",
-      label: "—",
-    },
-  }[status];
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ring-1 ${config.bg}`}
-    >
-      <span
-        className={`w-1.5 h-1.5 rounded-full ${config.dot} ${
-          status === "live" ? "animate-pulse" : ""
-        }`}
-      />
-      {config.label}
-    </span>
   );
 }
