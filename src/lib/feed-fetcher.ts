@@ -378,35 +378,27 @@ function parseFeedXml(xml: string, source: SourceMeta): FeedItem[] {
 }
 
 async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
 
-    try {
-      const res = await fetch(source.url, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": "WorldDashboard/1.0 (RSS Feed Reader)",
-          Accept:
-            "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
-        },
-      });
+  try {
+    const res = await fetch(source.url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "WorldDashboard/1.0 (RSS Feed Reader)",
+        Accept:
+          "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+      },
+    });
 
-      if (!res.ok) {
-        clearTimeout(timeout);
-        continue;
-      }
-      const text = await res.text();
-      return parseFeedXml(text, source);
-    } catch {
-      clearTimeout(timeout);
-      if (attempt === 0) continue;
-      return [];
-    } finally {
-      clearTimeout(timeout);
-    }
+    if (!res.ok) return [];
+    const text = await res.text();
+    return parseFeedXml(text, source);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timeout);
   }
-  return [];
 }
 
 export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
@@ -420,16 +412,9 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
       s.url.startsWith("http")
   );
 
-  // Fetch in batches of 20 to reduce network congestion
-  const BATCH_SIZE = 20;
-  const results: PromiseSettledResult<FeedItem[]>[] = [];
-  for (let i = 0; i < rssFeeds.length; i += BATCH_SIZE) {
-    const batch = rssFeeds.slice(i, i + BATCH_SIZE);
-    const batchResults = await Promise.allSettled(
-      batch.map((source) => fetchSingleFeed(source))
-    );
-    results.push(...batchResults);
-  }
+  const results = await Promise.allSettled(
+    rssFeeds.map((source) => fetchSingleFeed(source))
+  );
 
   const allItems: FeedItem[] = [];
   let succeeded = 0;
