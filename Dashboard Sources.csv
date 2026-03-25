@@ -75,7 +75,7 @@
 74,CNN - World,News,RSS,Tier 2 - Major Outlet,http://rss.cnn.com/rss/edition_world.rss,CNN international edition
 75,DW News,News,RSS,Tier 2 - Major Outlet,https://rss.dw.com/rdf/rss-en-all,Deutsche Welle English
 76,France 24 - World,News,RSS,Tier 2 - Major Outlet,https://www.france24.com/en/rss,France 24 English
-77,NHK World,News,RSS,Tier 2 - Major Outlet,https://www3.nhk.or.jp/rss/news/cat0.xml,Added in v2.3.9
+77,NHK World-Japan,News,RSS,Tier 2 - Major Outlet,https://www3.nhk.or.jp/nhkworld/data/en/news/backstory/rss.xml,NHK English in-depth news features
 78,NPR - World,News,RSS,Tier 2 - Major Outlet,https://feeds.npr.org/1004/rss.xml,NPR world section
 79,New York Times - World,News,RSS,Tier 2 - Major Outlet,https://rss.nytimes.com/services/xml/rss/nyt/World.xml,NYT world desk
 80,Nikkei Asia,News,RSS,Tier 2 - Major Outlet,https://asia.nikkei.com/rss,Added in v2.3.9

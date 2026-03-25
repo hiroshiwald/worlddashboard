@@ -761,12 +761,12 @@
   },
   {
     "id": 77,
-    "name": "NHK World",
+    "name": "NHK World-Japan",
     "category": "News",
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
-    "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",
-    "notes": "Added in v2.3.9",
+    "url": "https://www3.nhk.or.jp/nhkworld/data/en/news/backstory/rss.xml",
+    "notes": "NHK English in-depth news features",
     "status": "live"
   },
   {
