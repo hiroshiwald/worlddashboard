@@ -192,13 +192,56 @@ function extractImageUrl(block: string): string {
   return "";
 }
 
-// Max items to keep per individual feed (mirrors World Monitor's approach)
+// Max items to keep per individual feed
 const MAX_ITEMS_PER_FEED = 15;
+
+// Extra-strict filter for items without a publication date.
+// Dateless items are suspicious — real news almost always has dates.
+// Only allow them through if the title looks like genuine hard news.
+const FINANCIAL_AD_PATTERNS = [
+  /credit card/i,
+  /cash ?back/i,
+  /home equity/i,
+  /\bapr\b/i,
+  /\bloan\b/i,
+  /\bmortgage\b/i,
+  /\brefinanc/i,
+  /\binsurance\b.{0,15}(rate|quote|plan|cost)/i,
+  /\bsavings (account|rate)/i,
+  /\binterest rate/i,
+  /\bdebt (consolidat|relief|pay)/i,
+  /your (home|money|credit|debt|rate|savings|equity)/i,
+  /experts:.{0,5}(this|the|best)/i,
+  /it'?s official/i,
+  /dream big/i,
+  /cash (out|you can)/i,
+  /turn your/i,
+  /\b(visa|mastercard|amex)\b/i,
+  /\bintro (rate|apr|offer)/i,
+  /\b0%.{0,10}(apr|interest|intro)/i,
+  /best .{0,20}(card|rate|account)/i,
+  /avoid .{0,15}(interest|fee|charge)/i,
+  /high.yield/i,
+  /\bCD rate/i,
+  /balance transfer/i,
+  /personal (loan|finance)/i,
+  /student loan/i,
+];
+
+function isFinancialAd(title: string): boolean {
+  for (const pattern of FINANCIAL_AD_PATTERNS) {
+    if (pattern.test(title)) return true;
+  }
+  return false;
+}
 
 // --- RSS 2.0 parser ---
 function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
   const items: FeedItem[] = [];
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+  // Check if the feed has ANY pubDate at all (some feeds like CNN omit them entirely)
+  const feedHasDates = /<pubDate>/i.test(xml) || /<dc:date>/i.test(xml);
 
   const rssItemRegex = /<item[\s>]([\s\S]*?)<\/item>/gi;
   let match;
@@ -219,18 +262,25 @@ function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
       extractTag(block, "content:encoded");
 
     const published = pubDate ? new Date(pubDate) : null;
+    const hasValidDate = published && !isNaN(published.getTime());
 
-    // Items without a valid publication date are likely injected ads
-    if (!published || isNaN(published.getTime())) {
+    // If this feed generally has dates but THIS item doesn't, it's likely an injected ad
+    if (feedHasDates && !hasValidDate) {
       continue;
     }
 
-    if (published.getTime() < sevenDaysAgo) {
+    // If item has a date, enforce the 7-day window
+    if (hasValidDate && published!.getTime() < sevenDaysAgo) {
       continue;
     }
 
-    // Skip ads and promotional content
+    // Standard ad filter
     if (isAdContent(title, stripHtml(description), link || "")) {
+      continue;
+    }
+
+    // For dateless items (feeds where NO items have dates), apply strict financial ad filter
+    if (!hasValidDate && isFinancialAd(title)) {
       continue;
     }
 
@@ -241,7 +291,9 @@ function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
         id: `${source.name}-${title.slice(0, 40)}-${pubDate || Math.random()}`,
         title,
         link: link || source.url,
-        published: published.toISOString(),
+        published: hasValidDate
+          ? published!.toISOString()
+          : new Date().toISOString(),
         summary: stripHtml(description).slice(0, 300),
         sourceName: source.name,
         sourceCategory: source.category,
@@ -259,6 +311,9 @@ function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
   const items: FeedItem[] = [];
   const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
+  const feedHasDates =
+    /<updated>/i.test(xml) || /<published>/i.test(xml);
+
   const entryRegex = /<entry[\s>]([\s\S]*?)<\/entry>/gi;
   let match;
   while ((match = entryRegex.exec(xml)) !== null) {
@@ -274,18 +329,22 @@ function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
       extractTag(block, "summary") || extractTag(block, "content");
 
     const published = updated ? new Date(updated) : null;
+    const hasValidDate = published && !isNaN(published.getTime());
 
-    // Items without a valid date are likely injected ads
-    if (!published || isNaN(published.getTime())) {
+    if (feedHasDates && !hasValidDate) {
       continue;
     }
 
-    if (published.getTime() < sevenDaysAgo) {
+    if (hasValidDate && published!.getTime() < sevenDaysAgo) {
       continue;
     }
 
     // Skip ads
     if (isAdContent(title, stripHtml(summary), link || "")) {
+      continue;
+    }
+
+    if (!hasValidDate && isFinancialAd(title)) {
       continue;
     }
 
@@ -296,7 +355,9 @@ function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
         id: `${source.name}-${title.slice(0, 40)}-${updated || Math.random()}`,
         title,
         link: link || source.url,
-        published: published.toISOString(),
+        published: hasValidDate
+          ? published!.toISOString()
+          : new Date().toISOString(),
         summary: stripHtml(summary).slice(0, 300),
         sourceName: source.name,
         sourceCategory: source.category,
