@@ -18,20 +18,20 @@ interface Column {
 }
 
 const COLUMNS: Column[] = [
-  { key: "published", label: "Time", width: "w-28" },
+  { key: "published", label: "DTG", width: "w-32" },
   { key: "imageUrl", label: "", width: "w-14" },
-  { key: "sourceName", label: "Source", width: "min-w-[120px]" },
-  { key: "sourceCategory", label: "Category", width: "min-w-[110px]" },
-  { key: "title", label: "Headline", width: "min-w-[300px]" },
-  { key: "summary", label: "Summary", width: "min-w-[240px]" },
-  { key: "sourceTier", label: "Tier", width: "w-24" },
+  { key: "sourceName", label: "Source", width: "min-w-[140px]" },
+  { key: "sourceCategory", label: "Category", width: "min-w-[120px]" },
+  { key: "title", label: "Headline", width: "min-w-[320px]" },
+  { key: "summary", label: "Summary", width: "min-w-[260px]" },
+  { key: "sourceTier", label: "Tier", width: "w-28" },
 ];
 
 function timeAgo(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
   const secs = Math.floor(diff / 1000);
-  if (secs < 0) return "now";
-  if (secs < 5) return "now";
+  if (secs < 0) return "NOW";
+  if (secs < 5) return "NOW";
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m`;
@@ -48,15 +48,18 @@ function formatDate(isoString: string): string {
   const diffMs = now.getTime() - d.getTime();
   const diffHrs = diffMs / (1000 * 60 * 60);
 
-  if (diffHrs < 1) return timeAgo(isoString) + " ago";
-  if (diffHrs < 24) return `${Math.floor(diffHrs)}h ago`;
+  if (diffHrs < 1) return timeAgo(isoString) + " AGO";
+  if (diffHrs < 24) return `${Math.floor(diffHrs)}H AGO`;
 
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return d
+    .toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+    .toUpperCase();
 }
 
 export default function DashboardTable() {
@@ -94,7 +97,6 @@ export default function DashboardTable() {
   const filteredItems = useMemo(() => {
     let result = items;
 
-    // Search filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -106,7 +108,6 @@ export default function DashboardTable() {
       );
     }
 
-    // Category filter
     if (categoryFilter !== "all") {
       result = result.filter((i) => i.sourceCategory === categoryFilter);
     }
@@ -133,99 +134,87 @@ export default function DashboardTable() {
   }, [filteredItems, sort]);
 
   const getSortArrow = (key: ColumnKey): string => {
-    if (sort.key !== key) return "↕";
-    return sort.direction === "asc" ? "↑" : "↓";
+    if (sort.key !== key) return "";
+    return sort.direction === "asc" ? " ↑" : " ↓";
   };
 
   return (
-    <div className="min-h-screen bg-slate-100">
-      {/* ─── Dark Header Bar ─── */}
-      <div className="sticky top-0 z-30 bg-slate-900 shadow-lg">
-        {/* Primary row */}
-        <div className="max-w-[1920px] mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
-          {/* Left: branding */}
-          <div className="flex items-center gap-3 shrink-0">
-            <h1 className="text-sm font-semibold tracking-[0.2em] text-white uppercase">
-              World Dashboard
+    <div className="min-h-screen bg-slate-950">
+      {/* ─── Header Bar ─── */}
+      <div className="sticky top-0 z-30 bg-slate-900 border-b border-slate-700">
+        <div className="max-w-[1920px] mx-auto px-4 py-2 flex items-center justify-between gap-4">
+          {/* Left: branding + status */}
+          <div className="flex items-center gap-4 shrink-0">
+            <h1 className="text-xs font-bold tracking-[0.25em] text-slate-100 uppercase">
+              WORLD DASHBOARD
             </h1>
             {feedsSucceeded > 0 && (
-              <span className="flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-medium text-emerald-400 bg-emerald-400/10 rounded-full">
+              <span className="flex items-center gap-1.5 text-xs text-emerald-400">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                {feedsSucceeded}/{feedsAttempted} feeds
+                {feedsSucceeded}/{feedsAttempted} FEEDS
               </span>
             )}
             {totalItems > 0 && (
-              <span className="text-[10px] text-slate-400 font-mono">
-                {filteredItems.length}
+              <span className="text-xs text-slate-400">
                 {filteredItems.length !== totalItems
-                  ? ` / ${totalItems}`
-                  : ""}{" "}
-                items
+                  ? `${filteredItems.length}/${totalItems}`
+                  : totalItems}{" "}
+                ITEMS
               </span>
             )}
           </div>
 
           {/* Center: search */}
-          <div className="flex-1 max-w-md mx-4">
+          <div className="flex-1 max-w-lg mx-4">
             <div className="relative">
-              <svg
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-                />
-              </svg>
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">
+                /
+              </span>
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search headlines, sources, categories..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-800 border border-slate-700 rounded-md text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 focus:border-slate-500 transition-colors"
+                placeholder="SEARCH HEADLINES, SOURCES..."
+                className="w-full pl-7 pr-8 py-1.5 text-xs bg-slate-800 border border-slate-600 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-slate-400 uppercase"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 text-xs"
                 >
-                  ✕
+                  CLR
                 </button>
               )}
             </div>
           </div>
 
           {/* Right: controls */}
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-2 py-1.5 text-[11px] bg-slate-800 border border-slate-700 rounded-md text-slate-300 focus:outline-none focus:ring-1 focus:ring-slate-500 cursor-pointer"
+              className="px-2 py-1.5 text-xs bg-slate-800 border border-slate-600 text-slate-200 focus:outline-none focus:border-slate-400 cursor-pointer uppercase"
             >
               {categories.map((cat) => (
                 <option key={cat} value={cat}>
-                  {cat === "all" ? "All Categories" : cat}
+                  {cat === "all" ? "ALL CATEGORIES" : cat.toUpperCase()}
                 </option>
               ))}
             </select>
 
             {fetchedAt && (
-              <span className="text-[10px] text-slate-500 font-mono hidden sm:inline">
-                {timeAgo(fetchedAt)} ago
+              <span className="text-xs text-slate-500 hidden sm:inline">
+                {timeAgo(fetchedAt)}
               </span>
             )}
 
             <button
               onClick={refresh}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md transition-colors disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-200 bg-slate-700 hover:bg-slate-600 border border-slate-600 transition-colors disabled:opacity-40 uppercase tracking-wide"
             >
               <svg
-                className={`w-3 h-3 ${loading ? "animate-spin" : ""}`}
+                className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -237,28 +226,28 @@ export default function DashboardTable() {
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                 />
               </svg>
-              Refresh
+              REFRESH
             </button>
           </div>
         </div>
 
-        {/* Urgency legend strip */}
-        <div className="max-w-[1920px] mx-auto px-4 pb-2 flex items-center gap-4 text-[9px] font-medium text-slate-500">
+        {/* Urgency legend */}
+        <div className="max-w-[1920px] mx-auto px-4 pb-1.5 flex items-center gap-5 text-[10px] text-slate-500 uppercase tracking-wide">
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-sm bg-red-500" />
-            Critical
+            <span className="w-2.5 h-1 bg-red-500" />
+            CRITICAL
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-sm bg-amber-400" />
-            Warning
+            <span className="w-2.5 h-1 bg-amber-500" />
+            WARNING
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-sm bg-yellow-400" />
-            Advisory
+            <span className="w-2.5 h-1 bg-yellow-500" />
+            ADVISORY
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-sm bg-sky-400" />
-            Monitoring
+            <span className="w-2.5 h-1 bg-sky-500" />
+            MONITORING
           </span>
         </div>
       </div>
@@ -266,8 +255,8 @@ export default function DashboardTable() {
       {/* ─── Error Banner ─── */}
       {error && (
         <div className="max-w-[1920px] mx-auto px-4 py-3">
-          <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-md px-4 py-2">
-            {error}
+          <div className="bg-red-950 border border-red-700 text-red-300 text-xs px-4 py-2 uppercase">
+            ERROR: {error}
           </div>
         </div>
       )}
@@ -276,7 +265,7 @@ export default function DashboardTable() {
       {loading && items.length === 0 && (
         <div className="max-w-[1920px] mx-auto px-4 py-20 text-center">
           <svg
-            className="w-8 h-8 mx-auto mb-3 animate-spin text-slate-400"
+            className="w-6 h-6 mx-auto mb-3 animate-spin text-slate-500"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -288,40 +277,30 @@ export default function DashboardTable() {
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
             />
           </svg>
-          <p className="text-slate-500 text-xs">
-            Fetching live feeds from {feedsAttempted || "140+"} sources...
+          <p className="text-slate-400 text-xs uppercase tracking-wide">
+            FETCHING LIVE FEEDS FROM {feedsAttempted || "140+"} SOURCES...
           </p>
-          <p className="text-slate-400 text-[10px] mt-1">
-            This may take 10–15 seconds on first load
+          <p className="text-slate-600 text-xs mt-1">
+            STAND BY — 10-15 SECONDS
           </p>
         </div>
       )}
 
       {/* ─── Table ─── */}
       {items.length > 0 && (
-        <div className="max-w-[1920px] mx-auto px-3 py-3">
-          <div className="border border-slate-200 rounded-lg shadow-sm bg-white overflow-auto max-h-[calc(100vh-120px)]">
-            <table className="w-full border-collapse text-[13px]">
+        <div className="max-w-[1920px] mx-auto px-2 py-2">
+          <div className="border border-slate-700 bg-slate-900 overflow-auto max-h-[calc(100vh-110px)]">
+            <table className="w-full border-collapse text-xs">
               <thead className="sticky top-0 z-10">
-                <tr className="bg-slate-800">
+                <tr className="bg-slate-800 border-b border-slate-600">
                   {COLUMNS.map((col) => (
                     <th
                       key={col.key}
                       onClick={() => handleSort(col.key)}
-                      className={`${col.width} px-3 py-2 text-left text-[10px] font-semibold text-slate-400 uppercase tracking-wider cursor-pointer select-none hover:text-slate-200 transition-colors whitespace-nowrap`}
+                      className={`${col.width} px-3 py-2 text-left text-xs font-bold text-slate-300 uppercase tracking-wider cursor-pointer select-none hover:text-white transition-colors whitespace-nowrap`}
                     >
-                      <span className="flex items-center gap-1">
-                        {col.label}
-                        <span
-                          className={`text-[9px] ${
-                            sort.key === col.key
-                              ? "text-white"
-                              : "text-slate-600"
-                          }`}
-                        >
-                          {getSortArrow(col.key)}
-                        </span>
-                      </span>
+                      {col.label}
+                      {getSortArrow(col.key)}
                     </th>
                   ))}
                 </tr>
@@ -337,13 +316,13 @@ export default function DashboardTable() {
                       className={`${rowColor} ${
                         level === "neutral"
                           ? idx % 2 === 0
-                            ? "bg-white"
-                            : "bg-slate-50/50"
+                            ? "bg-slate-900"
+                            : "bg-slate-900/60"
                           : ""
-                      } hover:brightness-[0.97] transition-all border-b border-slate-100`}
+                      } hover:bg-slate-800 transition-colors border-b border-slate-800`}
                     >
-                      {/* Time */}
-                      <td className="px-3 py-1.5 text-[11px] text-slate-400 whitespace-nowrap font-mono">
+                      {/* DTG (Date-Time Group) */}
+                      <td className="px-3 py-1.5 text-xs text-slate-300 whitespace-nowrap">
                         {formatDate(item.published)}
                       </td>
 
@@ -353,7 +332,7 @@ export default function DashboardTable() {
                           <img
                             src={item.imageUrl}
                             alt=""
-                            className="w-10 h-7 object-cover rounded-sm bg-slate-100"
+                            className="w-10 h-7 object-cover bg-slate-800"
                             loading="lazy"
                             onError={(e) => {
                               (e.target as HTMLImageElement).style.display =
@@ -361,33 +340,29 @@ export default function DashboardTable() {
                             }}
                           />
                         ) : (
-                          <div className="w-10 h-7 rounded-sm bg-slate-100" />
+                          <div className="w-10 h-7 bg-slate-800" />
                         )}
                       </td>
 
                       {/* Source */}
-                      <td className="px-3 py-1.5 font-medium text-slate-700 text-[11px] whitespace-nowrap">
+                      <td className="px-3 py-1.5 text-xs font-semibold text-slate-100 whitespace-nowrap">
                         {item.sourceName}
                       </td>
 
                       {/* Category */}
-                      <td className="px-3 py-1.5">
-                        <span
-                          className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold ${getUrgencyBadgeClasses(
-                            level
-                          )}`}
-                        >
-                          {item.sourceCategory}
+                      <td className="px-3 py-1.5 text-xs">
+                        <span className={getUrgencyBadgeClasses(level)}>
+                          {item.sourceCategory.toUpperCase()}
                         </span>
                       </td>
 
                       {/* Headline */}
-                      <td className="px-3 py-1.5 max-w-[400px]">
+                      <td className="px-3 py-1.5 max-w-[420px]">
                         <a
                           href={item.link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-slate-900 hover:text-blue-700 hover:underline font-medium text-[13px] leading-snug line-clamp-2"
+                          className="text-xs font-semibold text-white hover:text-amber-300 hover:underline leading-snug line-clamp-2"
                           title={item.title}
                         >
                           {item.title}
@@ -396,14 +371,14 @@ export default function DashboardTable() {
 
                       {/* Summary */}
                       <td
-                        className="px-3 py-1.5 text-slate-400 text-[11px] max-w-[300px]"
+                        className="px-3 py-1.5 text-xs text-slate-400 max-w-[300px]"
                         title={item.summary}
                       >
                         <span className="line-clamp-2">{item.summary}</span>
                       </td>
 
                       {/* Tier */}
-                      <td className="px-3 py-1.5 text-slate-400 text-[10px] whitespace-nowrap font-mono">
+                      <td className="px-3 py-1.5 text-xs text-slate-400 whitespace-nowrap uppercase">
                         {item.sourceTier}
                       </td>
                     </tr>
@@ -418,14 +393,14 @@ export default function DashboardTable() {
       {/* ─── Empty State ─── */}
       {!loading && items.length === 0 && !error && (
         <div className="max-w-[1920px] mx-auto px-4 py-20 text-center">
-          <p className="text-slate-500 text-xs">
-            No feed items found from the past 7 days.
+          <p className="text-slate-500 text-xs uppercase">
+            NO FEED ITEMS — PAST 7 DAYS
           </p>
           <button
             onClick={refresh}
-            className="mt-3 text-slate-400 text-xs hover:text-slate-600 hover:underline"
+            className="mt-3 text-slate-400 text-xs hover:text-slate-200 hover:underline uppercase"
           >
-            Try refreshing
+            RETRY
           </button>
         </div>
       )}
@@ -433,18 +408,20 @@ export default function DashboardTable() {
       {/* ─── Search empty state ─── */}
       {!loading && items.length > 0 && sortedItems.length === 0 && (
         <div className="max-w-[1920px] mx-auto px-4 py-12 text-center">
-          <p className="text-slate-400 text-xs">
-            No results for &ldquo;{searchQuery}&rdquo;
-            {categoryFilter !== "all" ? ` in ${categoryFilter}` : ""}
+          <p className="text-slate-500 text-xs uppercase">
+            NO RESULTS FOR &ldquo;{searchQuery}&rdquo;
+            {categoryFilter !== "all"
+              ? ` IN ${categoryFilter.toUpperCase()}`
+              : ""}
           </p>
           <button
             onClick={() => {
               setSearchQuery("");
               setCategoryFilter("all");
             }}
-            className="mt-2 text-slate-500 text-xs hover:text-slate-700 hover:underline"
+            className="mt-2 text-slate-400 text-xs hover:text-slate-200 hover:underline uppercase"
           >
-            Clear filters
+            CLEAR FILTERS
           </button>
         </div>
       )}

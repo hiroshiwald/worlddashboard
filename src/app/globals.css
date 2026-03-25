@@ -8,29 +8,35 @@ html {
 }
 
 body {
-  background: #f1f5f9;
+  background: #0f172a;
 }
 
-/* Custom scrollbar — light theme for table */
+/* Scrollbar — dark theme */
 .overflow-auto::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 .overflow-auto::-webkit-scrollbar-track {
-  background: transparent;
+  background: #1e293b;
 }
 
 .overflow-auto::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #475569;
   border-radius: 3px;
 }
 
 .overflow-auto::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #64748b;
 }
 
-/* Smooth row transitions */
+/* Row transitions */
 tr {
   transition: background-color 0.1s ease;
+}
+
+/* Selection highlight for dark theme */
+::selection {
+  background: #334155;
+  color: #f1f5f9;
 }

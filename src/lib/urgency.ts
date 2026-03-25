@@ -3,7 +3,6 @@ import { UrgencyLevel } from "./types";
 export function getUrgencyLevel(category: string): UrgencyLevel {
   const cat = category.toLowerCase();
 
-  // Critical — immediate threat to life or security
   if (
     cat.startsWith("conflict") ||
     cat.startsWith("cyber") ||
@@ -14,7 +13,6 @@ export function getUrgencyLevel(category: string): UrgencyLevel {
     return "critical";
   }
 
-  // Warning — natural hazards, health emergencies, displacement
   if (
     cat.startsWith("natural disaster") ||
     cat.startsWith("health") ||
@@ -23,7 +21,6 @@ export function getUrgencyLevel(category: string): UrgencyLevel {
     return "warning";
   }
 
-  // Advisory — government alerts, sanctions, travel warnings
   if (
     cat.startsWith("government") ||
     cat.startsWith("sanctions") ||
@@ -32,7 +29,6 @@ export function getUrgencyLevel(category: string): UrgencyLevel {
     return "advisory";
   }
 
-  // Monitoring — economic, trade, supply chain, markets
   if (
     cat.startsWith("economic") ||
     cat.startsWith("supply chain") ||
@@ -43,7 +39,6 @@ export function getUrgencyLevel(category: string): UrgencyLevel {
     return "monitoring";
   }
 
-  // System — infrastructure, tools, AI
   if (
     cat.startsWith("infrastructure") ||
     cat.startsWith("ai/ml") ||
@@ -62,15 +57,15 @@ export function getUrgencyLevel(category: string): UrgencyLevel {
 export function getRowClasses(level: UrgencyLevel): string {
   switch (level) {
     case "critical":
-      return "bg-red-50/70 border-l-4 border-l-red-500";
+      return "bg-red-950/60 border-l-4 border-l-red-500";
     case "warning":
-      return "bg-amber-50/70 border-l-4 border-l-amber-400";
+      return "bg-amber-950/40 border-l-4 border-l-amber-500";
     case "advisory":
-      return "bg-yellow-50/60 border-l-4 border-l-yellow-400";
+      return "bg-yellow-950/30 border-l-4 border-l-yellow-500";
     case "monitoring":
-      return "bg-sky-50/60 border-l-4 border-l-sky-400";
+      return "bg-sky-950/40 border-l-4 border-l-sky-500";
     case "system":
-      return "bg-slate-50 border-l-4 border-l-slate-300";
+      return "bg-slate-800/40 border-l-4 border-l-slate-500";
     case "neutral":
       return "border-l-4 border-l-transparent";
   }
@@ -79,16 +74,16 @@ export function getRowClasses(level: UrgencyLevel): string {
 export function getUrgencyBadgeClasses(level: UrgencyLevel): string {
   switch (level) {
     case "critical":
-      return "bg-red-100 text-red-800";
+      return "text-red-400 font-bold";
     case "warning":
-      return "bg-amber-100 text-amber-800";
+      return "text-amber-400 font-bold";
     case "advisory":
-      return "bg-yellow-100 text-yellow-800";
+      return "text-yellow-400 font-semibold";
     case "monitoring":
-      return "bg-sky-100 text-sky-700";
+      return "text-sky-400 font-semibold";
     case "system":
-      return "bg-slate-100 text-slate-600";
+      return "text-slate-500 font-semibold";
     case "neutral":
-      return "bg-slate-100 text-slate-500";
+      return "text-slate-500";
   }
 }
