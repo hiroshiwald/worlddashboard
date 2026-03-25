@@ -9,6 +9,7 @@ html {
 
 body {
   background: #0f172a;
+  transition: background-color 0.2s ease;
 }
 
 /* Scrollbar — dark theme */

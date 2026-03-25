@@ -65,6 +65,7 @@ export default function DashboardTable() {
   });
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [dark, setDark] = useState(true);
   const [activeTab, setActiveTab] = useState<"feeds" | "intel">("feeds");
 
@@ -96,6 +97,18 @@ export default function DashboardTable() {
   const filteredItems = useMemo(() => {
     let result = items;
 
+    // Apply entity filter (from INTEL tab click)
+    if (entityFilter) {
+      const ef = entityFilter.toLowerCase();
+      result = result.filter(
+        (i) =>
+          i.title.toLowerCase().includes(ef) ||
+          i.sourceName.toLowerCase().includes(ef) ||
+          i.summary.toLowerCase().includes(ef) ||
+          i.sourceCategory.toLowerCase().includes(ef)
+      );
+    }
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(
@@ -112,7 +125,7 @@ export default function DashboardTable() {
     }
 
     return result;
-  }, [items, searchQuery, categoryFilter]);
+  }, [items, searchQuery, entityFilter, categoryFilter]);
 
   const sortedItems = useMemo(() => {
     const arr = [...filteredItems];
@@ -139,32 +152,34 @@ export default function DashboardTable() {
 
   // Theme classes
   const t = {
-    bg: dark ? "bg-slate-950" : "bg-stone-100",
-    headerBg: dark ? "bg-slate-900 border-b border-slate-700" : "bg-stone-900 border-b border-stone-700",
-    headerText: "text-stone-100",
-    feedBadge: "text-emerald-400",
-    itemCount: dark ? "text-slate-400" : "text-stone-400",
-    searchBg: dark ? "bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500 focus:border-slate-400" : "bg-stone-800 border-stone-600 text-stone-100 placeholder-stone-500 focus:border-stone-400",
-    selectBg: dark ? "bg-slate-800 border-slate-600 text-slate-200 focus:border-slate-400" : "bg-stone-800 border-stone-600 text-stone-200 focus:border-stone-400",
-    btnBg: dark ? "bg-slate-700 hover:bg-slate-600 border-slate-600 text-slate-200" : "bg-stone-700 hover:bg-stone-600 border-stone-600 text-stone-200",
+    bg: dark ? "bg-slate-950" : "bg-stone-50",
+    headerBg: dark ? "bg-slate-900 border-b border-slate-700" : "bg-white border-b border-stone-200 shadow-sm",
+    headerText: dark ? "text-stone-100" : "text-stone-800",
+    feedBadge: dark ? "text-emerald-400" : "text-emerald-600",
+    itemCount: dark ? "text-slate-400" : "text-stone-500",
+    searchBg: dark ? "bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500 focus:border-slate-400" : "bg-stone-100 border-stone-300 text-stone-900 placeholder-stone-400 focus:border-blue-400",
+    selectBg: dark ? "bg-slate-800 border-slate-600 text-slate-200 focus:border-slate-400" : "bg-stone-100 border-stone-300 text-stone-700 focus:border-blue-400",
+    btnBg: dark ? "bg-slate-700 hover:bg-slate-600 border-slate-600 text-slate-200" : "bg-stone-100 hover:bg-stone-200 border-stone-300 text-stone-700",
     legendText: dark ? "text-slate-500" : "text-stone-500",
-    tableBorder: dark ? "border-slate-700 bg-slate-900" : "border-stone-300 bg-white",
-    theadBg: dark ? "bg-slate-800 border-b border-slate-600" : "bg-stone-200 border-b border-stone-300",
-    theadText: dark ? "text-slate-300 hover:text-white" : "text-stone-700 hover:text-stone-900",
+    tableBorder: dark ? "border-slate-700 bg-slate-900" : "border-stone-200 bg-white",
+    theadBg: dark ? "bg-slate-800 border-b border-slate-600" : "bg-stone-100 border-b border-stone-200",
+    theadText: dark ? "text-slate-300 hover:text-white" : "text-stone-600 hover:text-stone-900",
     rowAltA: dark ? "bg-slate-900" : "bg-white",
     rowAltB: dark ? "bg-slate-900/60" : "bg-stone-50",
-    rowHover: dark ? "hover:bg-slate-800" : "hover:bg-stone-100",
-    rowBorder: dark ? "border-b border-slate-800" : "border-b border-stone-200",
-    dtgText: dark ? "text-slate-300" : "text-stone-600",
-    sourceText: dark ? "text-slate-100" : "text-stone-900",
-    headlineText: dark ? "text-white hover:text-amber-300" : "text-stone-900 hover:text-blue-700",
+    rowHover: dark ? "hover:bg-slate-800" : "hover:bg-blue-50/50",
+    rowBorder: dark ? "border-b border-slate-800" : "border-b border-stone-100",
+    dtgText: dark ? "text-slate-300" : "text-stone-500",
+    sourceText: dark ? "text-slate-100" : "text-stone-800",
+    headlineText: dark ? "text-white hover:text-amber-300" : "text-stone-900 hover:text-blue-600",
     summaryText: dark ? "text-slate-400" : "text-stone-500",
-    tierText: dark ? "text-slate-400" : "text-stone-500",
-    imgPlaceholder: dark ? "bg-slate-800" : "bg-stone-200",
+    tierText: dark ? "text-slate-400" : "text-stone-400",
+    imgPlaceholder: dark ? "bg-slate-800" : "bg-stone-100",
     loadingText: dark ? "text-slate-400" : "text-stone-500",
     loadingSub: dark ? "text-slate-600" : "text-stone-400",
     cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-stone-200",
     cardBorder: dark ? "border-slate-800" : "border-stone-200",
+    tabActive: dark ? "text-white bg-slate-700" : "text-white bg-blue-600",
+    tabInactive: dark ? "text-slate-500 hover:text-slate-300" : "text-stone-500 hover:text-stone-800",
   };
 
   return (
@@ -172,15 +187,15 @@ export default function DashboardTable() {
       {/* ─── Header Bar ─── */}
       <div className={`sticky top-0 z-30 ${t.headerBg}`}>
         {/* Row 1: brand + controls */}
-        <div className="max-w-[1920px] mx-auto px-3 md:px-4 py-2 flex items-center justify-between gap-2 md:gap-4">
+        <div className="max-w-[1920px] mx-auto px-3 md:px-4 py-2.5 flex items-center justify-between gap-2 md:gap-4">
           {/* Left: branding */}
           <div className="flex items-center gap-2 md:gap-4 shrink-0">
-            <h1 className={`text-[10px] md:text-xs font-bold tracking-[0.2em] md:tracking-[0.25em] ${t.headerText} uppercase`}>
+            <h1 className={`text-xs md:text-sm font-bold tracking-[0.12em] md:tracking-[0.15em] ${t.headerText} uppercase`}>
               WORLD DASHBOARD
             </h1>
             {feedsSucceeded > 0 && (
               <span className={`hidden sm:flex items-center gap-1.5 text-xs ${t.feedBadge}`}>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className={`w-1.5 h-1.5 rounded-full ${dark ? "bg-emerald-400" : "bg-emerald-500"} animate-pulse`} />
                 {feedsSucceeded}/{feedsAttempted}
               </span>
             )}
@@ -205,12 +220,12 @@ export default function DashboardTable() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="SEARCH..."
-                className={`w-full pl-7 pr-8 py-1.5 text-xs border focus:outline-none uppercase ${t.searchBg}`}
+                className={`w-full pl-7 pr-8 py-1.5 text-xs border rounded focus:outline-none uppercase ${t.searchBg}`}
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 text-xs"
+                  className={`absolute right-2.5 top-1/2 -translate-y-1/2 text-xs ${dark ? "text-slate-500 hover:text-slate-200" : "text-stone-400 hover:text-stone-700"}`}
                 >
                   CLR
                 </button>
@@ -222,16 +237,24 @@ export default function DashboardTable() {
           <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
             <button
               onClick={toggleTheme}
-              className={`px-1.5 md:px-2 py-1.5 text-[10px] md:text-xs border transition-colors ${t.btnBg} uppercase tracking-wide`}
+              className={`p-1.5 md:p-2 border rounded transition-colors ${t.btnBg}`}
               title={dark ? "Switch to light mode" : "Switch to dark mode"}
             >
-              {dark ? "LT" : "DK"}
+              {dark ? (
+                <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+              )}
             </button>
 
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className={`hidden md:block px-2 py-1.5 text-xs border focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
+              className={`hidden md:block px-2 py-1.5 text-xs border rounded focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
             >
               {categories.map((cat) => (
                 <option key={cat} value={cat}>
@@ -241,7 +264,7 @@ export default function DashboardTable() {
             </select>
 
             {fetchedAt && (
-              <span className="hidden lg:inline text-xs text-slate-500">
+              <span className={`hidden lg:inline text-xs ${dark ? "text-slate-500" : "text-stone-400"}`}>
                 {timeAgo(fetchedAt)}
               </span>
             )}
@@ -249,7 +272,7 @@ export default function DashboardTable() {
             <button
               onClick={refresh}
               disabled={loading}
-              className={`inline-flex items-center gap-1 md:gap-1.5 px-2 md:px-3 py-1.5 text-[10px] md:text-xs font-bold border transition-colors disabled:opacity-40 uppercase tracking-wide ${t.btnBg}`}
+              className={`inline-flex items-center gap-1 md:gap-1.5 px-2 md:px-3 py-1.5 text-[10px] md:text-xs font-semibold border rounded transition-colors disabled:opacity-40 uppercase tracking-wide ${t.btnBg}`}
             >
               <svg
                 className={`w-3 h-3 md:w-3.5 md:h-3.5 ${loading ? "animate-spin" : ""}`}
@@ -272,7 +295,7 @@ export default function DashboardTable() {
         {/* Row 2 mobile: search bar (shown on small screens only) */}
         <div className="sm:hidden max-w-[1920px] mx-auto px-3 pb-1.5">
           <div className="relative">
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">
+            <span className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-xs ${dark ? "text-slate-500" : "text-stone-400"}`}>
               /
             </span>
             <input
@@ -280,12 +303,12 @@ export default function DashboardTable() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="SEARCH..."
-              className={`w-full pl-7 pr-8 py-1.5 text-xs border focus:outline-none uppercase ${t.searchBg}`}
+              className={`w-full pl-7 pr-8 py-1.5 text-xs border rounded focus:outline-none uppercase ${t.searchBg}`}
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200 text-xs"
+                className={`absolute right-2.5 top-1/2 -translate-y-1/2 text-xs ${dark ? "text-slate-500 hover:text-slate-200" : "text-stone-400 hover:text-stone-700"}`}
               >
                 CLR
               </button>
@@ -298,20 +321,23 @@ export default function DashboardTable() {
           <div className="flex items-center gap-0.5 mr-1 md:mr-2">
             <button
               onClick={() => setActiveTab("feeds")}
-              className={`px-2 md:px-3 py-1 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-colors ${
+              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
                 activeTab === "feeds"
-                  ? "text-white bg-slate-700"
-                  : "text-slate-500 hover:text-slate-300"
+                  ? t.tabActive
+                  : t.tabInactive
               }`}
             >
               FEEDS
             </button>
             <button
-              onClick={() => setActiveTab("intel")}
-              className={`px-2 md:px-3 py-1 text-[10px] md:text-xs font-bold uppercase tracking-wider transition-colors ${
+              onClick={() => {
+                setActiveTab("intel");
+                setEntityFilter(null);
+              }}
+              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
                 activeTab === "intel"
-                  ? "text-white bg-slate-700"
-                  : "text-slate-500 hover:text-slate-300"
+                  ? t.tabActive
+                  : t.tabInactive
               }`}
             >
               INTEL
@@ -322,7 +348,7 @@ export default function DashboardTable() {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className={`md:hidden px-1.5 py-0.5 text-[10px] border focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
+            className={`md:hidden px-1.5 py-0.5 text-[10px] border rounded focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
           >
             {categories.map((cat) => (
               <option key={cat} value={cat}>
@@ -353,6 +379,45 @@ export default function DashboardTable() {
           )}
         </div>
       </div>
+
+      {/* ─── Entity Filter Banner ─── */}
+      {entityFilter && activeTab === "feeds" && (
+        <div className={`${dark ? "bg-blue-950/70 border-b border-blue-800" : "bg-blue-50 border-b border-blue-200"}`}>
+          <div className="max-w-[1920px] mx-auto px-3 md:px-4 py-2 flex items-center justify-between">
+            <span className={`text-xs ${dark ? "text-blue-200" : "text-blue-800"}`}>
+              Showing results for <strong>&ldquo;{entityFilter}&rdquo;</strong>
+              <span className={`ml-2 ${dark ? "text-blue-400" : "text-blue-500"}`}>
+                ({filteredItems.length} {filteredItems.length === 1 ? "item" : "items"})
+              </span>
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setEntityFilter(null);
+                }}
+                className={`text-xs font-semibold px-2.5 py-1 rounded transition-colors ${
+                  dark
+                    ? "text-blue-200 hover:bg-blue-900 hover:text-white"
+                    : "text-blue-700 hover:bg-blue-100 hover:text-blue-900"
+                }`}
+              >
+                SHOW ALL
+              </button>
+              <button
+                onClick={() => setEntityFilter(null)}
+                className={`p-0.5 rounded transition-colors ${
+                  dark ? "text-blue-400 hover:text-white" : "text-blue-500 hover:text-blue-900"
+                }`}
+                title="Clear filter"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ─── Error Banner ─── */}
       {error && (
@@ -394,7 +459,7 @@ export default function DashboardTable() {
           items={items}
           dark={dark}
           onEntityClick={(name) => {
-            setSearchQuery(name);
+            setEntityFilter(name);
             setActiveTab("feeds");
           }}
         />
@@ -519,7 +584,7 @@ export default function DashboardTable() {
           </div>
 
           {/* ─── FEEDS: Mobile Cards ─── */}
-          <div className="md:hidden max-w-[1920px] mx-auto px-2 py-2 space-y-1.5 max-h-[calc(100vh-140px)] overflow-auto">
+          <div className="md:hidden max-w-[1920px] mx-auto px-2 py-2 space-y-1.5">
             {sortedItems.map((item, idx) => {
               const level = getUrgencyLevel(item.sourceCategory);
               const rowColor = getRowClasses(level, dark);
@@ -606,7 +671,8 @@ export default function DashboardTable() {
       {!loading && items.length > 0 && sortedItems.length === 0 && activeTab === "feeds" && (
         <div className="max-w-[1920px] mx-auto px-4 py-12 text-center">
           <p className={`text-xs uppercase ${t.loadingText}`}>
-            NO RESULTS FOR &ldquo;{searchQuery}&rdquo;
+            NO RESULTS{searchQuery ? ` FOR \u201C${searchQuery}\u201D` : ""}
+            {entityFilter ? ` FOR \u201C${entityFilter}\u201D` : ""}
             {categoryFilter !== "all"
               ? ` IN ${categoryFilter.toUpperCase()}`
               : ""}
@@ -614,9 +680,10 @@ export default function DashboardTable() {
           <button
             onClick={() => {
               setSearchQuery("");
+              setEntityFilter(null);
               setCategoryFilter("all");
             }}
-            className="mt-2 text-slate-400 text-xs hover:text-slate-200 hover:underline uppercase"
+            className={`mt-2 text-xs hover:underline uppercase ${dark ? "text-slate-400 hover:text-slate-200" : "text-stone-500 hover:text-stone-800"}`}
           >
             CLEAR FILTERS
           </button>

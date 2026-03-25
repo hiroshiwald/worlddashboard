@@ -5,12 +5,15 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        mono: [
-          "Consolas",
-          "Menlo",
-          "Monaco",
-          "'Courier New'",
-          "monospace",
+        sans: [
+          "Inter",
+          "-apple-system",
+          "BlinkMacSystemFont",
+          "'Segoe UI'",
+          "Roboto",
+          "'Helvetica Neue'",
+          "Arial",
+          "sans-serif",
         ],
       },
     },
