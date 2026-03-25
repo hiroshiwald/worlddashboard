@@ -192,6 +192,9 @@ function extractImageUrl(block: string): string {
   return "";
 }
 
+// Max items to keep per individual feed (mirrors World Monitor's approach)
+const MAX_ITEMS_PER_FEED = 15;
+
 // --- RSS 2.0 parser ---
 function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
   const items: FeedItem[] = [];
@@ -200,6 +203,8 @@ function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
   const rssItemRegex = /<item[\s>]([\s\S]*?)<\/item>/gi;
   let match;
   while ((match = rssItemRegex.exec(xml)) !== null) {
+    if (items.length >= MAX_ITEMS_PER_FEED) break;
+
     const block = match[1];
     const title = stripHtml(extractTag(block, "title"));
     let link = extractTag(block, "link");
@@ -214,11 +219,13 @@ function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
       extractTag(block, "content:encoded");
 
     const published = pubDate ? new Date(pubDate) : null;
-    if (
-      published &&
-      !isNaN(published.getTime()) &&
-      published.getTime() < sevenDaysAgo
-    ) {
+
+    // Items without a valid publication date are likely injected ads
+    if (!published || isNaN(published.getTime())) {
+      continue;
+    }
+
+    if (published.getTime() < sevenDaysAgo) {
       continue;
     }
 
@@ -234,9 +241,7 @@ function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
         id: `${source.name}-${title.slice(0, 40)}-${pubDate || Math.random()}`,
         title,
         link: link || source.url,
-        published: published
-          ? published.toISOString()
-          : new Date().toISOString(),
+        published: published.toISOString(),
         summary: stripHtml(description).slice(0, 300),
         sourceName: source.name,
         sourceCategory: source.category,
@@ -257,6 +262,8 @@ function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
   const entryRegex = /<entry[\s>]([\s\S]*?)<\/entry>/gi;
   let match;
   while ((match = entryRegex.exec(xml)) !== null) {
+    if (items.length >= MAX_ITEMS_PER_FEED) break;
+
     const block = match[1];
     const title = stripHtml(extractTag(block, "title"));
     let link = extractAttr(block, "link", "href");
@@ -267,11 +274,13 @@ function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
       extractTag(block, "summary") || extractTag(block, "content");
 
     const published = updated ? new Date(updated) : null;
-    if (
-      published &&
-      !isNaN(published.getTime()) &&
-      published.getTime() < sevenDaysAgo
-    ) {
+
+    // Items without a valid date are likely injected ads
+    if (!published || isNaN(published.getTime())) {
+      continue;
+    }
+
+    if (published.getTime() < sevenDaysAgo) {
       continue;
     }
 
@@ -287,9 +296,7 @@ function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
         id: `${source.name}-${title.slice(0, 40)}-${updated || Math.random()}`,
         title,
         link: link || source.url,
-        published: published
-          ? published.toISOString()
-          : new Date().toISOString(),
+        published: published.toISOString(),
         summary: stripHtml(summary).slice(0, 300),
         sourceName: source.name,
         sourceCategory: source.category,
