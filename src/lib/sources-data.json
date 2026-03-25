@@ -1,0 +1,1002 @@
+[
+  {
+    "id": 1,
+    "name": "Groq",
+    "category": "AI/ML",
+    "type": "API",
+    "tier": "Infrastructure",
+    "url": "https://api.groq.com/",
+    "notes": "Primary AI inference (server-side key)",
+    "status": "live"
+  },
+  {
+    "id": 2,
+    "name": "Ollama (local)",
+    "category": "AI/ML",
+    "type": "API",
+    "tier": "Infrastructure",
+    "url": "http://localhost:11434/",
+    "notes": "Local AI inference (desktop variant)",
+    "status": "live"
+  },
+  {
+    "id": 3,
+    "name": "OpenRouter",
+    "category": "AI/ML",
+    "type": "API",
+    "tier": "Infrastructure",
+    "url": "https://openrouter.ai/api/v1/",
+    "notes": "AI routing fallback (server-side key)",
+    "status": "live"
+  },
+  {
+    "id": 4,
+    "name": "Transformers.js (browser)",
+    "category": "AI/ML",
+    "type": "Library",
+    "tier": "Infrastructure",
+    "url": "Browser-side T5 model",
+    "notes": "Browser ML fallback when cloud unavailable",
+    "status": "static"
+  },
+  {
+    "id": 5,
+    "name": "Upstash Redis",
+    "category": "Caching",
+    "type": "Service",
+    "tier": "Infrastructure",
+    "url": "https://upstash.com/",
+    "notes": "3-tier cache: in-memory + Redis + upstream",
+    "status": "live"
+  },
+  {
+    "id": 6,
+    "name": "Vercel Edge Functions (60+)",
+    "category": "Compute",
+    "type": "Service",
+    "tier": "Infrastructure",
+    "url": "https://vercel.com/",
+    "notes": "60+ edge functions for API handling",
+    "status": "live"
+  },
+  {
+    "id": 7,
+    "name": "ACLED (Armed Conflict Location & Event Data)",
+    "category": "Conflict",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://api.acleddata.com/",
+    "notes": "Protests, riots, strikes, demos; 30-day window; requiredForRisk",
+    "status": "live"
+  },
+  {
+    "id": 8,
+    "name": "GDELT (Global Database of Events, Language, Tone)",
+    "category": "Conflict",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://api.gdeltproject.org/api/v2/geo/geo",
+    "notes": "7-day geospatial event feed; requiredForRisk",
+    "status": "live"
+  },
+  {
+    "id": 9,
+    "name": "UCDP (Uppsala Conflict Data Program)",
+    "category": "Conflict",
+    "type": "API",
+    "tier": "Secondary",
+    "url": "https://ucdp.uu.se/apidocs/",
+    "notes": "Academic conflict data",
+    "status": "live"
+  },
+  {
+    "id": 10,
+    "name": "Liveuamap",
+    "category": "Conflict",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://liveuamap.com/rss",
+    "notes": "Live conflict mapping",
+    "status": "live"
+  },
+  {
+    "id": 11,
+    "name": "HAPI (Humanitarian API)",
+    "category": "Conflict/Humanitarian",
+    "type": "API",
+    "tier": "Secondary",
+    "url": "https://hapi.humdata.org/",
+    "notes": "UN OCHA humanitarian data",
+    "status": "live"
+  },
+  {
+    "id": 12,
+    "name": "AbuseIPDB",
+    "category": "Cyber Threats",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://api.abuseipdb.com/api/v2/",
+    "notes": "IP abuse reporting database",
+    "status": "live"
+  },
+  {
+    "id": 13,
+    "name": "AlienVault OTX",
+    "category": "Cyber Threats",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://otx.alienvault.com/api/v1/",
+    "notes": "Open Threat Exchange indicators",
+    "status": "live"
+  },
+  {
+    "id": 14,
+    "name": "URLhaus (abuse.ch)",
+    "category": "Cyber Threats",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://urlhaus-api.abuse.ch/v1/",
+    "notes": "Malicious URL tracking",
+    "status": "live"
+  },
+  {
+    "id": 15,
+    "name": "APT Threat Attribution",
+    "category": "Cyber Threats",
+    "type": "Derived",
+    "tier": "Secondary",
+    "url": "Derived from multiple CTI feeds",
+    "notes": "Advanced Persistent Threat tracking",
+    "status": "unknown"
+  },
+  {
+    "id": 16,
+    "name": "Army Recognition",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.armyrecognition.com/rss",
+    "notes": "Army equipment & news",
+    "status": "live"
+  },
+  {
+    "id": 17,
+    "name": "Breaking Defense",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://breakingdefense.com/feed/",
+    "notes": "Defense policy",
+    "status": "live"
+  },
+  {
+    "id": 18,
+    "name": "Defense News",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.defensenews.com/arc/outboundfeeds/rss/",
+    "notes": "Global defense industry",
+    "status": "live"
+  },
+  {
+    "id": 19,
+    "name": "Defense One",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.defenseone.com/rss/",
+    "notes": "US defense news",
+    "status": "live"
+  },
+  {
+    "id": 20,
+    "name": "Jane's / Janes",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.janes.com/feeds/news",
+    "notes": "Defense intelligence",
+    "status": "live"
+  },
+  {
+    "id": 21,
+    "name": "Naval News",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.navalnews.com/feed/",
+    "notes": "Naval/maritime defense",
+    "status": "live"
+  },
+  {
+    "id": 22,
+    "name": "The War Zone (The Drive)",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.thedrive.com/the-war-zone/feed",
+    "notes": "Military analysis",
+    "status": "live"
+  },
+  {
+    "id": 23,
+    "name": "WorldPop",
+    "category": "Demographics",
+    "type": "API/Static",
+    "tier": "Reference",
+    "url": "https://www.worldpop.org/",
+    "notes": "Population exposure data for risk assessment",
+    "status": "static"
+  },
+  {
+    "id": 24,
+    "name": "US Government Spending Data",
+    "category": "Economic",
+    "type": "API",
+    "tier": "Government",
+    "url": "https://api.usaspending.gov/",
+    "notes": "Federal spending tracking",
+    "status": "live"
+  },
+  {
+    "id": 25,
+    "name": "FRED (Federal Reserve Economic Data)",
+    "category": "Economic",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://api.stlouisfed.org/fred/",
+    "notes": "US economic indicators (GDP, unemployment, CPI, etc.)",
+    "status": "live"
+  },
+  {
+    "id": 26,
+    "name": "CoinGecko",
+    "category": "Economic/Crypto",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://api.coingecko.com/api/v3/",
+    "notes": "Stablecoin monitoring",
+    "status": "live"
+  },
+  {
+    "id": 27,
+    "name": "mempool.space",
+    "category": "Economic/Crypto",
+    "type": "API",
+    "tier": "Secondary",
+    "url": "https://mempool.space/api/",
+    "notes": "BTC hashrate monitoring",
+    "status": "live"
+  },
+  {
+    "id": 28,
+    "name": "EIA (Energy Information Administration)",
+    "category": "Economic/Energy",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://api.eia.gov/v2/",
+    "notes": "Oil analytics, energy data",
+    "status": "live"
+  },
+  {
+    "id": 29,
+    "name": "Finnhub",
+    "category": "Economic/Markets",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://finnhub.io/api/v1/",
+    "notes": "Financial market data (API key server-side)",
+    "status": "live"
+  },
+  {
+    "id": 30,
+    "name": "Yahoo Finance",
+    "category": "Economic/Markets",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://query1.finance.yahoo.com/v8/finance/",
+    "notes": "Equities, forex, crypto; 92 stock exchanges",
+    "status": "live"
+  },
+  {
+    "id": 31,
+    "name": "OFAC Sanctions Lists",
+    "category": "Economic/Sanctions",
+    "type": "API/Static",
+    "tier": "Government",
+    "url": "https://www.treasury.gov/ofac/downloads/",
+    "notes": "US Treasury sanctions data",
+    "status": "static"
+  },
+  {
+    "id": 32,
+    "name": "alternative.me",
+    "category": "Economic/Sentiment",
+    "type": "API",
+    "tier": "Secondary",
+    "url": "https://api.alternative.me/fng/",
+    "notes": "Fear & Greed Index",
+    "status": "live"
+  },
+  {
+    "id": 33,
+    "name": "Foreign Affairs",
+    "category": "Geopolitics",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.foreignaffairs.com/rss.xml",
+    "notes": "Policy analysis",
+    "status": "live"
+  },
+  {
+    "id": 34,
+    "name": "Foreign Policy",
+    "category": "Geopolitics",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://foreignpolicy.com/feed/",
+    "notes": "International affairs",
+    "status": "live"
+  },
+  {
+    "id": 35,
+    "name": "The Diplomat",
+    "category": "Geopolitics",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://thediplomat.com/feed/",
+    "notes": "Asia-Pacific geopolitics",
+    "status": "live"
+  },
+  {
+    "id": 36,
+    "name": "Australia DFAT Smartraveller",
+    "category": "Government Advisory",
+    "type": "RSS/API",
+    "tier": "Government",
+    "url": "https://www.smartraveller.gov.au/api/rss/countries",
+    "notes": "Australian travel advisories",
+    "status": "live"
+  },
+  {
+    "id": 37,
+    "name": "New Zealand MFAT",
+    "category": "Government Advisory",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://safetravel.govt.nz/feed",
+    "notes": "NZ travel advisories",
+    "status": "live"
+  },
+  {
+    "id": 38,
+    "name": "UK FCDO Travel Advice",
+    "category": "Government Advisory",
+    "type": "Atom",
+    "tier": "Government",
+    "url": "https://www.gov.uk/foreign-travel-advice.atom",
+    "notes": "British travel advisories",
+    "status": "live"
+  },
+  {
+    "id": 39,
+    "name": "US Embassy Alerts (13 countries)",
+    "category": "Government Advisory",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "Various embassy RSS feeds",
+    "notes": "Country-specific alert feeds from US embassies",
+    "status": "unknown"
+  },
+  {
+    "id": 40,
+    "name": "US State Dept Travel Advisories",
+    "category": "Government Advisory",
+    "type": "RSS/API",
+    "tier": "Government",
+    "url": "https://travel.state.gov/content/travel/en/traveladvisories/traveladvisories.rss",
+    "notes": "Do-Not-Travel adds +15 CII points",
+    "status": "live"
+  },
+  {
+    "id": 41,
+    "name": "CDC Travel Notices",
+    "category": "Health",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://tools.cdc.gov/api/v2/resources/media/403702.rss",
+    "notes": "US CDC travel health notices",
+    "status": "live"
+  },
+  {
+    "id": 42,
+    "name": "ECDC (European CDC)",
+    "category": "Health",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://www.ecdc.europa.eu/en/rss.xml",
+    "notes": "European disease monitoring",
+    "status": "live"
+  },
+  {
+    "id": 43,
+    "name": "WHO Africa Emergencies",
+    "category": "Health",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://www.afro.who.int/rss.xml",
+    "notes": "WHO Africa regional emergencies",
+    "status": "live"
+  },
+  {
+    "id": 44,
+    "name": "WHO News",
+    "category": "Health",
+    "type": "RSS",
+    "tier": "Government",
+    "url": "https://www.who.int/rss-feeds/news-english.xml",
+    "notes": "World Health Organization",
+    "status": "live"
+  },
+  {
+    "id": 45,
+    "name": "Cloudflare Radar (Internet Outages)",
+    "category": "Infrastructure",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://radar.cloudflare.com/",
+    "notes": "Real-time internet outage monitoring",
+    "status": "live"
+  },
+  {
+    "id": 46,
+    "name": "Undersea Cables Database",
+    "category": "Infrastructure",
+    "type": "Static/API",
+    "tier": "Reference",
+    "url": "https://www.submarinecablemap.com/",
+    "notes": "Global undersea cable routes",
+    "status": "static"
+  },
+  {
+    "id": 47,
+    "name": "Oil & Gas Pipelines",
+    "category": "Infrastructure/Energy",
+    "type": "Static",
+    "tier": "Reference",
+    "url": "Static dataset",
+    "notes": "Global pipeline routes",
+    "status": "static"
+  },
+  {
+    "id": 48,
+    "name": "Critical Mineral Deposits",
+    "category": "Infrastructure/Resources",
+    "type": "Static",
+    "tier": "Reference",
+    "url": "Static dataset",
+    "notes": "Strategic mineral deposit locations",
+    "status": "static"
+  },
+  {
+    "id": 49,
+    "name": "AI Datacenter Clusters (111)",
+    "category": "Infrastructure/Tech",
+    "type": "Static",
+    "tier": "Reference",
+    "url": "Static dataset",
+    "notes": "111 AI datacenter cluster locations",
+    "status": "static"
+  },
+  {
+    "id": 50,
+    "name": "Al Jazeera Live",
+    "category": "Live Video",
+    "type": "Stream",
+    "tier": "Tier 2",
+    "url": "YouTube Live Stream",
+    "notes": "24/7 news stream",
+    "status": "unknown"
+  },
+  {
+    "id": 51,
+    "name": "Bloomberg Live",
+    "category": "Live Video",
+    "type": "Stream",
+    "tier": "Tier 2",
+    "url": "YouTube Live Stream",
+    "notes": "Financial news stream",
+    "status": "unknown"
+  },
+  {
+    "id": 52,
+    "name": "Sky News Live",
+    "category": "Live Video",
+    "type": "Stream",
+    "tier": "Tier 2",
+    "url": "YouTube Live Stream",
+    "notes": "24/7 news stream",
+    "status": "unknown"
+  },
+  {
+    "id": 53,
+    "name": "Additional YouTube Streams (5+)",
+    "category": "Live Video",
+    "type": "Stream",
+    "tier": "Various",
+    "url": "YouTube Live Streams",
+    "notes": "8 total live YouTube streams embedded",
+    "status": "unknown"
+  },
+  {
+    "id": 54,
+    "name": "Pikud HaOref (Israel Home Front Command)",
+    "category": "Military/Alerts",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://www.oref.org.il/",
+    "notes": "Incoming rocket/missile/drone siren alerts for Israel",
+    "status": "live"
+  },
+  {
+    "id": 55,
+    "name": "OpenSky Network (ADS-B)",
+    "category": "Military/Aviation",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://opensky-network.org/api/",
+    "notes": "Live flight tracking, military aircraft",
+    "status": "live"
+  },
+  {
+    "id": 56,
+    "name": "Wingbits (ADS-B)",
+    "category": "Military/Aviation",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://wingbits.com/",
+    "notes": "ADS-B flight data solution",
+    "status": "live"
+  },
+  {
+    "id": 57,
+    "name": "Military Bases Database (220+)",
+    "category": "Military/Infrastructure",
+    "type": "Static",
+    "tier": "Reference",
+    "url": "Static dataset",
+    "notes": "220+ global military base locations",
+    "status": "static"
+  },
+  {
+    "id": 58,
+    "name": "AIS (Automatic Identification System)",
+    "category": "Military/Maritime",
+    "type": "API/Relay",
+    "tier": "Primary",
+    "url": "AIS data relay",
+    "notes": "Naval vessel monitoring via Railway relay",
+    "status": "unknown"
+  },
+  {
+    "id": 59,
+    "name": "CelesTrak (TLE Satellite Data)",
+    "category": "Military/Space",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://celestrak.org/NORAD/elements/",
+    "notes": "80-120 intelligence-relevant satellites tracked in real time",
+    "status": "live"
+  },
+  {
+    "id": 60,
+    "name": "Spaceport Locations",
+    "category": "Military/Space",
+    "type": "Static",
+    "tier": "Reference",
+    "url": "Static dataset",
+    "notes": "Global spaceport locations",
+    "status": "static"
+  },
+  {
+    "id": 61,
+    "name": "GDACS (Global Disaster Alert & Coordination)",
+    "category": "Natural Disaster",
+    "type": "RSS/API",
+    "tier": "Primary",
+    "url": "https://www.gdacs.org/xml/rss.xml",
+    "notes": "UN disaster alert system",
+    "status": "live"
+  },
+  {
+    "id": 62,
+    "name": "NASA EONET (Earth Observatory Natural Events)",
+    "category": "Natural Disaster",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://eonet.gsfc.nasa.gov/api/v3/events",
+    "notes": "Wildfires, volcanoes, floods, storms (quakes excluded — USGS used instead)",
+    "status": "live"
+  },
+  {
+    "id": 63,
+    "name": "NASA FIRMS (Fire Information for Resource Mgmt)",
+    "category": "Natural Disaster",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://firms.modaps.eosdis.nasa.gov/api/",
+    "notes": "VIIRS satellite fire detection; wildfires filtered to 48h",
+    "status": "live"
+  },
+  {
+    "id": 64,
+    "name": "Severe Weather Data",
+    "category": "Natural Disaster",
+    "type": "API",
+    "tier": "Primary",
+    "url": "Various NWS/meteorological APIs",
+    "notes": "Severe weather alerts and tracking",
+    "status": "unknown"
+  },
+  {
+    "id": 65,
+    "name": "USGS Earthquake API",
+    "category": "Natural Disaster",
+    "type": "API",
+    "tier": "Primary",
+    "url": "https://earthquake.usgs.gov/fdsnws/event/1/query",
+    "notes": "Real-time earthquake data (preferred over EONET for seismic)",
+    "status": "live"
+  },
+  {
+    "id": 66,
+    "name": "IRNA (Islamic Republic News Agency)",
+    "category": "News",
+    "type": "RSS",
+    "tier": "State-Affiliated",
+    "url": "https://en.irna.ir/rss",
+    "notes": "Iranian state media — propaganda-flagged",
+    "status": "live"
+  },
+  {
+    "id": 67,
+    "name": "RT (Russia Today)",
+    "category": "News",
+    "type": "RSS",
+    "tier": "State-Affiliated",
+    "url": "https://www.rt.com/rss/",
+    "notes": "Russian state media — propaganda-flagged",
+    "status": "live"
+  },
+  {
+    "id": 68,
+    "name": "Xinhua News Agency",
+    "category": "News",
+    "type": "RSS",
+    "tier": "State-Affiliated",
+    "url": "http://www.xinhuanet.com/english/rss/worldrss.xml",
+    "notes": "Chinese state media — propaganda-flagged",
+    "status": "live"
+  },
+  {
+    "id": 69,
+    "name": "AFP - Agence France-Presse",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 1 - Wire Service",
+    "url": "https://www.afp.com/en/rss",
+    "notes": "French wire service",
+    "status": "live"
+  },
+  {
+    "id": 70,
+    "name": "Associated Press - Top News",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 1 - Wire Service",
+    "url": "https://rsshub.app/apnews/topics/apf-topnews",
+    "notes": "AP top news wire feed",
+    "status": "live"
+  },
+  {
+    "id": 71,
+    "name": "Reuters - World News",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 1 - Wire Service",
+    "url": "https://www.reutersagency.com/feed/",
+    "notes": "Primary wire service feed",
+    "status": "live"
+  },
+  {
+    "id": 72,
+    "name": "Al Jazeera - News",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://www.aljazeera.com/xml/rss/all.xml",
+    "notes": "Al Jazeera English",
+    "status": "live"
+  },
+  {
+    "id": 73,
+    "name": "BBC News - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "notes": "BBC World news",
+    "status": "live"
+  },
+  {
+    "id": 74,
+    "name": "CNN - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "http://rss.cnn.com/rss/edition_world.rss",
+    "notes": "CNN international edition",
+    "status": "live"
+  },
+  {
+    "id": 75,
+    "name": "DW News",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://rss.dw.com/rdf/rss-en-all",
+    "notes": "Deutsche Welle English",
+    "status": "live"
+  },
+  {
+    "id": 76,
+    "name": "France 24 - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://www.france24.com/en/rss",
+    "notes": "France 24 English",
+    "status": "live"
+  },
+  {
+    "id": 77,
+    "name": "NHK World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",
+    "notes": "Added in v2.3.9",
+    "status": "live"
+  },
+  {
+    "id": 78,
+    "name": "NPR - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://feeds.npr.org/1004/rss.xml",
+    "notes": "NPR world section",
+    "status": "live"
+  },
+  {
+    "id": 79,
+    "name": "New York Times - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    "notes": "NYT world desk",
+    "status": "live"
+  },
+  {
+    "id": 80,
+    "name": "Nikkei Asia",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://asia.nikkei.com/rss",
+    "notes": "Added in v2.3.9",
+    "status": "live"
+  },
+  {
+    "id": 81,
+    "name": "Sky News - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://feeds.skynews.com/feeds/rss/world.xml",
+    "notes": "Sky News world",
+    "status": "live"
+  },
+  {
+    "id": 82,
+    "name": "The Guardian - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://www.theguardian.com/world/rss",
+    "notes": "Guardian world news",
+    "status": "live"
+  },
+  {
+    "id": 83,
+    "name": "Washington Post - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://feeds.washingtonpost.com/rss/world",
+    "notes": "WaPo world section",
+    "status": "live"
+  },
+  {
+    "id": 84,
+    "name": "The Intercept",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://theintercept.com/feed/?rss",
+    "notes": "Investigative journalism",
+    "status": "live"
+  },
+  {
+    "id": 85,
+    "name": "Zero Hedge",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 4 - Aggregator/Blog",
+    "url": "https://feeds.feedburner.com/zerohedge/feed",
+    "notes": "Financial/geopolitical aggregator",
+    "status": "live"
+  },
+  {
+    "id": 86,
+    "name": "Bellingcat",
+    "category": "OSINT",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.bellingcat.com/feed/",
+    "notes": "Open-source investigations",
+    "status": "live"
+  },
+  {
+    "id": 87,
+    "name": "Polymarket",
+    "category": "Prediction Markets",
+    "type": "API",
+    "tier": "Secondary",
+    "url": "https://polymarket.com/",
+    "notes": "Geopolitical prediction markets (Ukraine, Iran, China, Taiwan); 5-min cache",
+    "status": "live"
+  },
+  {
+    "id": 88,
+    "name": "Railway Relay",
+    "category": "Proxy",
+    "type": "Service",
+    "tier": "Infrastructure",
+    "url": "https://railway.app/",
+    "notes": "Stateless Node.js proxy for external APIs/RSS",
+    "status": "live"
+  },
+  {
+    "id": 89,
+    "name": "Greek locale feeds",
+    "category": "Regional News",
+    "type": "RSS",
+    "tier": "Tier 2/3",
+    "url": "Various",
+    "notes": "Added in v2.5.6",
+    "status": "unknown"
+  },
+  {
+    "id": 90,
+    "name": "Nigeria feeds (multiple)",
+    "category": "Regional News",
+    "type": "RSS",
+    "tier": "Tier 2/3",
+    "url": "Various",
+    "notes": "Added in v2.5.6",
+    "status": "unknown"
+  },
+  {
+    "id": 91,
+    "name": "Telegram Relay",
+    "category": "Social/Messaging",
+    "type": "API/Relay",
+    "tier": "Secondary",
+    "url": "Telegram relay endpoint",
+    "notes": "Topic classification: breaking, conflict, alerts, osint, politics, middleeast",
+    "status": "unknown"
+  },
+  {
+    "id": 92,
+    "name": "Bab el-Mandeb Monitoring",
+    "category": "Supply Chain",
+    "type": "Derived",
+    "tier": "Primary",
+    "url": "AIS + satellite data",
+    "notes": "Strategic maritime chokepoint",
+    "status": "unknown"
+  },
+  {
+    "id": 93,
+    "name": "Panama Canal Monitoring",
+    "category": "Supply Chain",
+    "type": "Derived",
+    "tier": "Primary",
+    "url": "AIS + satellite data",
+    "notes": "Strategic maritime chokepoint",
+    "status": "unknown"
+  },
+  {
+    "id": 94,
+    "name": "Strait of Hormuz Monitoring",
+    "category": "Supply Chain",
+    "type": "Derived",
+    "tier": "Primary",
+    "url": "AIS + satellite data",
+    "notes": "Strategic maritime chokepoint",
+    "status": "unknown"
+  },
+  {
+    "id": 95,
+    "name": "Strait of Malacca Monitoring",
+    "category": "Supply Chain",
+    "type": "Derived",
+    "tier": "Primary",
+    "url": "AIS + satellite data",
+    "notes": "Strategic maritime chokepoint",
+    "status": "unknown"
+  },
+  {
+    "id": 96,
+    "name": "Suez Canal Monitoring",
+    "category": "Supply Chain",
+    "type": "Derived",
+    "tier": "Primary",
+    "url": "AIS + satellite data",
+    "notes": "One of 6 strategic maritime chokepoints",
+    "status": "unknown"
+  },
+  {
+    "id": 97,
+    "name": "Taiwan Strait Monitoring",
+    "category": "Supply Chain",
+    "type": "Derived",
+    "tier": "Primary",
+    "url": "AIS + satellite data",
+    "notes": "Strategic maritime chokepoint",
+    "status": "unknown"
+  },
+  {
+    "id": 98,
+    "name": "Brookings",
+    "category": "Think Tank",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.brookings.edu/feed/",
+    "notes": "Brookings Institution",
+    "status": "live"
+  },
+  {
+    "id": 99,
+    "name": "CSIS",
+    "category": "Think Tank",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.csis.org/rss.xml",
+    "notes": "Center for Strategic & Intl Studies",
+    "status": "live"
+  },
+  {
+    "id": 100,
+    "name": "RAND Corporation",
+    "category": "Think Tank",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://www.rand.org/news.xml",
+    "notes": "Policy research",
+    "status": "live"
+  }
+]
