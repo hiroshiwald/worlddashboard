@@ -385,7 +385,7 @@ async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
     const res = await fetch(source.url, {
       signal: controller.signal,
       headers: {
-        "User-Agent": "WorldDashboard/1.0 (RSS Feed Reader)",
+        "User-Agent": "Mozilla/5.0 (compatible; WorldDashboard/1.0; +https://worlddashboard.vercel.app)",
         Accept:
           "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
       },
