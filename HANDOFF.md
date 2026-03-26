@@ -83,10 +83,29 @@ A live intelligence dashboard deployed at **https://worlddashboard.vercel.app/**
 - No export functionality (CSV/PDF of current view)
 - No notification system for critical alerts
 - No historical trend data (entity mentions over time beyond 1H snapshot)
-- No geographic map view
 - INTEL tab person detection is heuristic-only (2-3 capitalized words) — could have false positives
 - Entity dictionary could be expanded
 - Summary column sometimes shows raw HTML fragments from poorly-formatted feeds
+
+### PARKING LOT — Feed Reliability
+
+**Current state**: ~31/65 RSS feeds succeed. The rest are blocked by news sites
+that reject requests from Vercel/AWS IP ranges.
+
+**Deployed fix**: Railway relay server (`relay/` directory) provides a GCP-based
+fallback IP. Feed fetcher tries direct first, falls back to relay.
+
+**Future improvement — Caching Relay (high impact)**:
+Instead of fetching all 65 feeds on every user request, the relay should:
+1. Run a cron job every 15 minutes that fetches each feed and caches the result
+2. Serve cached responses instantly when the dashboard requests them
+3. Build IP reputation over time (same IP, regular interval = trusted crawler)
+4. Implement `If-Modified-Since` / `ETag` headers to reduce bandwidth
+5. Eventually register as a known feed reader (like Feedly/Feedbin do)
+
+This converts the relay from a pass-through proxy into a proper feed aggregation
+cache — the same architecture Feedly, Feedbin, and NewsAPI use. Expected result:
+60+/65 feeds working reliably with sub-second response times.
 
 ---
 
