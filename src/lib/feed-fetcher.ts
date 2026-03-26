@@ -377,94 +377,25 @@ function parseFeedXml(xml: string, source: SourceMeta): FeedItem[] {
   return parseRssItems(xml, source);
 }
 
-// ─── Fetch Strategy: Direct + Proxy Relay ───
-// Adapted from koala73/worldmonitor's approach:
-// 1. Full browser UA to pass WAF rules
-// 2. Known-blocked domains go straight to proxy (skip wasted timeout)
-// 3. Other domains race direct vs proxy — first success wins
-
-const DIRECT_HEADERS: Record<string, string> = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept:
-    "application/rss+xml, application/xml, text/xml, */*",
-  "Accept-Language": "en-US,en;q=0.9",
-};
-
-// Domains known to block Vercel/AWS IPs — skip direct fetch, go straight to proxy
-const RELAY_ONLY_DOMAINS = new Set([
-  "rss.cnn.com",
-  "www.defensenews.com",
-  "www.cisa.gov",
-  "www.iaea.org",
-  "www.who.int",
-  "www.crisisgroup.org",
-  "www.timesofisrael.com",
-  "www.scmp.com",
-  "kyivindependent.com",
-  "www.themoscowtimes.com",
-  "www.atlanticcouncil.org",
-  "feeds.bbci.co.uk",
-  "rss.nytimes.com",
-  "feeds.washingtonpost.com",
-  "feeds.npr.org",
-  "www.aljazeera.com",
-  "www.foreignaffairs.com",
-  "foreignpolicy.com",
-  "thediplomat.com",
-  "www.defenseone.com",
-  "www.janes.com",
-  "www.afp.com",
-  "www.reutersagency.com",
-  "rsshub.app",
-]);
-
-const PROXY_BASE = "https://api.allorigins.win/raw?url=";
-
-function fetchDirect(
-  url: string,
-  signal: AbortSignal
-): Promise<string> {
-  return fetch(url, { signal, headers: DIRECT_HEADERS }).then((res) => {
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.text();
-  });
-}
-
-function fetchViaProxy(
-  url: string,
-  signal: AbortSignal
-): Promise<string> {
-  return fetch(`${PROXY_BASE}${encodeURIComponent(url)}`, { signal }).then(
-    (res) => {
-      if (!res.ok) throw new Error(`Proxy ${res.status}`);
-      return res.text();
-    }
-  );
-}
-
 async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
 
   try {
-    const hostname = new URL(source.url).hostname;
-    let xml: string | null = null;
+    const res = await fetch(source.url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept:
+          "application/rss+xml, application/xml, text/xml, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
 
-    if (RELAY_ONLY_DOMAINS.has(hostname)) {
-      // Known-blocked: skip direct, go straight to proxy
-      xml = await fetchViaProxy(source.url, controller.signal).catch(
-        () => null
-      );
-    } else {
-      // Race direct vs proxy — first valid response wins
-      xml = await Promise.any([
-        fetchDirect(source.url, controller.signal),
-        fetchViaProxy(source.url, controller.signal),
-      ]).catch(() => null);
-    }
-
-    return xml ? parseFeedXml(xml, source) : [];
+    if (!res.ok) return [];
+    const text = await res.text();
+    return parseFeedXml(text, source);
   } catch {
     return [];
   } finally {
