@@ -390,7 +390,11 @@ const FETCH_HEADERS: Record<string, string> = {
 };
 
 function getRelayUrl(): string {
-  return process.env.RELAY_URL || "";
+  const raw = process.env.RELAY_URL || "";
+  if (!raw) return "";
+  // Ensure protocol prefix — Railway internal URLs and bare hostnames need https://
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  return `https://${raw}`;
 }
 function getRelaySecret(): string {
   return process.env.RELAY_SECRET || "";
@@ -461,10 +465,10 @@ async function fetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> {
     }
   }
 
-  // Phase 3: altUrl fallback (RSSHub mirror) — 3s timeout.
+  // Phase 3: altUrl fallback (RSSHub mirror) — 5s timeout.
   if (source.altUrl) {
     const ac = new AbortController();
-    const at = setTimeout(() => ac.abort(), 3000);
+    const at = setTimeout(() => ac.abort(), 5000);
     try {
       const res = await fetch(source.altUrl, {
         signal: ac.signal,

@@ -696,7 +696,8 @@
     "category": "News",
     "type": "RSS",
     "tier": "Tier 1 - Wire Service",
-    "url": "https://rsshub.app/apnews/topics/apf-topnews",
+    "url": "https://feedx.net/rss/ap.xml",
+    "altUrl": "https://rsshub.app/apnews/topics/apf-topnews",
     "notes": "AP top news wire feed",
     "status": "live"
   },
@@ -740,6 +741,7 @@
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
     "url": "https://rss.cnn.com/rss/edition_world.rss",
+    "altUrl": "https://rsshub.app/cnn/world",
     "notes": "CNN international edition",
     "status": "live"
   },
@@ -985,6 +987,7 @@
     "type": "RSS",
     "tier": "Tier 3 - Specialized",
     "url": "https://www.brookings.edu/feed/",
+    "altUrl": "https://rsshub.app/brookings/research",
     "notes": "Brookings Institution",
     "status": "live"
   },
@@ -1085,6 +1088,7 @@
     "type": "RSS",
     "tier": "Primary",
     "url": "https://reliefweb.int/updates/rss.xml",
+    "altUrl": "https://rsshub.app/reliefweb/updates",
     "notes": "UN OCHA humanitarian updates and disaster reports",
     "status": "live"
   },
