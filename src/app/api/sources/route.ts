@@ -15,13 +15,14 @@ export async function GET() {
     type: s.type,
   }));
 
-  const { items, feedsAttempted, feedsSucceeded } =
+  const { items, feedsAttempted, feedsSucceeded, relayConfigured } =
     await fetchAllFeeds(sources);
 
   return NextResponse.json({
     items,
     feedsAttempted,
     feedsSucceeded,
+    relayConfigured,
     fetchedAt: new Date().toISOString(),
     count: items.length,
   });
