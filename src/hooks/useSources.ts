@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { FeedItem } from "@/lib/types";
+import { FeedItem, FeedDiagnostic } from "@/lib/types";
 
 interface UseFeedReturn {
   items: FeedItem[];
@@ -11,6 +11,7 @@ interface UseFeedReturn {
   feedsAttempted: number;
   feedsSucceeded: number;
   totalItems: number;
+  feedDiagnostics: FeedDiagnostic[];
   refresh: () => void;
 }
 
@@ -22,6 +23,7 @@ export function useFeed(): UseFeedReturn {
   const [feedsAttempted, setFeedsAttempted] = useState(0);
   const [feedsSucceeded, setFeedsSucceeded] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
+  const [feedDiagnostics, setFeedDiagnostics] = useState<FeedDiagnostic[]>([]);
 
   const fetchFeed = useCallback(async () => {
     setLoading(true);
@@ -35,6 +37,7 @@ export function useFeed(): UseFeedReturn {
       setFeedsAttempted(data.feedsAttempted);
       setFeedsSucceeded(data.feedsSucceeded);
       setTotalItems(data.count);
+      setFeedDiagnostics(data.feedDiagnostics || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch feed");
     } finally {
@@ -54,6 +57,7 @@ export function useFeed(): UseFeedReturn {
     feedsAttempted,
     feedsSucceeded,
     totalItems,
+    feedDiagnostics,
     refresh: fetchFeed,
   };
 }

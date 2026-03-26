@@ -16,6 +16,15 @@ export interface SourceMeta {
   tier: string;
   url: string;
   type: string;
+  altUrl?: string;
+}
+
+export interface FeedDiagnostic {
+  sourceName: string;
+  sourceUrl: string;
+  phase: "direct" | "relay" | "altUrl" | "failed";
+  durationMs: number;
+  error?: string;
 }
 
 export type SortDirection = "asc" | "desc";

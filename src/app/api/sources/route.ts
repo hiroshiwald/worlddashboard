@@ -13,9 +13,10 @@ export async function GET() {
     tier: s.tier,
     url: s.url,
     type: s.type,
+    altUrl: (s as Record<string, unknown>).altUrl as string | undefined,
   }));
 
-  const { items, feedsAttempted, feedsSucceeded, relayConfigured } =
+  const { items, feedsAttempted, feedsSucceeded, relayConfigured, feedDiagnostics } =
     await fetchAllFeeds(sources);
 
   return NextResponse.json({
@@ -23,6 +24,7 @@ export async function GET() {
     feedsAttempted,
     feedsSucceeded,
     relayConfigured,
+    feedDiagnostics,
     fetchedAt: new Date().toISOString(),
     count: items.length,
   });
