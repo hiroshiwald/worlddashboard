@@ -1,4 +1,4 @@
-import { FeedItem, SourceMeta } from "./types";
+import { FeedItem, SourceMeta, FeedDiagnostic } from "./types";
 
 // --- Ad / spam filter ---
 const AD_TITLE_PATTERNS = [
@@ -377,10 +377,7 @@ function parseFeedXml(xml: string, source: SourceMeta): FeedItem[] {
   return parseRssItems(xml, source);
 }
 
-// ─── Fetch with relay fallback ───
-// Direct fetch first (works for ~32 feeds on Vercel).
-// If direct fails and RELAY_URL is set, retry via the Railway relay
-// (different IP range — GCP vs AWS — bypasses IP-based blocking).
+// ─── Fetch with relay + altUrl fallback ───
 
 const FETCH_HEADERS: Record<string, string> = {
   "User-Agent":
@@ -396,7 +393,19 @@ function getRelaySecret(): string {
   return process.env.RELAY_SECRET || "";
 }
 
-async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
+function isXmlLike(text: string): boolean {
+  return text.includes("<rss") || text.includes("<feed") || text.includes("<channel");
+}
+
+interface FetchResult {
+  items: FeedItem[];
+  diagnostic: FeedDiagnostic;
+}
+
+async function fetchSingleFeed(source: SourceMeta): Promise<FetchResult> {
+  const start = Date.now();
+  let lastError = "";
+
   // Phase 1: Direct fetch — 5s timeout.
   const dc = new AbortController();
   const dt = setTimeout(() => dc.abort(), 5000);
@@ -408,38 +417,122 @@ async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
     if (res.ok) {
       const text = await res.text();
       const items = parseFeedXml(text, source);
-      if (items.length > 0) return items;
+      if (items.length > 0) {
+        return {
+          items,
+          diagnostic: {
+            name: source.name,
+            url: source.url,
+            status: "ok",
+            method: "direct",
+            itemCount: items.length,
+            durationMs: Date.now() - start,
+          },
+        };
+      }
+      lastError = "parse-empty";
+    } else {
+      lastError = `http-${res.status}`;
     }
-  } catch {
-    // Direct failed — fall through to relay
+  } catch (e) {
+    lastError = e instanceof DOMException ? "timeout" : "network";
   } finally {
     clearTimeout(dt);
   }
 
   // Phase 2: Relay fallback — own 10s timeout.
   const relayUrl = getRelayUrl();
-  if (!relayUrl) return [];
-  const relaySecret = getRelaySecret();
-  const rc = new AbortController();
-  const rt = setTimeout(() => rc.abort(), 10000);
-  try {
-    const headers: Record<string, string> = {};
-    if (relaySecret) headers["x-relay-key"] = relaySecret;
-    const res = await fetch(
-      `${relayUrl}/rss?url=${encodeURIComponent(source.url)}`,
-      { signal: rc.signal, headers }
-    );
-    if (!res.ok) return [];
-    const text = await res.text();
-    if (text.includes("<rss") || text.includes("<feed") || text.includes("<channel")) {
-      return parseFeedXml(text, source);
+  if (relayUrl) {
+    const relaySecret = getRelaySecret();
+    const rc = new AbortController();
+    const rt = setTimeout(() => rc.abort(), 10000);
+    try {
+      const headers: Record<string, string> = {};
+      if (relaySecret) headers["x-relay-key"] = relaySecret;
+      const res = await fetch(
+        `${relayUrl}/rss?url=${encodeURIComponent(source.url)}`,
+        { signal: rc.signal, headers }
+      );
+      if (res.ok) {
+        const text = await res.text();
+        if (isXmlLike(text)) {
+          const items = parseFeedXml(text, source);
+          if (items.length > 0) {
+            return {
+              items,
+              diagnostic: {
+                name: source.name,
+                url: source.url,
+                status: "direct-fail-relay-ok",
+                method: "relay",
+                itemCount: items.length,
+                durationMs: Date.now() - start,
+              },
+            };
+          }
+        }
+        lastError = "relay-parse-empty";
+      } else {
+        lastError = `relay-http-${res.status}`;
+      }
+    } catch (e) {
+      lastError = e instanceof DOMException ? "relay-timeout" : "relay-network";
+    } finally {
+      clearTimeout(rt);
     }
-    return [];
-  } catch {
-    return [];
-  } finally {
-    clearTimeout(rt);
   }
+
+  // Phase 3: RSSHub / altUrl fallback — 3s timeout.
+  if (source.altUrl) {
+    const ac = new AbortController();
+    const at = setTimeout(() => ac.abort(), 3000);
+    try {
+      const res = await fetch(source.altUrl, {
+        signal: ac.signal,
+        headers: FETCH_HEADERS,
+      });
+      if (res.ok) {
+        const text = await res.text();
+        if (isXmlLike(text)) {
+          const items = parseFeedXml(text, source);
+          if (items.length > 0) {
+            return {
+              items,
+              diagnostic: {
+                name: source.name,
+                url: source.url,
+                status: "alt-ok",
+                method: "alt",
+                itemCount: items.length,
+                durationMs: Date.now() - start,
+              },
+            };
+          }
+        }
+        lastError = "alt-parse-empty";
+      } else {
+        lastError = `alt-http-${res.status}`;
+      }
+    } catch (e) {
+      lastError = e instanceof DOMException ? "alt-timeout" : "alt-network";
+    } finally {
+      clearTimeout(at);
+    }
+  }
+
+  // All phases failed
+  return {
+    items: [],
+    diagnostic: {
+      name: source.name,
+      url: source.url,
+      status: "all-fail",
+      method: "direct",
+      error: lastError,
+      itemCount: 0,
+      durationMs: Date.now() - start,
+    },
+  };
 }
 
 export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
@@ -447,6 +540,7 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
   feedsAttempted: number;
   feedsSucceeded: number;
   relayConfigured: boolean;
+  feedDiagnostics: FeedDiagnostic[];
 }> {
   const rssFeeds = sources.filter(
     (s) =>
@@ -459,12 +553,16 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
   );
 
   const allItems: FeedItem[] = [];
+  const diagnostics: FeedDiagnostic[] = [];
   let succeeded = 0;
 
   for (const result of results) {
-    if (result.status === "fulfilled" && result.value.length > 0) {
-      succeeded++;
-      allItems.push(...result.value);
+    if (result.status === "fulfilled") {
+      diagnostics.push(result.value.diagnostic);
+      if (result.value.items.length > 0) {
+        succeeded++;
+        allItems.push(...result.value.items);
+      }
     }
   }
 
@@ -479,5 +577,6 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
     feedsAttempted: rssFeeds.length,
     feedsSucceeded: succeeded,
     relayConfigured: !!getRelayUrl(),
+    feedDiagnostics: diagnostics,
   };
 }

@@ -186,6 +186,7 @@
     "type": "RSS",
     "tier": "Tier 3 - Specialized",
     "url": "https://www.defenseone.com/rss/",
+    "altUrl": "https://rsshub.app/defenseone",
     "notes": "US defense news",
     "status": "live"
   },
@@ -326,6 +327,7 @@
     "type": "RSS",
     "tier": "Tier 3 - Specialized",
     "url": "https://www.foreignaffairs.com/rss.xml",
+    "altUrl": "https://rsshub.app/foreignaffairs",
     "notes": "Policy analysis",
     "status": "live"
   },
@@ -336,6 +338,7 @@
     "type": "RSS",
     "tier": "Tier 3 - Specialized",
     "url": "https://foreignpolicy.com/feed/",
+    "altUrl": "https://rsshub.app/foreignpolicy",
     "notes": "International affairs",
     "status": "live"
   },
@@ -675,7 +678,7 @@
     "category": "News",
     "type": "RSS",
     "tier": "State-Affiliated",
-    "url": "http://www.xinhuanet.com/english/rss/worldrss.xml",
+    "url": "https://www.xinhuanet.com/english/rss/worldrss.xml",
     "notes": "Chinese state media — propaganda-flagged",
     "status": "live"
   },
@@ -706,6 +709,7 @@
     "type": "RSS",
     "tier": "Tier 1 - Wire Service",
     "url": "https://www.reutersagency.com/feed/",
+    "altUrl": "https://rsshub.app/reuters/world",
     "notes": "Primary wire service feed",
     "status": "live"
   },
@@ -756,6 +760,7 @@
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
     "url": "https://www.france24.com/en/rss",
+    "altUrl": "https://rsshub.app/france24/en",
     "notes": "France 24 English",
     "status": "live"
   },
@@ -786,6 +791,7 @@
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
     "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    "altUrl": "https://rsshub.app/nytimes/world",
     "notes": "NYT world desk",
     "status": "live"
   },
@@ -796,6 +802,7 @@
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
     "url": "https://asia.nikkei.com/rss",
+    "altUrl": "https://rsshub.app/nikkei/asia",
     "notes": "Added in v2.3.9",
     "status": "live"
   },
@@ -806,6 +813,7 @@
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
     "url": "https://feeds.skynews.com/feeds/rss/world.xml",
+    "altUrl": "https://rsshub.app/skynews/world",
     "notes": "Sky News world",
     "status": "live"
   },
@@ -816,6 +824,7 @@
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
     "url": "https://www.theguardian.com/world/rss",
+    "altUrl": "https://rsshub.app/guardian/world",
     "notes": "Guardian world news",
     "status": "live"
   },
@@ -826,6 +835,7 @@
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
     "url": "https://feeds.washingtonpost.com/rss/world",
+    "altUrl": "https://rsshub.app/washingtonpost/world",
     "notes": "WaPo world section",
     "status": "live"
   },
@@ -836,6 +846,7 @@
     "type": "RSS",
     "tier": "Tier 3 - Specialized",
     "url": "https://theintercept.com/feed/?rss",
+    "altUrl": "https://rsshub.app/theintercept",
     "notes": "Investigative journalism",
     "status": "live"
   },
@@ -846,6 +857,7 @@
     "type": "RSS",
     "tier": "Tier 4 - Aggregator/Blog",
     "url": "https://feeds.feedburner.com/zerohedge/feed",
+    "altUrl": "https://rsshub.app/zerohedge",
     "notes": "Financial/geopolitical aggregator",
     "status": "live"
   },
@@ -1013,7 +1025,7 @@
     "id": 102,
     "name": "CISA Known Exploited Vulnerabilities",
     "category": "Cyber Threats",
-    "type": "RSS",
+    "type": "JSON",
     "tier": "Government",
     "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
     "notes": "KEV catalog — actively exploited vulnerabilities",
@@ -1143,7 +1155,7 @@
     "id": 115,
     "name": "EU Sanctions List (European Commission)",
     "category": "Sanctions",
-    "type": "RSS/API",
+    "type": "Web",
     "tier": "Government",
     "url": "https://data.europa.eu/data/datasets/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions?locale=en",
     "notes": "European Union consolidated sanctions list",
@@ -1213,7 +1225,7 @@
     "id": 122,
     "name": "NOAA Solar Weather",
     "category": "Space Weather",
-    "type": "RSS",
+    "type": "JSON",
     "tier": "Government",
     "url": "https://services.swpc.noaa.gov/products/alerts.json",
     "notes": "Solar flare, geomagnetic storm, and radiation alerts",
@@ -1276,6 +1288,7 @@
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
     "url": "https://www.scmp.com/rss/91/feed",
+    "altUrl": "https://rsshub.app/scmp",
     "notes": "Hong Kong/China — key for Asia-Pacific",
     "status": "live"
   },
