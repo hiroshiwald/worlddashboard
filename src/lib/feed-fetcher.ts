@@ -393,51 +393,48 @@ const RELAY_URL = process.env.RELAY_URL || "";
 const RELAY_SECRET = process.env.RELAY_SECRET || "";
 
 async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12000);
-
+  // Phase 1: Direct fetch — 5s timeout.
+  // Responsive feeds reply in <2s. Blocked feeds hang forever.
+  const dc = new AbortController();
+  const dt = setTimeout(() => dc.abort(), 5000);
   try {
-    // 1. Try direct fetch
-    let directOk = false;
-    try {
-      const res = await fetch(source.url, {
-        signal: controller.signal,
-        headers: FETCH_HEADERS,
-      });
-      if (res.ok) {
-        const text = await res.text();
-        const items = parseFeedXml(text, source);
-        if (items.length > 0) return items;
-      }
-      directOk = true; // Got a response (even if empty/non-ok)
-    } catch {
-      // Direct failed (timeout, network error) — fall through to relay
+    const res = await fetch(source.url, {
+      signal: dc.signal,
+      headers: FETCH_HEADERS,
+    });
+    if (res.ok) {
+      const text = await res.text();
+      const items = parseFeedXml(text, source);
+      if (items.length > 0) return items;
     }
+  } catch {
+    // Direct failed — fall through to relay
+  } finally {
+    clearTimeout(dt);
+  }
 
-    // 2. Fallback: fetch via relay (if configured)
-    if (RELAY_URL && !controller.signal.aborted) {
-      const relayHeaders: Record<string, string> = {};
-      if (RELAY_SECRET) relayHeaders["x-relay-key"] = RELAY_SECRET;
-
-      const relayRes = await fetch(
-        `${RELAY_URL}/rss?url=${encodeURIComponent(source.url)}`,
-        { signal: controller.signal, headers: relayHeaders }
-      );
-
-      if (relayRes.ok) {
-        const text = await relayRes.text();
-        // Validate it's actually XML, not an error page
-        if (text.includes("<rss") || text.includes("<feed") || text.includes("<channel")) {
-          return parseFeedXml(text, source);
-        }
-      }
+  // Phase 2: Relay fallback — own 10s timeout.
+  // Railway runs on GCP; different IP range bypasses AWS blocks.
+  if (!RELAY_URL) return [];
+  const rc = new AbortController();
+  const rt = setTimeout(() => rc.abort(), 10000);
+  try {
+    const headers: Record<string, string> = {};
+    if (RELAY_SECRET) headers["x-relay-key"] = RELAY_SECRET;
+    const res = await fetch(
+      `${RELAY_URL}/rss?url=${encodeURIComponent(source.url)}`,
+      { signal: rc.signal, headers }
+    );
+    if (!res.ok) return [];
+    const text = await res.text();
+    if (text.includes("<rss") || text.includes("<feed") || text.includes("<channel")) {
+      return parseFeedXml(text, source);
     }
-
     return [];
   } catch {
     return [];
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(rt);
   }
 }
 
