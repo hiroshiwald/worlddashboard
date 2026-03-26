@@ -389,12 +389,15 @@ const FETCH_HEADERS: Record<string, string> = {
   "Accept-Language": "en-US,en;q=0.9",
 };
 
-const RELAY_URL = process.env.RELAY_URL || "";
-const RELAY_SECRET = process.env.RELAY_SECRET || "";
+function getRelayUrl(): string {
+  return process.env.RELAY_URL || "";
+}
+function getRelaySecret(): string {
+  return process.env.RELAY_SECRET || "";
+}
 
 async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
   // Phase 1: Direct fetch — 5s timeout.
-  // Responsive feeds reply in <2s. Blocked feeds hang forever.
   const dc = new AbortController();
   const dt = setTimeout(() => dc.abort(), 5000);
   try {
@@ -414,15 +417,16 @@ async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
   }
 
   // Phase 2: Relay fallback — own 10s timeout.
-  // Railway runs on GCP; different IP range bypasses AWS blocks.
-  if (!RELAY_URL) return [];
+  const relayUrl = getRelayUrl();
+  if (!relayUrl) return [];
+  const relaySecret = getRelaySecret();
   const rc = new AbortController();
   const rt = setTimeout(() => rc.abort(), 10000);
   try {
     const headers: Record<string, string> = {};
-    if (RELAY_SECRET) headers["x-relay-key"] = RELAY_SECRET;
+    if (relaySecret) headers["x-relay-key"] = relaySecret;
     const res = await fetch(
-      `${RELAY_URL}/rss?url=${encodeURIComponent(source.url)}`,
+      `${relayUrl}/rss?url=${encodeURIComponent(source.url)}`,
       { signal: rc.signal, headers }
     );
     if (!res.ok) return [];
@@ -442,6 +446,7 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
   items: FeedItem[];
   feedsAttempted: number;
   feedsSucceeded: number;
+  relayConfigured: boolean;
 }> {
   const rssFeeds = sources.filter(
     (s) =>
@@ -473,5 +478,6 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
     items: allItems,
     feedsAttempted: rssFeeds.length,
     feedsSucceeded: succeeded,
+    relayConfigured: !!getRelayUrl(),
   };
 }

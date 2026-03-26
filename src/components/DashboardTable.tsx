@@ -213,7 +213,7 @@ export default function DashboardTable() {
               WORLD DASHBOARD
             </h1>
             {feedsSucceeded > 0 && (
-              <span className={`hidden sm:flex items-center gap-1.5 text-xs ${t.feedBadge}`}>
+              <span className={`flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs ${t.feedBadge}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${dark ? "bg-emerald-400" : "bg-emerald-500"} animate-pulse`} />
                 {feedsSucceeded}/{feedsAttempted}
               </span>
