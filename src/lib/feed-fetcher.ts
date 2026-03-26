@@ -377,25 +377,63 @@ function parseFeedXml(xml: string, source: SourceMeta): FeedItem[] {
   return parseRssItems(xml, source);
 }
 
+// ─── Fetch with relay fallback ───
+// Direct fetch first (works for ~32 feeds on Vercel).
+// If direct fails and RELAY_URL is set, retry via the Railway relay
+// (different IP range — GCP vs AWS — bypasses IP-based blocking).
+
+const FETCH_HEADERS: Record<string, string> = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "application/rss+xml, application/xml, text/xml, */*",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+
+const RELAY_URL = process.env.RELAY_URL || "";
+const RELAY_SECRET = process.env.RELAY_SECRET || "";
+
 async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
 
   try {
-    const res = await fetch(source.url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept:
-          "application/rss+xml, application/xml, text/xml, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-    });
+    // 1. Try direct fetch
+    let directOk = false;
+    try {
+      const res = await fetch(source.url, {
+        signal: controller.signal,
+        headers: FETCH_HEADERS,
+      });
+      if (res.ok) {
+        const text = await res.text();
+        const items = parseFeedXml(text, source);
+        if (items.length > 0) return items;
+      }
+      directOk = true; // Got a response (even if empty/non-ok)
+    } catch {
+      // Direct failed (timeout, network error) — fall through to relay
+    }
 
-    if (!res.ok) return [];
-    const text = await res.text();
-    return parseFeedXml(text, source);
+    // 2. Fallback: fetch via relay (if configured)
+    if (RELAY_URL && !controller.signal.aborted) {
+      const relayHeaders: Record<string, string> = {};
+      if (RELAY_SECRET) relayHeaders["x-relay-key"] = RELAY_SECRET;
+
+      const relayRes = await fetch(
+        `${RELAY_URL}/rss?url=${encodeURIComponent(source.url)}`,
+        { signal: controller.signal, headers: relayHeaders }
+      );
+
+      if (relayRes.ok) {
+        const text = await relayRes.text();
+        // Validate it's actually XML, not an error page
+        if (text.includes("<rss") || text.includes("<feed") || text.includes("<channel")) {
+          return parseFeedXml(text, source);
+        }
+      }
+    }
+
+    return [];
   } catch {
     return [];
   } finally {
