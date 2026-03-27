@@ -165,7 +165,7 @@ export const ORG_DICT: DictEntry[] = [
   { name: "Arab League", aliases: [], type: "organization" },
   { name: "OSCE", aliases: ["Organization for Security"], type: "organization" },
   { name: "Wagner Group", aliases: ["Wagner", "PMC Wagner"], type: "organization" },
-  { name: "ISIS", aliases: ["Islamic State", "ISIL", "Daesh", "IS"], type: "organization" },
+  { name: "ISIS", aliases: ["Islamic State", "ISIL", "Daesh"], type: "organization" },
   { name: "Al-Qaeda", aliases: ["al Qaeda", "Al Qaeda"], type: "organization" },
   { name: "Mossad", aliases: [], type: "organization" },
   { name: "MI6", aliases: ["SIS", "Secret Intelligence Service"], type: "organization" },

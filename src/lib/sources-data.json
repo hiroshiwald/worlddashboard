@@ -1678,5 +1678,155 @@
     "url": "https://news.google.com/rss/search?q=site:coindesk.com&hl=en-US&gl=US&ceid=US:en",
     "notes": "Crypto news - via Google News RSS",
     "status": "live"
+  },
+  {
+    "id": 168,
+    "name": "ProPublica",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:propublica.org&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US investigative journalism - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 169,
+    "name": "Der Spiegel English",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:spiegel.de+international&hl=en-US&gl=US&ceid=US:en",
+    "notes": "German magazine (English) - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 170,
+    "name": "Hurriyet Daily News",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:hurriyetdailynews.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Turkish English press - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 171,
+    "name": "Asharq Al-Awsat",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:aawsat.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Pan-Arab press (English) - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 172,
+    "name": "VnExpress International",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:e.vnexpress.net&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Vietnam English press - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 173,
+    "name": "Dark Reading",
+    "category": "Cyber",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:darkreading.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Enterprise cybersecurity - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 174,
+    "name": "Schneier on Security",
+    "category": "Cyber",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:schneier.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Security analysis/commentary - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 175,
+    "name": "gCaptain",
+    "category": "Trade/Maritime",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:gcaptain.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Maritime security/shipping - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 176,
+    "name": "OilPrice.com",
+    "category": "Economic/Energy",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:oilprice.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Energy/oil markets - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 177,
+    "name": "Kitco News",
+    "category": "Economic/Energy",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:kitco.com+news&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Gold/precious metals - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 178,
+    "name": "CoinTelegraph",
+    "category": "Crypto",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:cointelegraph.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Crypto/blockchain news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 179,
+    "name": "Seeking Alpha",
+    "category": "Economic/Markets",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:seekingalpha.com+markets&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Financial markets analysis - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 180,
+    "name": "Oryx OSINT",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:oryxspioenkop.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Equipment loss/OSINT tracking - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 181,
+    "name": "Rudaw",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:rudaw.net+english&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Kurdish/Iraq news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 182,
+    "name": "Novaya Gazeta Europe",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:novayagazeta.eu&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Russian independent media (exiled) - via Google News RSS",
+    "status": "live"
   }
 ]
