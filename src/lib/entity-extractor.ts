@@ -85,13 +85,46 @@ function matchDictionary(text: string): Set<string> {
   return found;
 }
 
+// Words that when present in a candidate phrase, disqualify it as a person name
+const NON_PERSON_WORDS = new Set([
+  // Media/source words
+  "post", "times", "news", "zone", "journal", "monitor", "tribune",
+  "herald", "gazette", "observer", "telegraph", "intercept", "briefing",
+  "digest", "report", "review", "service", "english",
+  // Organizations/institutions
+  "force", "forces", "security", "organization", "organisation", "programme",
+  "program", "affairs", "council", "committee", "ministry", "bureau",
+  "agency", "command", "corps", "division", "department", "commission",
+  "authority", "institute", "association", "foundation", "federation",
+  // Places/things
+  "airport", "material", "materials", "plants", "plant", "nuclear",
+  "vulnerability", "vulnerabilities", "exploited", "fleet", "awards",
+  "network", "operating", "innovation", "revolution", "operations",
+  // Common non-person headline words
+  "war", "article", "full", "read", "says", "adds", "known", "linked",
+  "uses", "stealthy", "morning", "afternoon", "evening", "update",
+  "special", "general", "fury", "hawk", "leaving",
+  // Title/role words that create fragments
+  "international", "humanitarian", "population", "world",
+]);
+
+// Title prefixes to strip for deduplication
+const TITLE_PREFIXES = [
+  "president", "vice president", "director", "secretary", "minister",
+  "prime minister", "senator", "governor", "ambassador", "chairman",
+  "general", "admiral", "colonel", "major", "captain", "commander",
+  "chief", "state", "deputy", "former",
+];
+
 /**
  * Extract likely person names: sequences of 2-3 capitalized words.
  * Excludes anything already matched by dictionaries or in the stopword list.
+ * Uses multiple heuristics to filter false positives.
  */
 function matchPersonNames(
   text: string,
-  knownEntities: Set<string>
+  knownEntities: Set<string>,
+  sourceNames: Set<string>
 ): Set<string> {
   const found = new Set<string>();
   // Match 2-3 consecutive capitalized words (first letter uppercase, rest lowercase)
@@ -100,12 +133,13 @@ function matchPersonNames(
 
   while ((match = regex.exec(text)) !== null) {
     const candidate = match[1];
+    const candidateLower = candidate.toLowerCase();
 
     // Skip if it's a known dictionary entity or alias
     if (knownEntities.has(candidate)) continue;
 
     // Skip if it's in stopwords
-    if (STOP_LOWER.has(candidate.toLowerCase())) continue;
+    if (STOP_LOWER.has(candidateLower)) continue;
 
     // Skip single common words that got paired with something
     const words = candidate.split(/\s+/);
@@ -114,10 +148,58 @@ function matchPersonNames(
     // Basic quality filter: each word should be 2+ chars
     if (words.some((w) => w.length < 2)) continue;
 
+    // Skip if any word is a non-person indicator word
+    const lowerWords = words.map((w) => w.toLowerCase());
+    if (lowerWords.some((w) => NON_PERSON_WORDS.has(w))) continue;
+
+    // Skip if the candidate matches a source name (e.g. "Bangkok Post", "The Hill")
+    if (sourceNames.has(candidateLower)) continue;
+
+    // Skip if candidate contains a known dictionary entity name
+    // (catches "Iran War", "China On", "Trump Iran", etc.)
+    let containsKnownEntity = false;
+    for (const entity of knownEntities) {
+      if (candidateLower.includes(entity.toLowerCase()) && candidate !== entity) {
+        containsKnownEntity = true;
+        break;
+      }
+    }
+    if (containsKnownEntity) continue;
+
+    // Skip if candidate is only 2 words and one is a very common word
+    // (catches "Why Pakistan", "India On", etc.)
+    const FILLER_WORDS = new Set([
+      "the", "on", "in", "at", "of", "for", "and", "or", "but", "why",
+      "how", "who", "what", "when", "where", "its", "his", "her", "our",
+      "their", "this", "that", "one", "two", "most", "some", "all", "any",
+      "new", "old", "big", "very", "just", "also", "than", "each",
+    ]);
+    if (lowerWords.some((w) => FILLER_WORDS.has(w))) continue;
+
     found.add(candidate);
   }
 
-  return found;
+  // Deduplicate title-prefixed variants: "President Donald Trump" → keep "Donald Trump"
+  const deduped = new Set<string>();
+  for (const name of found) {
+    let stripped = name;
+    const nameLower = name.toLowerCase();
+    for (const prefix of TITLE_PREFIXES) {
+      if (nameLower.startsWith(prefix + " ")) {
+        stripped = name.slice(prefix.length + 1);
+        break;
+      }
+    }
+    // Only keep the stripped version if it's at least 2 words
+    const strippedWords = stripped.split(/\s+/);
+    if (strippedWords.length >= 2 && strippedWords.every((w) => w.length >= 2)) {
+      deduped.add(stripped);
+    } else {
+      deduped.add(name);
+    }
+  }
+
+  return deduped;
 }
 
 // Lightweight sentiment scoring for news headlines
@@ -191,6 +273,17 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
   // Track which entities appear in each item (for co-occurrence)
   const itemEntities: Map<string, Set<string>> = new Map();
 
+  // Collect all source names for person-name filtering
+  const sourceNames = new Set<string>();
+  for (const item of items) {
+    sourceNames.add(item.sourceName.toLowerCase());
+    // Also add common fragments: "The Hill" → "hill", "Bangkok Post" → "bangkok post"
+    const parts = item.sourceName.split(/\s*[-–—|:]\s*/);
+    for (const part of parts) {
+      sourceNames.add(part.trim().toLowerCase());
+    }
+  }
+
   for (const item of items) {
     const text = item.title + " " + item.summary;
     const urgency = getUrgencyLevel(item.sourceCategory);
@@ -202,7 +295,7 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
     const dictMatches = matchDictionary(text);
 
     // Person name matches
-    const personMatches = matchPersonNames(text, dictMatches);
+    const personMatches = matchPersonNames(text, dictMatches, sourceNames);
 
     // Combine all entities for this item
     const allEntities = new Set<string>();
