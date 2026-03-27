@@ -65,7 +65,7 @@ function matchDictionary(text: string): Set<string> {
   const lower = text.toLowerCase();
 
   for (const term of SORTED_TERMS) {
-    if (term.length < 2) continue;
+    if (term.length < 3) continue;
     const idx = lower.indexOf(term);
     if (idx === -1) continue;
 

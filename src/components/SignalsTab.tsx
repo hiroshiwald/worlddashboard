@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { FeedItem, ExtractedEntity, Signal, SignalSeverity, SignalType } from "@/lib/types";
 import { extractEntities } from "@/lib/entity-extractor";
 import { detectSignals } from "@/lib/signal-detector";
@@ -9,6 +9,50 @@ interface SignalsTabProps {
   items: FeedItem[];
   dark: boolean;
   onEntityClick: (name: string) => void;
+}
+
+const MUTE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+const SNAPSHOT_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+function loadMutedEntities(): Map<string, number> {
+  try {
+    const raw = localStorage.getItem("wd-muted-entities");
+    if (!raw) return new Map();
+    const arr: [string, number][] = JSON.parse(raw);
+    const now = Date.now();
+    // Filter expired
+    return new Map(arr.filter(([, expiry]) => expiry > now));
+  } catch {
+    return new Map();
+  }
+}
+
+function saveMutedEntities(muted: Map<string, number>) {
+  localStorage.setItem(
+    "wd-muted-entities",
+    JSON.stringify(Array.from(muted.entries()))
+  );
+}
+
+function loadPreviousEntityNames(): Set<string> {
+  try {
+    const raw = localStorage.getItem("wd-entity-snapshot");
+    if (!raw) return new Set();
+    const { names, timestamp } = JSON.parse(raw);
+    // Only use snapshots less than 2 hours old
+    if (Date.now() - timestamp > 2 * 60 * 60 * 1000) return new Set();
+    return new Set(names);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveEntitySnapshot(entities: ExtractedEntity[]) {
+  const names = entities.map((e) => e.name);
+  localStorage.setItem(
+    "wd-entity-snapshot",
+    JSON.stringify({ names, timestamp: Date.now() })
+  );
 }
 
 function SignalIcon({ type, className }: { type: SignalType; className?: string }) {
@@ -23,7 +67,7 @@ function SignalIcon({ type, className }: { type: SignalType; className?: string 
     case "sentiment_deterioration":
       return (
         <svg className={cls} viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M1 10a.75.75 0 01.75-.75h1.5a.75.75 0 010 1.5h-1.5A.75.75 0 011 10zM5.05 3.05a.75.75 0 011.06 0l1.062 1.06a.75.75 0 11-1.061 1.06L5.05 4.11a.75.75 0 010-1.06zM14.95 3.05a.75.75 0 011.06 1.06l-1.06 1.062a.75.75 0 01-1.062-1.061l1.061-1.06zM10 1a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 1zM5.597 14.403a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 01-1.06-1.06l1.06-1.061a.75.75 0 011.06 0zm9.867 1.06a.75.75 0 01-1.06 0l-1.061-1.06a.75.75 0 011.06-1.06l1.06 1.06a.75.75 0 010 1.06zM10 18a.75.75 0 01-.75-.75v-1.5a.75.75 0 011.5 0v1.5A.75.75 0 0110 18zM17.25 10a.75.75 0 01.75.75h1.5a.75.75 0 010-1.5h-1.5a.75.75 0 01-.75.75zM10 5.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z" clipRule="evenodd" />
+          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
         </svg>
       );
     case "cross_category":
@@ -43,6 +87,12 @@ function SignalIcon({ type, className }: { type: SignalType; className?: string 
       return (
         <svg className={cls} viewBox="0 0 20 20" fill="currentColor">
           <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+        </svg>
+      );
+    case "novel_emergence":
+      return (
+        <svg className={cls} viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401z" clipRule="evenodd" />
         </svg>
       );
   }
@@ -148,22 +198,86 @@ export default function SignalsTab({
   onEntityClick,
 }: SignalsTabProps) {
   const entities = useMemo(() => extractEntities(items), [items]);
+
+  // --- Muting state (persisted to localStorage) ---
+  const [mutedEntities, setMutedEntities] = useState<Map<string, number>>(
+    () => new Map()
+  );
+
+  useEffect(() => {
+    setMutedEntities(loadMutedEntities());
+  }, []);
+
+  const handleMute = useCallback((name: string) => {
+    setMutedEntities((prev) => {
+      const next = new Map(prev);
+      next.set(name, Date.now() + MUTE_DURATION);
+      saveMutedEntities(next);
+      return next;
+    });
+  }, []);
+
+  const handleUnmuteAll = useCallback(() => {
+    setMutedEntities(new Map());
+    localStorage.removeItem("wd-muted-entities");
+  }, []);
+
+  // --- Novelty tracking (entity snapshot) ---
+  const previousEntityNames = useRef<Set<string>>(new Set());
+  const lastSnapshotTime = useRef<number>(0);
+
+  useEffect(() => {
+    previousEntityNames.current = loadPreviousEntityNames();
+  }, []);
+
+  // Save snapshot periodically
+  useEffect(() => {
+    const now = Date.now();
+    if (
+      entities.length > 0 &&
+      now - lastSnapshotTime.current > SNAPSHOT_INTERVAL
+    ) {
+      lastSnapshotTime.current = now;
+      saveEntitySnapshot(entities);
+    }
+  }, [entities]);
+
+  // --- Signal detection ---
   const signals = useMemo(
-    () => detectSignals(entities, items),
+    () => detectSignals(entities, items, previousEntityNames.current),
     [entities, items]
   );
+
+  // Filter out signals where ALL entities are muted
+  const activeSignals = useMemo(() => {
+    if (mutedEntities.size === 0) return signals;
+    const now = Date.now();
+    return signals.filter(
+      (s) => !s.entities.every((e) => {
+        const expiry = mutedEntities.get(e);
+        return expiry !== undefined && expiry > now;
+      })
+    );
+  }, [signals, mutedEntities]);
 
   const [showAll, setShowAll] = useState(false);
   const INITIAL_LIMIT = 12;
 
-  const visibleSignals = showAll ? signals : signals.slice(0, INITIAL_LIMIT);
+  const visibleSignals = showAll
+    ? activeSignals
+    : activeSignals.slice(0, INITIAL_LIMIT);
 
-  // Top 20 entities by recent mentions for the velocity grid
+  // Top 20 entities by recent mentions for the velocity grid (excluding muted)
   const topEntities = useMemo(() => {
+    const now = Date.now();
     return [...entities]
+      .filter((e) => {
+        const expiry = mutedEntities.get(e.name);
+        return !expiry || expiry <= now;
+      })
       .sort((a, b) => b.recentMentions.day - a.recentMentions.day)
       .slice(0, 20);
-  }, [entities]);
+  }, [entities, mutedEntities]);
 
   // Compute max values for normalizing bars
   const maxHour = useMemo(
@@ -181,9 +295,11 @@ export default function SignalsTab({
 
   const severityCounts = useMemo(() => {
     const c = { critical: 0, warning: 0, advisory: 0 };
-    for (const s of signals) c[s.severity]++;
+    for (const s of activeSignals) c[s.severity]++;
     return c;
-  }, [signals]);
+  }, [activeSignals]);
+
+  const mutedCount = mutedEntities.size;
 
   const t = {
     cardBg: dark
@@ -203,9 +319,7 @@ export default function SignalsTab({
     theadBg: dark
       ? "bg-slate-800 border-b border-slate-600"
       : "bg-stone-200 border-b border-stone-300",
-    theadText: dark
-      ? "text-slate-300"
-      : "text-stone-700",
+    theadText: dark ? "text-slate-300" : "text-stone-700",
     rowAltA: dark ? "bg-slate-900" : "bg-white",
     rowAltB: dark ? "bg-slate-900/60" : "bg-stone-50",
     rowHover: dark ? "hover:bg-slate-800" : "hover:bg-stone-100",
@@ -216,6 +330,9 @@ export default function SignalsTab({
     barHour: "bg-amber-500",
     barSixHour: "bg-sky-500",
     barDay: dark ? "bg-slate-500" : "bg-stone-400",
+    muteBtnBg: dark
+      ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
+      : "text-stone-400 hover:text-red-600 hover:bg-red-50",
   };
 
   return (
@@ -224,20 +341,42 @@ export default function SignalsTab({
       <div
         className={`flex flex-wrap items-center gap-3 md:gap-6 px-3 md:px-4 py-2 md:py-2.5 mb-2 text-[10px] md:text-xs uppercase tracking-wide ${t.summaryBg} ${t.summaryText} border ${t.summaryBorder}`}
       >
-        <span className="font-bold">{signals.length} SIGNALS</span>
+        <span className="font-bold">{activeSignals.length} SIGNALS</span>
         {severityCounts.critical > 0 && (
           <span>
-            <span className="text-red-500 font-bold">{severityCounts.critical}</span> CRITICAL
+            <span className="text-red-500 font-bold">
+              {severityCounts.critical}
+            </span>{" "}
+            CRITICAL
           </span>
         )}
         {severityCounts.warning > 0 && (
           <span>
-            <span className="text-amber-500 font-bold">{severityCounts.warning}</span> WARNING
+            <span className="text-amber-500 font-bold">
+              {severityCounts.warning}
+            </span>{" "}
+            WARNING
           </span>
         )}
         {severityCounts.advisory > 0 && (
           <span>
-            <span className="text-yellow-500 font-bold">{severityCounts.advisory}</span> ADVISORY
+            <span className="text-yellow-500 font-bold">
+              {severityCounts.advisory}
+            </span>{" "}
+            ADVISORY
+          </span>
+        )}
+        {mutedCount > 0 && (
+          <span className="flex items-center gap-1.5">
+            <span className={t.textMuted}>
+              {mutedCount} MUTED
+            </span>
+            <button
+              onClick={handleUnmuteAll}
+              className={`text-[10px] underline ${dark ? "text-slate-500 hover:text-slate-300" : "text-stone-400 hover:text-stone-700"}`}
+            >
+              CLEAR
+            </button>
           </span>
         )}
         <span className={`ml-auto text-[10px] ${t.textMuted}`}>
@@ -246,7 +385,7 @@ export default function SignalsTab({
       </div>
 
       {/* ─── Signal Cards ─── */}
-      {signals.length > 0 ? (
+      {activeSignals.length > 0 ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 mb-2">
             {visibleSignals.map((signal) => {
@@ -272,10 +411,14 @@ export default function SignalsTab({
                     </div>
                     {/* Confidence bar */}
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      <div className={`w-12 h-1.5 rounded-full overflow-hidden ${t.confidenceBg}`}>
+                      <div
+                        className={`w-12 h-1.5 rounded-full overflow-hidden ${t.confidenceBg}`}
+                      >
                         <div
                           className={`h-full rounded-full ${sc.bar}`}
-                          style={{ width: `${signal.confidence * 100}%` }}
+                          style={{
+                            width: `${signal.confidence * 100}%`,
+                          }}
                         />
                       </div>
                       <span className={`text-[9px] ${t.textMuted}`}>
@@ -285,20 +428,42 @@ export default function SignalsTab({
                   </div>
 
                   {/* Description */}
-                  <p className={`text-[10px] leading-tight mb-2 ${t.textMuted}`}>
+                  <p
+                    className={`text-[10px] leading-tight mb-2 ${t.textMuted}`}
+                  >
                     {signal.description}
                   </p>
 
-                  {/* Entity chips */}
-                  <div className="flex flex-wrap gap-1.5">
+                  {/* Entity chips with mute buttons */}
+                  <div className="flex flex-wrap gap-1.5 items-center">
                     {signal.entities.map((name) => (
-                      <button
-                        key={name}
-                        onClick={() => onEntityClick(name)}
-                        className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded cursor-pointer hover:underline ${sc.bg} ${sc.text}`}
-                      >
-                        {name}
-                      </button>
+                      <span key={name} className="inline-flex items-center gap-0.5">
+                        <button
+                          onClick={() => onEntityClick(name)}
+                          className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded cursor-pointer hover:underline ${sc.bg} ${sc.text}`}
+                        >
+                          {name}
+                        </button>
+                        <button
+                          onClick={() => handleMute(name)}
+                          className={`text-[10px] px-0.5 py-0.5 rounded transition-colors ${t.muteBtnBg}`}
+                          title={`Mute "${name}" for 24h`}
+                        >
+                          <svg
+                            className="w-3 h-3"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M6 18L18 6M6 6l12 12"
+                            />
+                          </svg>
+                        </button>
+                      </span>
                     ))}
                     <span
                       className={`text-[9px] uppercase font-semibold px-1 py-0.5 ${t.textMuted}`}
@@ -312,14 +477,14 @@ export default function SignalsTab({
           </div>
 
           {/* Show all toggle */}
-          {signals.length > INITIAL_LIMIT && (
+          {activeSignals.length > INITIAL_LIMIT && (
             <button
               onClick={() => setShowAll(!showAll)}
-              className={`w-full text-center py-1.5 text-[10px] uppercase tracking-wide font-semibold ${t.textMuted} hover:${dark ? "text-slate-200" : "text-stone-800"} transition-colors`}
+              className={`w-full text-center py-1.5 text-[10px] uppercase tracking-wide font-semibold ${t.textMuted} transition-colors`}
             >
               {showAll
                 ? "SHOW LESS"
-                : `SHOW ALL ${signals.length} SIGNALS`}
+                : `SHOW ALL ${activeSignals.length} SIGNALS`}
             </button>
           )}
         </>
@@ -327,7 +492,9 @@ export default function SignalsTab({
         <div
           className={`text-center py-12 text-xs uppercase tracking-wide ${t.textMuted}`}
         >
-          NO SIGNALS DETECTED
+          {mutedCount > 0
+            ? "ALL SIGNALS MUTED — CLEAR MUTES TO VIEW"
+            : "NO SIGNALS DETECTED"}
         </div>
       )}
 
@@ -339,33 +506,52 @@ export default function SignalsTab({
           >
             ENTITY VELOCITY — TOP {topEntities.length}
             <span className={`ml-auto font-normal ${t.textMuted}`}>
-              <span className="inline-block w-2 h-2 bg-amber-500 rounded-sm mr-0.5" /> 1H
-              <span className="inline-block w-2 h-2 bg-sky-500 rounded-sm ml-2 mr-0.5" /> 6H
-              <span className={`inline-block w-2 h-2 ${t.barDay} rounded-sm ml-2 mr-0.5`} /> 24H
+              <span className="inline-block w-2 h-2 bg-amber-500 rounded-sm mr-0.5" />{" "}
+              1H
+              <span className="inline-block w-2 h-2 bg-sky-500 rounded-sm ml-2 mr-0.5" />{" "}
+              6H
+              <span
+                className={`inline-block w-2 h-2 ${t.barDay} rounded-sm ml-2 mr-0.5`}
+              />{" "}
+              24H
             </span>
           </div>
 
           {/* Desktop table */}
-          <div className={`hidden md:block border overflow-auto ${t.tableBorder}`}>
+          <div
+            className={`hidden md:block border overflow-auto ${t.tableBorder}`}
+          >
             <table className="w-full border-collapse text-xs">
               <thead className="sticky top-0 z-10">
                 <tr className={t.theadBg}>
-                  <th className={`min-w-[160px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}>
+                  <th
+                    className={`min-w-[160px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                  >
                     ENTITY
                   </th>
-                  <th className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}>
+                  <th
+                    className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                  >
                     1H
                   </th>
-                  <th className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}>
+                  <th
+                    className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                  >
                     6H
                   </th>
-                  <th className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}>
+                  <th
+                    className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                  >
                     24H
                   </th>
-                  <th className={`w-16 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}>
+                  <th
+                    className={`w-16 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                  >
                     TONE
                   </th>
-                  <th className={`w-24 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}>
+                  <th
+                    className={`w-24 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                  >
                     URGENCY
                   </th>
                 </tr>
@@ -386,15 +572,27 @@ export default function SignalsTab({
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="flex items-center gap-1.5">
-                        <div className={`h-2.5 rounded-sm ${t.barHour}`} style={{ width: `${(entity.recentMentions.hour / maxHour) * 80}px` }} />
-                        <span className={`text-[10px] ${entity.recentMentions.hour > 0 ? "text-amber-500 font-bold" : t.textMuted}`}>
+                        <div
+                          className={`h-2.5 rounded-sm ${t.barHour}`}
+                          style={{
+                            width: `${(entity.recentMentions.hour / maxHour) * 80}px`,
+                          }}
+                        />
+                        <span
+                          className={`text-[10px] ${entity.recentMentions.hour > 0 ? "text-amber-500 font-bold" : t.textMuted}`}
+                        >
                           {entity.recentMentions.hour}
                         </span>
                       </div>
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="flex items-center gap-1.5">
-                        <div className={`h-2.5 rounded-sm ${t.barSixHour}`} style={{ width: `${(entity.recentMentions.sixHour / maxSixHour) * 80}px` }} />
+                        <div
+                          className={`h-2.5 rounded-sm ${t.barSixHour}`}
+                          style={{
+                            width: `${(entity.recentMentions.sixHour / maxSixHour) * 80}px`,
+                          }}
+                        />
                         <span className={`text-[10px] ${t.textMuted}`}>
                           {entity.recentMentions.sixHour}
                         </span>
@@ -402,7 +600,12 @@ export default function SignalsTab({
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="flex items-center gap-1.5">
-                        <div className={`h-2.5 rounded-sm ${t.barDay}`} style={{ width: `${(entity.recentMentions.day / maxDay) * 80}px` }} />
+                        <div
+                          className={`h-2.5 rounded-sm ${t.barDay}`}
+                          style={{
+                            width: `${(entity.recentMentions.day / maxDay) * 80}px`,
+                          }}
+                        />
                         <span className={`text-[10px] ${t.textMuted}`}>
                           {entity.recentMentions.day}
                         </span>
@@ -443,38 +646,62 @@ export default function SignalsTab({
                 <div className="flex items-center gap-2">
                   <div className="flex-1 space-y-1">
                     <div className="flex items-center gap-1">
-                      <span className={`text-[9px] w-4 ${t.textMuted}`}>1H</span>
-                      <div className={`h-2 rounded-sm flex-1 ${t.confidenceBg}`}>
+                      <span className={`text-[9px] w-4 ${t.textMuted}`}>
+                        1H
+                      </span>
+                      <div
+                        className={`h-2 rounded-sm flex-1 ${t.confidenceBg}`}
+                      >
                         <div
                           className={`h-full rounded-sm ${t.barHour}`}
-                          style={{ width: `${(entity.recentMentions.hour / maxHour) * 100}%` }}
+                          style={{
+                            width: `${(entity.recentMentions.hour / maxHour) * 100}%`,
+                          }}
                         />
                       </div>
-                      <span className={`text-[9px] w-4 text-right ${entity.recentMentions.hour > 0 ? "text-amber-500 font-bold" : t.textMuted}`}>
+                      <span
+                        className={`text-[9px] w-4 text-right ${entity.recentMentions.hour > 0 ? "text-amber-500 font-bold" : t.textMuted}`}
+                      >
                         {entity.recentMentions.hour}
                       </span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <span className={`text-[9px] w-4 ${t.textMuted}`}>6H</span>
-                      <div className={`h-2 rounded-sm flex-1 ${t.confidenceBg}`}>
+                      <span className={`text-[9px] w-4 ${t.textMuted}`}>
+                        6H
+                      </span>
+                      <div
+                        className={`h-2 rounded-sm flex-1 ${t.confidenceBg}`}
+                      >
                         <div
                           className={`h-full rounded-sm ${t.barSixHour}`}
-                          style={{ width: `${(entity.recentMentions.sixHour / maxSixHour) * 100}%` }}
+                          style={{
+                            width: `${(entity.recentMentions.sixHour / maxSixHour) * 100}%`,
+                          }}
                         />
                       </div>
-                      <span className={`text-[9px] w-4 text-right ${t.textMuted}`}>
+                      <span
+                        className={`text-[9px] w-4 text-right ${t.textMuted}`}
+                      >
                         {entity.recentMentions.sixHour}
                       </span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <span className={`text-[9px] w-4 ${t.textMuted}`}>24H</span>
-                      <div className={`h-2 rounded-sm flex-1 ${t.confidenceBg}`}>
+                      <span className={`text-[9px] w-4 ${t.textMuted}`}>
+                        24H
+                      </span>
+                      <div
+                        className={`h-2 rounded-sm flex-1 ${t.confidenceBg}`}
+                      >
                         <div
                           className={`h-full rounded-sm ${t.barDay}`}
-                          style={{ width: `${(entity.recentMentions.day / maxDay) * 100}%` }}
+                          style={{
+                            width: `${(entity.recentMentions.day / maxDay) * 100}%`,
+                          }}
                         />
                       </div>
-                      <span className={`text-[9px] w-4 text-right ${t.textMuted}`}>
+                      <span
+                        className={`text-[9px] w-4 text-right ${t.textMuted}`}
+                      >
                         {entity.recentMentions.day}
                       </span>
                     </div>
