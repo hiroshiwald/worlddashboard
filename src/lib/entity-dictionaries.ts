@@ -184,6 +184,12 @@ export const ORG_DICT: DictEntry[] = [
   { name: "SCO", aliases: ["Shanghai Cooperation"], type: "organization" },
   { name: "AUKUS", aliases: [], type: "organization" },
   { name: "Quad", aliases: ["Quadrilateral Security"], type: "organization" },
+  { name: "Air Force", aliases: ["USAF", "U.S. Air Force"], type: "organization" },
+  { name: "Homeland Security", aliases: ["DHS", "Department of Homeland Security"], type: "organization" },
+  { name: "World Food Programme", aliases: ["WFP"], type: "organization" },
+  { name: "Atlantic Council", aliases: [], type: "organization" },
+  { name: "Samsung Electronics", aliases: ["Samsung Electronics Co"], type: "organization" },
+  { name: "Pheu Thai", aliases: ["Pheu Thai Party"], type: "organization" },
 ];
 
 export const REGION_DICT: DictEntry[] = [
@@ -242,4 +248,21 @@ export const PERSON_STOPWORDS: Set<string> = new Set([
   "Breaking News", "Live Updates", "Just In",
   "Read More", "Click Here", "Sign Up",
   "Photo Credit", "Getty Images", "Associated Press",
+  // Source publication names
+  "Bangkok Post", "The Hill", "The Times", "The Intercept",
+  "The Guardian", "The Telegraph", "Hacker News",
+  "War Zone", "Military Times", "Task Purpose",
+  "Chosun Ilbo", "El Pais",
+  // Organizations/institutions
+  "Air Force", "Coast Guard", "National Guard",
+  "Samsung Electronics", "Atlantic Council",
+  "World Food", "Food Programme",
+  "Homeland Security", "Ben Gurion",
+  "United Nations", "European Union",
+  // Common headline fragments
+  "Read Full", "Full Article",
+  "Morning Briefing", "Evening Briefing",
+  "World War", "Cold War", "Civil War",
+  "Black Hawk", "Golden Fleet", "Epic Fury",
+  "Power Plants", "Fort Bragg",
 ]);
