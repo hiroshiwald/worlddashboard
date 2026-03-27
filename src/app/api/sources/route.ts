@@ -19,13 +19,20 @@ export async function GET() {
   const { items, feedsAttempted, feedsSucceeded, relayConfigured, feedDiagnostics } =
     await fetchAllFeeds(sources);
 
-  return NextResponse.json({
-    items,
-    feedsAttempted,
-    feedsSucceeded,
-    relayConfigured,
-    feedDiagnostics,
-    fetchedAt: new Date().toISOString(),
-    count: items.length,
-  });
+  return NextResponse.json(
+    {
+      items,
+      feedsAttempted,
+      feedsSucceeded,
+      relayConfigured,
+      feedDiagnostics,
+      fetchedAt: new Date().toISOString(),
+      count: items.length,
+    },
+    {
+      headers: {
+        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+      },
+    }
+  );
 }

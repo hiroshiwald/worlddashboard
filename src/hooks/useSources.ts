@@ -29,7 +29,7 @@ export function useFeed(): UseFeedReturn {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/sources", { cache: "no-store" });
+      const res = await fetch("/api/sources");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setItems(data.items);
