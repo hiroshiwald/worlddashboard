@@ -75,7 +75,8 @@ export type SignalType =
   | "sentiment_deterioration"
   | "cross_category"
   | "novel_cooccurrence"
-  | "escalation";
+  | "escalation"
+  | "novel_emergence";
 
 export type SignalSeverity = "critical" | "warning" | "advisory";
 

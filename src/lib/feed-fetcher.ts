@@ -113,7 +113,7 @@ function isAdContent(title: string, summary: string, link: string): boolean {
 
 // --- HTML / XML helpers ---
 function stripHtml(html: string): string {
-  return html
+  let text = html
     .replace(/<[^>]*>/g, "")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
@@ -122,9 +122,11 @@ function stripHtml(html: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&#x27;/g, "'")
-    .replace(/&#\d+;/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+    .replace(/&#x[0-9a-fA-F]+;/g, "")
+    .replace(/&#\d+;/g, "");
+  // Second pass: strip any tags that were entity-encoded in the original
+  text = text.replace(/<[^>]*>/g, "");
+  return text.replace(/\s+/g, " ").trim();
 }
 
 function extractTag(xml: string, tag: string): string {

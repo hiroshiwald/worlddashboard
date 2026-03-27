@@ -11,7 +11,20 @@ const SEVERITY_ORDER: Record<SignalSeverity, number> = {
   advisory: 2,
 };
 
-function detectSurges(entities: ExtractedEntity[]): Signal[] {
+// Entities appearing in >15% of items get confidence penalized to reduce noise
+function dominancePenalty(
+  entity: ExtractedEntity,
+  totalItems: number
+): number {
+  const ratio = entity.mentions / totalItems;
+  if (ratio > 0.15) return 0.5;
+  return 1;
+}
+
+function detectSurges(
+  entities: ExtractedEntity[],
+  totalItems: number
+): Signal[] {
   const signals: Signal[] = [];
   const now = new Date().toISOString();
 
@@ -31,6 +44,8 @@ function detectSurges(entities: ExtractedEntity[]): Signal[] {
           ? "warning"
           : "advisory";
 
+    const penalty = dominancePenalty(e, totalItems);
+
     signals.push({
       id: `surge-${e.name}`,
       type: "surge",
@@ -38,7 +53,7 @@ function detectSurges(entities: ExtractedEntity[]): Signal[] {
       title: `SURGE: ${e.name} (+${hour} in 1h)`,
       description: `Mention velocity ${ratio.toFixed(1)}x above daily baseline. ${hour} mentions in the last hour vs ${day} over 24h.`,
       entities: [e.name],
-      confidence: Math.min(1, ratio / 10),
+      confidence: Math.min(1, ratio / 10) * penalty,
       detectedAt: now,
       metric: hour,
     });
@@ -48,7 +63,8 @@ function detectSurges(entities: ExtractedEntity[]): Signal[] {
 }
 
 function detectSentimentDeteriorations(
-  entities: ExtractedEntity[]
+  entities: ExtractedEntity[],
+  totalItems: number
 ): Signal[] {
   const signals: Signal[] = [];
   const now = new Date().toISOString();
@@ -64,6 +80,8 @@ function detectSentimentDeteriorations(
           ? "warning"
           : "advisory";
 
+    const penalty = dominancePenalty(e, totalItems);
+
     signals.push({
       id: `sentiment_deterioration-${e.name}`,
       type: "sentiment_deterioration",
@@ -71,7 +89,7 @@ function detectSentimentDeteriorations(
       title: `NEG SENTIMENT: ${e.name}`,
       description: `Sentiment score ${e.sentiment.toFixed(2)} across ${e.mentions} mentions. High-volume negative coverage indicates brewing crisis.`,
       entities: [e.name],
-      confidence: Math.min(1, compound / 10),
+      confidence: Math.min(1, compound / 10) * penalty,
       detectedAt: now,
       metric: compound,
     });
@@ -179,7 +197,8 @@ function detectNovelCooccurrences(
 }
 
 function detectEscalationPatterns(
-  entities: ExtractedEntity[]
+  entities: ExtractedEntity[],
+  totalItems: number
 ): Signal[] {
   const signals: Signal[] = [];
   const now = new Date().toISOString();
@@ -201,6 +220,8 @@ function detectEscalationPatterns(
           ? "warning"
           : "advisory";
 
+    const penalty = dominancePenalty(e, totalItems);
+
     signals.push({
       id: `escalation-${e.name}`,
       type: "escalation",
@@ -208,7 +229,7 @@ function detectEscalationPatterns(
       title: `ESCALATION: ${e.name}`,
       description: `${Math.round(ratio * 100)}% of ${e.mentions} mentions are critical/warning urgency. Predominantly high-threat coverage.`,
       entities: [e.name],
-      confidence: ratio,
+      confidence: ratio * penalty,
       detectedAt: now,
       metric: ratio * e.mentions,
     });
@@ -217,10 +238,55 @@ function detectEscalationPatterns(
   return signals;
 }
 
+/**
+ * Detect novel entity emergence by comparing against a previous snapshot.
+ * previousEntities should be a Map of entity names that existed in the prior snapshot.
+ */
+export function detectNovelEmergence(
+  entities: ExtractedEntity[],
+  previousEntityNames: Set<string>
+): Signal[] {
+  // If no previous snapshot yet, skip novelty detection
+  if (previousEntityNames.size === 0) return [];
+
+  const signals: Signal[] = [];
+  const now = new Date().toISOString();
+
+  for (const e of entities) {
+    if (previousEntityNames.has(e.name)) continue;
+    // Must have meaningful volume to avoid noise
+    if (e.mentions < 3 && e.recentMentions.hour < 2) continue;
+
+    const severity: SignalSeverity =
+      e.recentMentions.hour >= 4
+        ? "critical"
+        : e.recentMentions.hour >= 2
+          ? "warning"
+          : "advisory";
+
+    signals.push({
+      id: `novel_emergence-${e.name}`,
+      type: "novel_emergence",
+      severity,
+      title: `NEW: ${e.name}`,
+      description: `First appearance with ${e.mentions} mentions (${e.recentMentions.hour} in last hour). ${e.type} not seen in previous data snapshot.`,
+      entities: [e.name],
+      confidence: Math.min(1, e.mentions / 6),
+      detectedAt: now,
+      metric: e.recentMentions.hour + e.mentions,
+    });
+  }
+
+  return signals;
+}
+
 export function detectSignals(
   entities: ExtractedEntity[],
-  items: FeedItem[]
+  items: FeedItem[],
+  previousEntityNames?: Set<string>
 ): Signal[] {
+  const totalItems = items.length;
+
   // Build item → category lookup once
   const itemCategoryMap = new Map<string, string>();
   for (const item of items) {
@@ -228,11 +294,14 @@ export function detectSignals(
   }
 
   const all = [
-    ...detectSurges(entities),
-    ...detectSentimentDeteriorations(entities),
+    ...detectSurges(entities, totalItems),
+    ...detectSentimentDeteriorations(entities, totalItems),
     ...detectCrossCategoryConvergence(entities, itemCategoryMap),
     ...detectNovelCooccurrences(entities),
-    ...detectEscalationPatterns(entities),
+    ...detectEscalationPatterns(entities, totalItems),
+    ...(previousEntityNames
+      ? detectNovelEmergence(entities, previousEntityNames)
+      : []),
   ];
 
   // Deduplicate by id, keep higher confidence

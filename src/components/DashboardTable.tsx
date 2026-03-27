@@ -642,7 +642,7 @@ export default function DashboardTable() {
                               <img
                                 src={item.imageUrl}
                                 alt=""
-                                className={`w-16 h-11 object-cover shrink-0 mt-0.5 ${t.imgPlaceholder}`}
+                                className={`w-[74px] h-[50px] object-cover shrink-0 mt-0.5 ${t.imgPlaceholder}`}
                                 loading="lazy"
                                 onError={(e) => {
                                   (e.target as HTMLImageElement).style.display =
@@ -650,7 +650,7 @@ export default function DashboardTable() {
                                 }}
                               />
                             ) : (
-                              <div className={`w-16 h-11 shrink-0 mt-0.5 ${t.imgPlaceholder}`} />
+                              <div className={`w-[74px] h-[50px] shrink-0 mt-0.5 ${t.imgPlaceholder}`} />
                             )}
                             <a
                               href={item.link}
@@ -709,7 +709,7 @@ export default function DashboardTable() {
                       <img
                         src={item.imageUrl}
                         alt=""
-                        className={`w-14 h-10 object-cover shrink-0 ${t.imgPlaceholder}`}
+                        className={`w-16 h-[46px] object-cover shrink-0 ${t.imgPlaceholder}`}
                         loading="lazy"
                         onError={(e) => {
                           (e.target as HTMLImageElement).style.display = "none";
