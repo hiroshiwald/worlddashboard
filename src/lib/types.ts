@@ -16,6 +16,29 @@ export interface SourceMeta {
   tier: string;
   url: string;
   type: string;
+  altUrl?: string;
+}
+
+export type FeedErrorType =
+  | "timeout"
+  | "dns"
+  | "connection_refused"
+  | "http_403"
+  | "http_404"
+  | "http_429"
+  | "http_5xx"
+  | "http_other"
+  | "unknown";
+
+export interface FeedDiagnostic {
+  sourceName: string;
+  sourceUrl: string;
+  phase: "direct" | "relay" | "altUrl" | "failed";
+  durationMs: number;
+  error?: string;
+  errorType?: FeedErrorType;
+  httpStatus?: number;
+  fromCache?: boolean;
 }
 
 export type SortDirection = "asc" | "desc";

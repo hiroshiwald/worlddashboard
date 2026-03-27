@@ -1,4 +1,4 @@
-import { FeedItem, SourceMeta } from "./types";
+import { FeedItem, FeedDiagnostic, FeedErrorType, SourceMeta } from "./types";
 
 // --- Ad / spam filter ---
 const AD_TITLE_PATTERNS = [
@@ -377,10 +377,7 @@ function parseFeedXml(xml: string, source: SourceMeta): FeedItem[] {
   return parseRssItems(xml, source);
 }
 
-// ─── Fetch with relay fallback ───
-// Direct fetch first (works for ~32 feeds on Vercel).
-// If direct fails and RELAY_URL is set, retry via the Railway relay
-// (different IP range — GCP vs AWS — bypasses IP-based blocking).
+// ─── Fetch with relay fallback + caching ───
 
 const FETCH_HEADERS: Record<string, string> = {
   "User-Agent":
@@ -390,64 +387,254 @@ const FETCH_HEADERS: Record<string, string> = {
 };
 
 function getRelayUrl(): string {
-  return process.env.RELAY_URL || "";
+  const raw = process.env.RELAY_URL || "";
+  if (!raw) return "";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  return `https://${raw}`;
 }
 function getRelaySecret(): string {
   return process.env.RELAY_SECRET || "";
 }
 
-async function fetchSingleFeed(source: SourceMeta): Promise<FeedItem[]> {
-  // Phase 1: Direct fetch — 5s timeout.
-  const dc = new AbortController();
-  const dt = setTimeout(() => dc.abort(), 5000);
-  try {
-    const res = await fetch(source.url, {
-      signal: dc.signal,
-      headers: FETCH_HEADERS,
-    });
-    if (res.ok) {
-      const text = await res.text();
-      const items = parseFeedXml(text, source);
-      if (items.length > 0) return items;
-    }
-  } catch {
-    // Direct failed — fall through to relay
-  } finally {
-    clearTimeout(dt);
+// ─── Error classification ───
+function classifyError(
+  error: unknown,
+  response?: Response
+): { errorType: FeedErrorType; message: string; httpStatus?: number } {
+  if (response && !response.ok) {
+    const status = response.status;
+    return {
+      errorType:
+        status === 403 ? "http_403"
+        : status === 404 ? "http_404"
+        : status === 429 ? "http_429"
+        : status >= 500 ? "http_5xx"
+        : "http_other",
+      message: `HTTP ${status}`,
+      httpStatus: status,
+    };
   }
-
-  // Phase 2: Relay fallback — own 10s timeout.
-  const relayUrl = getRelayUrl();
-  if (!relayUrl) return [];
-  const relaySecret = getRelaySecret();
-  const rc = new AbortController();
-  const rt = setTimeout(() => rc.abort(), 10000);
-  try {
-    const headers: Record<string, string> = {};
-    if (relaySecret) headers["x-relay-key"] = relaySecret;
-    const res = await fetch(
-      `${relayUrl}/rss?url=${encodeURIComponent(source.url)}`,
-      { signal: rc.signal, headers }
-    );
-    if (!res.ok) return [];
-    const text = await res.text();
-    if (text.includes("<rss") || text.includes("<feed") || text.includes("<channel")) {
-      return parseFeedXml(text, source);
-    }
-    return [];
-  } catch {
-    return [];
-  } finally {
-    clearTimeout(rt);
+  if (error instanceof Error) {
+    if (error.name === "AbortError")
+      return { errorType: "timeout", message: "Request timed out" };
+    if (error.message.includes("ENOTFOUND") || error.message.includes("getaddrinfo"))
+      return { errorType: "dns", message: `DNS lookup failed` };
+    if (error.message.includes("ECONNREFUSED"))
+      return { errorType: "connection_refused", message: error.message };
+    return { errorType: "unknown", message: error.message };
   }
+  return { errorType: "unknown", message: String(error) };
 }
 
-export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
+// ─── In-memory feed cache ───
+interface CacheEntry {
+  items: FeedItem[];
+  diagnostic: FeedDiagnostic;
+  timestamp: number;
+}
+
+const feedCache = new Map<string, CacheEntry>();
+const CACHE_FRESH_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_STALE_MAX_MS = 30 * 60 * 1000; // 30 minutes
+
+interface SingleFeedResult {
+  items: FeedItem[];
+  diagnostic: FeedDiagnostic;
+}
+
+// ─── Core fetch for a single feed ───
+async function fetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> {
+  // Check cache first
+  const cached = feedCache.get(source.url);
+  const now = Date.now();
+  if (cached && now - cached.timestamp < CACHE_FRESH_MS) {
+    return {
+      items: cached.items,
+      diagnostic: { ...cached.diagnostic, fromCache: true, durationMs: 0 },
+    };
+  }
+
+  const result = await doFetchSingleFeed(source);
+
+  // On success, update cache
+  if (result.items.length > 0) {
+    feedCache.set(source.url, {
+      items: result.items,
+      diagnostic: result.diagnostic,
+      timestamp: now,
+    });
+    return result;
+  }
+
+  // On failure, serve stale cache if available (up to 30 min)
+  if (cached && now - cached.timestamp < CACHE_STALE_MAX_MS) {
+    return {
+      items: cached.items,
+      diagnostic: { ...cached.diagnostic, fromCache: true, durationMs: result.diagnostic.durationMs },
+    };
+  }
+
+  return result;
+}
+
+async function doFetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> {
+  const start = Date.now();
+  let lastError = "";
+  let lastErrorType: FeedErrorType | undefined;
+  let lastHttpStatus: number | undefined;
+
+  // Phase 1: Direct fetch with single retry on transient failures — 5s timeout each.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const dc = new AbortController();
+    const dt = setTimeout(() => dc.abort(), 5000);
+    try {
+      const res = await fetch(source.url, {
+        signal: dc.signal,
+        headers: FETCH_HEADERS,
+      });
+      if (res.ok) {
+        const text = await res.text();
+        const items = parseFeedXml(text, source);
+        if (items.length > 0) {
+          return {
+            items,
+            diagnostic: { sourceName: source.name, sourceUrl: source.url, phase: "direct", durationMs: Date.now() - start },
+          };
+        }
+        break; // Got response but no items — don't retry
+      } else {
+        const classified = classifyError(null, res);
+        lastError = classified.message;
+        lastErrorType = classified.errorType;
+        lastHttpStatus = classified.httpStatus;
+        if (attempt === 0 && classified.errorType === "http_5xx") {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        break;
+      }
+    } catch (e) {
+      const classified = classifyError(e);
+      lastError = classified.message;
+      lastErrorType = classified.errorType;
+      if (attempt === 0 && classified.errorType === "timeout") {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      break;
+    } finally {
+      clearTimeout(dt);
+    }
+  }
+
+  // Phase 2: Relay fallback — 10s timeout.
+  const relayUrl = getRelayUrl();
+  if (relayUrl) {
+    const relaySecret = getRelaySecret();
+    const rc = new AbortController();
+    const rt = setTimeout(() => rc.abort(), 10000);
+    try {
+      const headers: Record<string, string> = {};
+      if (relaySecret) headers["x-relay-key"] = relaySecret;
+      const res = await fetch(
+        `${relayUrl}/rss?url=${encodeURIComponent(source.url)}`,
+        { signal: rc.signal, headers }
+      );
+      if (res.ok) {
+        const text = await res.text();
+        if (text.includes("<rss") || text.includes("<feed") || text.includes("<channel")) {
+          const items = parseFeedXml(text, source);
+          if (items.length > 0) {
+            return {
+              items,
+              diagnostic: { sourceName: source.name, sourceUrl: source.url, phase: "relay", durationMs: Date.now() - start },
+            };
+          }
+        }
+      } else {
+        const classified = classifyError(null, res);
+        lastError = classified.message;
+        lastErrorType = classified.errorType;
+        lastHttpStatus = classified.httpStatus;
+      }
+    } catch (e) {
+      const classified = classifyError(e);
+      lastError = classified.message;
+      lastErrorType = classified.errorType;
+    } finally {
+      clearTimeout(rt);
+    }
+  }
+
+  // Phase 3: altUrl fallback (RSSHub mirror) — 5s timeout.
+  if (source.altUrl) {
+    const ac = new AbortController();
+    const at = setTimeout(() => ac.abort(), 5000);
+    try {
+      const res = await fetch(source.altUrl, {
+        signal: ac.signal,
+        headers: FETCH_HEADERS,
+      });
+      if (res.ok) {
+        const text = await res.text();
+        const items = parseFeedXml(text, source);
+        if (items.length > 0) {
+          return {
+            items,
+            diagnostic: { sourceName: source.name, sourceUrl: source.url, phase: "altUrl", durationMs: Date.now() - start },
+          };
+        }
+      } else {
+        const classified = classifyError(null, res);
+        lastError = classified.message;
+        lastErrorType = classified.errorType;
+        lastHttpStatus = classified.httpStatus;
+      }
+    } catch (e) {
+      const classified = classifyError(e);
+      lastError = classified.message;
+      lastErrorType = classified.errorType;
+    } finally {
+      clearTimeout(at);
+    }
+  }
+
+  return {
+    items: [],
+    diagnostic: {
+      sourceName: source.name,
+      sourceUrl: source.url,
+      phase: "failed",
+      durationMs: Date.now() - start,
+      error: lastError || "All phases returned no items",
+      errorType: lastErrorType,
+      httpStatus: lastHttpStatus,
+    },
+  };
+}
+
+// ─── Request deduplication ───
+interface FetchAllResult {
   items: FeedItem[];
   feedsAttempted: number;
   feedsSucceeded: number;
   relayConfigured: boolean;
-}> {
+  feedDiagnostics: FeedDiagnostic[];
+}
+
+let inFlightFetch: Promise<FetchAllResult> | null = null;
+
+export function fetchAllFeeds(sources: SourceMeta[]): Promise<FetchAllResult> {
+  if (inFlightFetch) return inFlightFetch;
+
+  inFlightFetch = doFetchAllFeeds(sources).finally(() => {
+    inFlightFetch = null;
+  });
+
+  return inFlightFetch;
+}
+
+async function doFetchAllFeeds(sources: SourceMeta[]): Promise<FetchAllResult> {
   const rssFeeds = sources.filter(
     (s) =>
       (s.type.includes("RSS") || s.type.includes("Atom")) &&
@@ -459,12 +646,16 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
   );
 
   const allItems: FeedItem[] = [];
+  const diagnostics: FeedDiagnostic[] = [];
   let succeeded = 0;
 
   for (const result of results) {
-    if (result.status === "fulfilled" && result.value.length > 0) {
-      succeeded++;
-      allItems.push(...result.value);
+    if (result.status === "fulfilled") {
+      diagnostics.push(result.value.diagnostic);
+      if (result.value.items.length > 0) {
+        succeeded++;
+        allItems.push(...result.value.items);
+      }
     }
   }
 
@@ -479,5 +670,6 @@ export async function fetchAllFeeds(sources: SourceMeta[]): Promise<{
     feedsAttempted: rssFeeds.length,
     feedsSucceeded: succeeded,
     relayConfigured: !!getRelayUrl(),
+    feedDiagnostics: diagnostics,
   };
 }
