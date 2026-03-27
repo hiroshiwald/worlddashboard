@@ -29,6 +29,15 @@ const NetworkTab = dynamic(() => import("./NetworkTab"), {
   ),
 });
 
+const SignalsTab = dynamic(() => import("./SignalsTab"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-xs uppercase tracking-wide text-slate-500">ANALYZING SIGNALS...</p>
+    </div>
+  ),
+});
+
 type ColumnKey = keyof FeedItem;
 
 function timeAgo(isoString: string): string {
@@ -86,7 +95,7 @@ export default function DashboardTable() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [dark, setDark] = useState(true);
-  const [activeTab, setActiveTab] = useState<"feeds" | "intel" | "network" | "map">("feeds");
+  const [activeTab, setActiveTab] = useState<"feeds" | "intel" | "network" | "map" | "signals">("feeds");
 
   useEffect(() => {
     const saved = localStorage.getItem("wd-theme");
@@ -381,6 +390,16 @@ export default function DashboardTable() {
             >
               MAP
             </button>
+            <button
+              onClick={() => setActiveTab("signals")}
+              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
+                activeTab === "signals"
+                  ? t.tabActive
+                  : t.tabInactive
+              }`}
+            >
+              SIGNALS
+            </button>
           </div>
 
           {/* Mobile: category filter inline with tabs */}
@@ -396,7 +415,7 @@ export default function DashboardTable() {
             ))}
           </select>
 
-          {(activeTab === "feeds" || activeTab === "map") && (
+          {(activeTab === "feeds" || activeTab === "map" || activeTab === "signals") && (
             <div className="hidden sm:flex items-center gap-3 md:gap-5">
               <span className="flex items-center gap-1">
                 <span className="w-2.5 h-1 bg-red-500" />
@@ -522,6 +541,18 @@ export default function DashboardTable() {
       {/* ─── INTEL Tab ─── */}
       {activeTab === "intel" && items.length > 0 && (
         <IntelTab
+          items={items}
+          dark={dark}
+          onEntityClick={(name) => {
+            setEntityFilter(name);
+            setActiveTab("feeds");
+          }}
+        />
+      )}
+
+      {/* ─── SIGNALS Tab ─── */}
+      {activeTab === "signals" && items.length > 0 && (
+        <SignalsTab
           items={items}
           dark={dark}
           onEntityClick={(name) => {

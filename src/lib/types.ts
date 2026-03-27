@@ -69,3 +69,24 @@ export interface ExtractedEntity {
   cooccurrences: [string, number][];
   sentiment: number; // -1 (negative) to +1 (positive)
 }
+
+export type SignalType =
+  | "surge"
+  | "sentiment_deterioration"
+  | "cross_category"
+  | "novel_cooccurrence"
+  | "escalation";
+
+export type SignalSeverity = "critical" | "warning" | "advisory";
+
+export interface Signal {
+  id: string;
+  type: SignalType;
+  severity: SignalSeverity;
+  title: string;
+  description: string;
+  entities: string[];
+  confidence: number;
+  detectedAt: string;
+  metric: number;
+}
