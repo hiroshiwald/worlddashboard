@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { FeedItem, ExtractedEntity, Signal, SignalSeverity, SignalType } from "@/lib/types";
 import { extractEntities } from "@/lib/entity-extractor";
 import { detectSignals } from "@/lib/signal-detector";
+import { computeCascades, CascadeChain, CascadeNode, DOMAIN_LABELS } from "@/lib/cascade-graph";
 
 interface SignalsTabProps {
   items: FeedItem[];
@@ -260,6 +261,11 @@ export default function SignalsTab({
     );
   }, [signals, mutedEntities]);
 
+  const cascadeChains = useMemo(
+    () => computeCascades(activeSignals, entities, items),
+    [activeSignals, entities, items]
+  );
+
   const [showAll, setShowAll] = useState(false);
   const INITIAL_LIMIT = 12;
 
@@ -496,6 +502,60 @@ export default function SignalsTab({
             ? "ALL SIGNALS MUTED — CLEAR MUTES TO VIEW"
             : "NO SIGNALS DETECTED"}
         </div>
+      )}
+
+      {/* ─── Cascading Effects ─── */}
+      {cascadeChains.length > 0 && (
+        <>
+          <div
+            className={`flex items-center gap-3 px-3 py-1.5 mt-2 mb-1 text-[10px] uppercase tracking-wide font-bold ${t.summaryBg} ${t.summaryText} border ${t.summaryBorder}`}
+          >
+            CASCADING EFFECTS — {cascadeChains.length} CHAINS
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5 mb-1">
+            {cascadeChains.map((chain, ci) => (
+              <div
+                key={ci}
+                className={`flex items-center gap-1 px-2 py-1.5 border rounded text-[10px] ${t.cardBg}`}
+              >
+                {chain.nodes.map((node, ni) => {
+                  const sev = node.order === 0
+                    ? chain.signalSeverity
+                    : node.order === 1
+                    ? (chain.signalSeverity === "critical" ? "warning" : "advisory")
+                    : "advisory";
+                  const bg = sev === "critical"
+                    ? (dark ? "bg-red-500/15 border-red-500/30" : "bg-red-50 border-red-200")
+                    : sev === "warning"
+                    ? (dark ? "bg-amber-500/15 border-amber-500/30" : "bg-amber-50 border-amber-200")
+                    : (dark ? "bg-yellow-500/10 border-yellow-500/20" : "bg-yellow-50 border-yellow-200");
+                  const textCol = sev === "critical"
+                    ? (dark ? "text-red-400" : "text-red-700")
+                    : sev === "warning"
+                    ? (dark ? "text-amber-400" : "text-amber-700")
+                    : (dark ? "text-yellow-400" : "text-yellow-700");
+                  return (
+                    <span key={ni} className="flex items-center gap-1 min-w-0">
+                      {ni > 0 && (
+                        <span className={`${t.textMuted} flex-shrink-0`}>→</span>
+                      )}
+                      <span
+                        className={`inline-flex flex-col px-1.5 py-0.5 rounded border ${bg} min-w-0`}
+                      >
+                        <span className={`font-bold truncate ${textCol}`}>
+                          {DOMAIN_LABELS[node.domain]}
+                        </span>
+                        <span className={`truncate ${t.textMuted}`} style={{ fontSize: "9px" }}>
+                          {node.label}
+                        </span>
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* ─── Entity Velocity Grid ─── */}
