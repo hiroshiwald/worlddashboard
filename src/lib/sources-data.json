@@ -706,8 +706,8 @@
     "category": "News",
     "type": "RSS",
     "tier": "Tier 1 - Wire Service",
-    "url": "https://www.reutersagency.com/feed/",
-    "notes": "Primary wire service feed",
+    "url": "https://news.google.com/rss/search?q=site:reuters.com+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Via Google News RSS proxy (direct feed blocked)",
     "status": "live"
   },
   {
@@ -738,8 +738,8 @@
     "category": "News",
     "type": "RSS",
     "tier": "Tier 2 - Major Outlet",
-    "url": "https://rss.cnn.com/rss/edition_world.rss",
-    "notes": "CNN international edition",
+    "url": "https://news.google.com/rss/search?q=site:cnn.com+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Via Google News RSS proxy (direct feed blocked)",
     "status": "live"
   },
   {
@@ -1477,6 +1477,206 @@
     "tier": "Primary",
     "url": "https://www.acaps.org/en/countries/rss",
     "notes": "Humanitarian crisis severity assessments and risk monitoring",
+    "status": "live"
+  },
+  {
+    "id": 148,
+    "name": "PBS NewsHour",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:pbs.org+newshour+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US public broadcasting - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 149,
+    "name": "Wall Street Journal - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 1 - Wire Service",
+    "url": "https://news.google.com/rss/search?q=site:wsj.com+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US business/world news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 150,
+    "name": "Politico",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:politico.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US politics - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 151,
+    "name": "The Hill",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:thehill.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US politics - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 152,
+    "name": "Axios",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:axios.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US politics/tech - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 153,
+    "name": "Fox News - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:foxnews.com+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US cable news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 154,
+    "name": "Tagesschau",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:tagesschau.de&hl=en-US&gl=US&ceid=US:en",
+    "notes": "German public broadcasting - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 155,
+    "name": "El Pais English",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:english.elpais.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Spanish press (English edition) - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 156,
+    "name": "ANSA English",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:ansa.it+english&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Italian wire service - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 157,
+    "name": "Meduza",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:meduza.io&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Russian independent media (exiled) - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 158,
+    "name": "Krebs on Security",
+    "category": "Cyber",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:krebsonsecurity.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Security journalism - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 159,
+    "name": "The Hacker News",
+    "category": "Cyber",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:thehackernews.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Cybersecurity news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 160,
+    "name": "Military Times",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:militarytimes.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US military news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 161,
+    "name": "CNA Singapore",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:channelnewsasia.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Channel News Asia - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 162,
+    "name": "Bangkok Post",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:bangkokpost.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Thai English press - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 163,
+    "name": "Chosun Ilbo English",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:english.chosun.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "South Korean press - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 164,
+    "name": "FAO News",
+    "category": "Food Security",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:fao.org+news&hl=en-US&gl=US&ceid=US:en",
+    "notes": "UN food agency - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 165,
+    "name": "Task and Purpose",
+    "category": "Defense",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:taskandpurpose.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US military culture - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 166,
+    "name": "TechCrunch",
+    "category": "Tech",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:techcrunch.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Tech/startup news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 167,
+    "name": "CoinDesk",
+    "category": "Crypto",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:coindesk.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Crypto news - via Google News RSS",
     "status": "live"
   }
 ]
