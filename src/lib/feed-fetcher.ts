@@ -152,11 +152,27 @@ function extractAttr(xml: string, tag: string, attr: string): string {
 
 // --- Image extraction ---
 function extractImageUrl(block: string): string {
-  // 1. <media:content url="...">
-  const mediaContent = block.match(
+  // 1a. <media:content url="..."> with known image extension
+  const mediaContentExt = block.match(
     /<media:content[^>]+url="([^"]+\.(jpg|jpeg|png|webp|gif)[^"]*)"/i
   );
-  if (mediaContent) return mediaContent[1];
+  if (mediaContentExt) return mediaContentExt[1];
+
+  // 1b. <media:content medium="image" url="..."> (Google News proxy URLs without extensions)
+  const mediaImg = block.match(
+    /<media:content[^>]+medium="image"[^>]+url="([^"]+)"/i
+  );
+  if (mediaImg) return mediaImg[1];
+  const mediaImg2 = block.match(
+    /<media:content[^>]+url="([^"]+)"[^>]+medium="image"/i
+  );
+  if (mediaImg2) return mediaImg2[1];
+
+  // 1c. <media:content url="..."> any URL (fallback)
+  const mediaContentAny = block.match(
+    /<media:content[^>]+url="(https?:\/\/[^"]+)"/i
+  );
+  if (mediaContentAny) return mediaContentAny[1];
 
   // 2. <media:thumbnail url="...">
   const mediaThumbnail = block.match(

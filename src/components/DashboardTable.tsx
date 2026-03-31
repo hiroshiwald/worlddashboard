@@ -650,7 +650,9 @@ export default function DashboardTable() {
                                 }}
                               />
                             ) : (
-                              <div className={`w-[74px] h-[50px] shrink-0 mt-0.5 ${t.imgPlaceholder}`} />
+                              <div className={`w-[74px] h-[50px] shrink-0 mt-0.5 flex items-center justify-center text-lg font-bold text-white/60 ${t.imgPlaceholder}`}>
+                                {item.sourceName.charAt(0)}
+                              </div>
                             )}
                             <a
                               href={item.link}
@@ -705,7 +707,7 @@ export default function DashboardTable() {
 
                   {/* Headline with image */}
                   <div className="flex items-start gap-2.5 mb-1.5">
-                    {item.imageUrl && (
+                    {item.imageUrl ? (
                       <img
                         src={item.imageUrl}
                         alt=""
@@ -715,6 +717,10 @@ export default function DashboardTable() {
                           (e.target as HTMLImageElement).style.display = "none";
                         }}
                       />
+                    ) : (
+                      <div className={`w-16 h-[46px] shrink-0 flex items-center justify-center text-base font-bold text-white/60 ${t.imgPlaceholder}`}>
+                        {item.sourceName.charAt(0)}
+                      </div>
                     )}
                     <a
                       href={item.link}
