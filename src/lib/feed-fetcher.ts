@@ -151,6 +151,20 @@ function extractAttr(xml: string, tag: string, attr: string): string {
 }
 
 // --- Image extraction ---
+function getDomainFromUrl(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function getSourceImageUrl(link: string, sourceUrl: string): string {
+  const domain = getDomainFromUrl(link) || getDomainFromUrl(sourceUrl);
+  if (!domain) return "";
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
+}
+
 function extractImageUrl(block: string): string {
   // 1a. <media:content url="..."> with known image extension
   const mediaContentExt = block.match(
@@ -176,7 +190,7 @@ function extractImageUrl(block: string): string {
 
   // 2. <media:thumbnail url="...">
   const mediaThumbnail = block.match(
-    /<media:thumbnail[^>]+url="([^"]+)"/i
+    /<media:thumbnail[^>]+url=["']([^"']+)["']/i
   );
   if (mediaThumbnail) return mediaThumbnail[1];
 
@@ -204,8 +218,21 @@ function extractImageUrl(block: string): string {
     extractTag(block, "content:encoded") ||
     extractTag(block, "content") ||
     extractTag(block, "summary");
-  const imgMatch = description.match(/<img[^>]+src="([^"]+)"/i);
+  const imgMatch = description.match(/<img[^>]+src=["']([^"']+)["']/i);
   if (imgMatch && imgMatch[1].startsWith("http")) return imgMatch[1];
+
+  // 6. Escaped <img> tags in HTML-encoded descriptions
+  const decodedDescription = description
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&");
+  const escapedImgMatch = decodedDescription.match(
+    /<img[^>]+src=["']([^"']+)["']/i
+  );
+  if (escapedImgMatch && escapedImgMatch[1].startsWith("http")) {
+    return escapedImgMatch[1];
+  }
 
   return "";
 }
@@ -302,7 +329,8 @@ function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
       continue;
     }
 
-    const imageUrl = extractImageUrl(block);
+    const imageUrl =
+      extractImageUrl(block) || getSourceImageUrl(link || "", source.url);
 
     if (title) {
       items.push({
@@ -366,7 +394,8 @@ function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
       continue;
     }
 
-    const imageUrl = extractImageUrl(block);
+    const imageUrl =
+      extractImageUrl(block) || getSourceImageUrl(link || "", source.url);
 
     if (title) {
       items.push({

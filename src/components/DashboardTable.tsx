@@ -75,6 +75,15 @@ function formatDate(isoString: string): string {
     .toUpperCase();
 }
 
+function fallbackSourceImage(link: string): string {
+  try {
+    const domain = new URL(link).hostname;
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
+  } catch {
+    return "";
+  }
+}
+
 export default function DashboardTable() {
   const {
     items,
@@ -645,8 +654,13 @@ export default function DashboardTable() {
                                 className={`w-[74px] h-[50px] object-cover shrink-0 mt-0.5 ${t.imgPlaceholder}`}
                                 loading="lazy"
                                 onError={(e) => {
-                                  (e.target as HTMLImageElement).style.display =
-                                    "none";
+                                  const img = e.currentTarget;
+                                  const sourceFallback = fallbackSourceImage(item.link);
+                                  if (sourceFallback && img.src !== sourceFallback) {
+                                    img.src = sourceFallback;
+                                    return;
+                                  }
+                                  img.style.display = "none";
                                 }}
                               />
                             ) : (
@@ -714,7 +728,13 @@ export default function DashboardTable() {
                         className={`w-16 h-[46px] object-cover shrink-0 ${t.imgPlaceholder}`}
                         loading="lazy"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = "none";
+                          const img = e.currentTarget;
+                          const sourceFallback = fallbackSourceImage(item.link);
+                          if (sourceFallback && img.src !== sourceFallback) {
+                            img.src = sourceFallback;
+                            return;
+                          }
+                          img.style.display = "none";
                         }}
                       />
                     ) : (
