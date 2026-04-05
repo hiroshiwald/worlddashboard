@@ -103,7 +103,7 @@ export default function NetworkTab({ items, dark, onEntityClick }: NetworkTabPro
       // Draw circle
       ctx.beginPath();
       ctx.arc(node.x!, node.y!, radius, 0, 2 * Math.PI);
-      ctx.fillStyle = color + "88";
+      ctx.fillStyle = color + "66";
       ctx.fill();
       ctx.strokeStyle = color;
       ctx.lineWidth = 1.5 / globalScale;
@@ -111,11 +111,11 @@ export default function NetworkTab({ items, dark, onEntityClick }: NetworkTabPro
 
       // Draw label
       if (globalScale > 0.6 || node.mentions > 5) {
-        ctx.font = `bold ${fontSize}px Inter, sans-serif`;
+        ctx.font = `600 ${fontSize}px Inter, sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        ctx.fillStyle = dark ? "#e2e8f0" : "#1c1917";
-        ctx.fillText(label.toUpperCase(), node.x!, node.y! + radius + 2);
+        ctx.fillStyle = dark ? "#e2e8f0" : "#1f2937";
+        ctx.fillText(label, node.x!, node.y! + radius + 2);
       }
     },
     [dark]
@@ -132,7 +132,6 @@ export default function NetworkTab({ items, dark, onEntityClick }: NetworkTabPro
     []
   );
 
-  // Fit to view after mount
   useEffect(() => {
     const timer = setTimeout(() => {
       if (graphRef.current) {
@@ -150,32 +149,32 @@ export default function NetworkTab({ items, dark, onEntityClick }: NetworkTabPro
         nodeCanvasObject={nodeCanvasObject}
         nodePointerAreaPaint={nodePointerAreaPaint}
         onNodeClick={handleNodeClick}
-        linkColor={() => dark ? "rgba(148,163,184,0.15)" : "rgba(120,113,108,0.15)"}
+        linkColor={() => dark ? "rgba(148,163,184,0.12)" : "rgba(107,114,128,0.15)"}
         linkWidth={(link: any) => Math.max(0.5, Math.sqrt(link.value) * 0.5)}
-        backgroundColor={dark ? "#020617" : "#fafaf9"}
+        backgroundColor={dark ? "#020617" : "#f9fafb"}
         cooldownTicks={100}
         d3AlphaDecay={0.02}
         d3VelocityDecay={0.3}
       />
       {/* Legend */}
-      <div className={`absolute bottom-3 left-3 flex flex-wrap gap-3 px-3 py-2 text-[10px] uppercase tracking-wide rounded ${
-        dark ? "bg-slate-900/90 text-slate-400 border border-slate-700" : "bg-white/90 text-stone-500 border border-stone-200"
+      <div className={`absolute bottom-4 left-4 flex flex-wrap gap-3 px-4 py-2.5 text-xs rounded-xl shadow-md ${
+        dark ? "bg-slate-900/95 text-slate-400 border border-slate-700" : "bg-white/95 text-gray-500 border border-gray-200"
       }`}>
-        <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dark ? TYPE_COLORS.country.dark : TYPE_COLORS.country.light }} />
-          COUNTRY
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: dark ? TYPE_COLORS.country.dark : TYPE_COLORS.country.light }} />
+          Country
         </span>
-        <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dark ? TYPE_COLORS.organization.dark : TYPE_COLORS.organization.light }} />
-          ORG
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: dark ? TYPE_COLORS.organization.dark : TYPE_COLORS.organization.light }} />
+          Org
         </span>
-        <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dark ? TYPE_COLORS.person.dark : TYPE_COLORS.person.light }} />
-          PERSON
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: dark ? TYPE_COLORS.person.dark : TYPE_COLORS.person.light }} />
+          Person
         </span>
-        <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: dark ? TYPE_COLORS.region.dark : TYPE_COLORS.region.light }} />
-          REGION
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: dark ? TYPE_COLORS.region.dark : TYPE_COLORS.region.light }} />
+          Region
         </span>
       </div>
     </div>

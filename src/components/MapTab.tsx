@@ -121,25 +121,22 @@ export default function MapTab({ items, dark, onEntityClick }: MapTabProps) {
   );
 
   const t = {
-    popupBg: dark ? "bg-slate-900 text-slate-100" : "bg-white text-stone-900",
-    popupBorder: dark ? "border-slate-700" : "border-stone-300",
+    popupBg: dark ? "bg-slate-900 text-slate-100" : "bg-white text-gray-900",
     headlineLink: dark
-      ? "text-amber-300 hover:text-amber-200"
-      : "text-blue-700 hover:text-blue-900",
-    subText: dark ? "text-slate-400" : "text-stone-500",
+      ? "text-blue-400 hover:text-blue-300"
+      : "text-blue-600 hover:text-blue-700",
+    subText: dark ? "text-slate-400" : "text-gray-500",
   };
 
   return (
-    <div
-      className="w-full h-full"
-    >
+    <div className="w-full h-full">
       <MapContainer
         center={[20, 0]}
         zoom={2}
         minZoom={2}
         maxZoom={10}
         className="w-full h-full"
-        style={{ background: dark ? "#0f172a" : "#f5f5f4" }}
+        style={{ background: dark ? "#0f172a" : "#f9fafb" }}
         worldCopyJump={true}
       >
         <TileSwapper dark={dark} />
@@ -151,33 +148,33 @@ export default function MapTab({ items, dark, onEntityClick }: MapTabProps) {
             pathOptions={{
               color: URGENCY_COLORS[m.maxUrgency],
               fillColor: URGENCY_COLORS[m.maxUrgency],
-              fillOpacity: 0.55,
+              fillOpacity: 0.5,
               weight: 2,
-              opacity: 0.9,
+              opacity: 0.85,
             }}
           >
             <Tooltip
               direction="top"
               offset={[0, -8]}
-              className="map-tooltip"
+              className={dark ? "map-tooltip-dark" : "map-tooltip"}
             >
-              <span className="text-xs font-bold uppercase">
+              <span className="text-xs font-semibold">
                 {m.name}
               </span>
-              <span className="text-xs ml-1.5 opacity-70">
+              <span className="text-xs ml-1.5 opacity-60">
                 {m.mentions} mention{m.mentions !== 1 ? "s" : ""}
               </span>
             </Tooltip>
-            <Popup className="map-popup" maxWidth={320} minWidth={220}>
-              <div className={`${t.popupBg} -m-[13px] -mt-[12px] p-3 rounded`}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold uppercase tracking-wide">
+            <Popup className={dark ? "map-popup map-popup-dark" : "map-popup"} maxWidth={320} minWidth={220}>
+              <div className={`${t.popupBg} -m-[13px] -mt-[12px] p-4 rounded-xl shadow-lg`}>
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-sm font-bold tracking-wide">
                     {m.name}
                   </span>
                   <span
-                    className="text-[10px] px-1.5 py-0.5 rounded font-bold"
+                    className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
                     style={{
-                      backgroundColor: URGENCY_COLORS[m.maxUrgency] + "30",
+                      backgroundColor: URGENCY_COLORS[m.maxUrgency] + "20",
                       color: URGENCY_COLORS[m.maxUrgency],
                     }}
                   >
@@ -186,7 +183,7 @@ export default function MapTab({ items, dark, onEntityClick }: MapTabProps) {
                 </div>
 
                 {/* Urgency breakdown bar */}
-                <div className="flex h-1.5 rounded overflow-hidden mb-2 gap-px">
+                <div className="flex h-2 rounded-full overflow-hidden mb-2.5 gap-px">
                   {URGENCY_PRIORITY.filter(
                     (l) => m.urgencyBreakdown[l] > 0
                   ).map((level) => (
@@ -201,20 +198,20 @@ export default function MapTab({ items, dark, onEntityClick }: MapTabProps) {
                   ))}
                 </div>
 
-                <div className={`text-[10px] mb-2 ${t.subText}`}>
-                  {m.mentions} MENTION{m.mentions !== 1 ? "S" : ""} ACROSS{" "}
-                  {m.headlines.length}+ STORIES
+                <div className={`text-xs mb-2.5 ${t.subText}`}>
+                  {m.mentions} mention{m.mentions !== 1 ? "s" : ""} across{" "}
+                  {m.headlines.length}+ stories
                 </div>
 
                 {/* Headlines */}
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {m.headlines.map((h, i) => (
                     <a
                       key={i}
                       href={h.link}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={`block text-[11px] leading-snug hover:underline ${t.headlineLink}`}
+                      className={`block text-xs leading-snug hover:underline ${t.headlineLink}`}
                     >
                       {h.title.length > 80
                         ? h.title.slice(0, 80) + "..."
@@ -226,9 +223,13 @@ export default function MapTab({ items, dark, onEntityClick }: MapTabProps) {
                 {onEntityClick && (
                   <button
                     onClick={() => onEntityClick(m.name)}
-                    className={`mt-2 text-[10px] uppercase tracking-wide ${t.subText} hover:underline`}
+                    className={`mt-3 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                      dark
+                        ? "bg-slate-800 hover:bg-slate-700 text-slate-300"
+                        : "bg-gray-100 hover:bg-gray-200 text-gray-700"
+                    }`}
                   >
-                    VIEW IN FEEDS &rarr;
+                    View in Feeds &rarr;
                   </button>
                 )}
               </div>

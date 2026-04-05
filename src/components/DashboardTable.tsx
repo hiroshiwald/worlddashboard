@@ -15,7 +15,7 @@ const MapTab = dynamic(() => import("./MapTab"), {
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center h-full">
-      <p className="text-xs uppercase tracking-wide text-slate-500">LOADING MAP...</p>
+      <p className="text-sm text-gray-400">Loading map...</p>
     </div>
   ),
 });
@@ -24,7 +24,7 @@ const NetworkTab = dynamic(() => import("./NetworkTab"), {
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center h-full">
-      <p className="text-xs uppercase tracking-wide text-slate-500">LOADING NETWORK...</p>
+      <p className="text-sm text-gray-400">Loading network...</p>
     </div>
   ),
 });
@@ -33,7 +33,7 @@ const SignalsTab = dynamic(() => import("./SignalsTab"), {
   ssr: false,
   loading: () => (
     <div className="flex items-center justify-center h-full">
-      <p className="text-xs uppercase tracking-wide text-slate-500">ANALYZING SIGNALS...</p>
+      <p className="text-sm text-gray-400">Analyzing signals...</p>
     </div>
   ),
 });
@@ -61,8 +61,8 @@ function formatDate(isoString: string): string {
   const diffMs = now.getTime() - d.getTime();
   const diffHrs = diffMs / (1000 * 60 * 60);
 
-  if (diffHrs < 1) return timeAgo(isoString) + " AGO";
-  if (diffHrs < 24) return `${Math.floor(diffHrs)}H AGO`;
+  if (diffHrs < 1) return timeAgo(isoString) + " ago";
+  if (diffHrs < 24) return `${Math.floor(diffHrs)}h ago`;
 
   return d
     .toLocaleDateString("en-US", {
@@ -103,12 +103,12 @@ export default function DashboardTable() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(false);
   const [activeTab, setActiveTab] = useState<"feeds" | "intel" | "network" | "map" | "signals">("feeds");
 
   useEffect(() => {
     const saved = localStorage.getItem("wd-theme");
-    if (saved === "light") setDark(false);
+    if (saved === "dark") setDark(true);
   }, []);
 
   const toggleTheme = () => {
@@ -134,7 +134,6 @@ export default function DashboardTable() {
   const filteredItems = useMemo(() => {
     let result = items;
 
-    // Apply entity filter (from INTEL tab click)
     if (entityFilter) {
       const ef = entityFilter.toLowerCase();
       result = result.filter(
@@ -187,52 +186,66 @@ export default function DashboardTable() {
     return sort.direction === "asc" ? " ↑" : " ↓";
   };
 
-  // Theme classes
+  // Theme classes — refreshed design
   const t = {
-    bg: dark ? "bg-slate-950" : "bg-stone-50",
-    headerBg: dark ? "bg-slate-900 border-b border-slate-700" : "bg-white border-b border-stone-200 shadow-sm",
-    headerText: dark ? "text-stone-100" : "text-stone-800",
+    bg: dark ? "bg-slate-950" : "bg-gray-50",
+    headerBg: dark ? "bg-slate-900/95 backdrop-blur border-b border-slate-800" : "bg-white/95 backdrop-blur shadow-sm",
+    headerText: dark ? "text-slate-100" : "text-gray-900",
     feedBadge: dark ? "text-emerald-400" : "text-emerald-600",
-    itemCount: dark ? "text-slate-400" : "text-stone-500",
-    searchBg: dark ? "bg-slate-800 border-slate-600 text-slate-100 placeholder-slate-500 focus:border-slate-400" : "bg-stone-100 border-stone-300 text-stone-900 placeholder-stone-400 focus:border-blue-400",
-    selectBg: dark ? "bg-slate-800 border-slate-600 text-slate-200 focus:border-slate-400" : "bg-stone-100 border-stone-300 text-stone-700 focus:border-blue-400",
-    btnBg: dark ? "bg-slate-700 hover:bg-slate-600 border-slate-600 text-slate-200" : "bg-stone-100 hover:bg-stone-200 border-stone-300 text-stone-700",
-    legendText: dark ? "text-slate-500" : "text-stone-500",
-    tableBorder: dark ? "border-slate-700 bg-slate-900" : "border-stone-200 bg-white",
-    theadBg: dark ? "bg-slate-800 border-b border-slate-600" : "bg-stone-100 border-b border-stone-200",
-    theadText: dark ? "text-slate-300 hover:text-white" : "text-stone-600 hover:text-stone-900",
+    itemCount: dark ? "text-slate-400" : "text-gray-500",
+    searchBg: dark
+      ? "bg-slate-800 border-slate-700 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
+      : "bg-gray-100 border-gray-200 text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20",
+    selectBg: dark
+      ? "bg-slate-800 border-slate-700 text-slate-200 focus:border-blue-500"
+      : "bg-gray-100 border-gray-200 text-gray-700 focus:border-blue-500",
+    btnBg: dark
+      ? "bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200"
+      : "bg-white hover:bg-gray-50 border-gray-200 text-gray-700 shadow-sm",
+    legendText: dark ? "text-slate-500" : "text-gray-400",
+    tableBorder: dark ? "bg-slate-900 border-slate-800" : "bg-white",
+    theadBg: dark ? "bg-slate-800/60 border-b border-slate-700" : "bg-gray-50/80 border-b border-gray-200",
+    theadText: dark ? "text-slate-400 hover:text-slate-200" : "text-gray-500 hover:text-gray-700",
     rowAltA: dark ? "bg-slate-900" : "bg-white",
-    rowAltB: dark ? "bg-slate-900/60" : "bg-stone-50",
-    rowHover: dark ? "hover:bg-slate-800" : "hover:bg-blue-50/50",
-    rowBorder: dark ? "border-b border-slate-800" : "border-b border-stone-100",
-    dtgText: dark ? "text-slate-300" : "text-stone-500",
-    sourceText: dark ? "text-slate-100" : "text-stone-800",
-    headlineText: dark ? "text-white hover:text-amber-300" : "text-stone-900 hover:text-blue-600",
-    summaryText: dark ? "text-slate-400" : "text-stone-500",
-    tierText: dark ? "text-slate-400" : "text-stone-400",
-    imgPlaceholder: dark ? "bg-slate-800" : "bg-stone-100",
-    loadingText: dark ? "text-slate-400" : "text-stone-500",
-    loadingSub: dark ? "text-slate-600" : "text-stone-400",
-    cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-stone-200",
-    cardBorder: dark ? "border-slate-800" : "border-stone-200",
-    tabActive: dark ? "text-white bg-slate-700" : "text-white bg-blue-600",
-    tabInactive: dark ? "text-slate-500 hover:text-slate-300" : "text-stone-500 hover:text-stone-800",
+    rowAltB: dark ? "bg-slate-900/60" : "bg-gray-50/50",
+    rowHover: dark ? "hover:bg-slate-800/80" : "hover:bg-blue-50/40",
+    rowBorder: dark ? "border-b border-slate-800/60" : "border-b border-gray-100",
+    dtgText: dark ? "text-slate-400" : "text-gray-500",
+    sourceText: dark ? "text-slate-100" : "text-gray-800",
+    headlineText: dark ? "text-slate-100 hover:text-blue-300" : "text-gray-900 hover:text-blue-600",
+    summaryText: dark ? "text-slate-400" : "text-gray-500",
+    tierText: dark ? "text-slate-500" : "text-gray-400",
+    imgPlaceholder: dark ? "bg-slate-800 rounded-lg" : "bg-gray-100 rounded-lg",
+    loadingText: dark ? "text-slate-400" : "text-gray-500",
+    loadingSub: dark ? "text-slate-600" : "text-gray-400",
+    cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-gray-100 shadow-sm",
+    cardBorder: dark ? "border-slate-800" : "border-gray-100",
+    tabActive: dark ? "text-blue-400 border-b-2 border-blue-400" : "text-blue-600 border-b-2 border-blue-600",
+    tabInactive: dark ? "text-slate-500 hover:text-slate-300 border-b-2 border-transparent" : "text-gray-400 hover:text-gray-600 border-b-2 border-transparent",
   };
 
+  const tabs = [
+    { key: "feeds" as const, label: "Feeds" },
+    { key: "intel" as const, label: "Intel" },
+    { key: "network" as const, label: "Network" },
+    { key: "map" as const, label: "Map" },
+    { key: "signals" as const, label: "Signals" },
+  ];
+
   return (
-    <div className={`h-screen flex flex-col ${t.bg} transition-colors duration-200`}>
+    <div className={`h-screen flex flex-col ${t.bg} transition-colors duration-200 ${dark ? "dark-scrollbar" : ""}`}>
       {/* ─── Header Bar ─── */}
       <div className={`shrink-0 z-30 ${t.headerBg}`}>
         {/* Row 1: brand + controls */}
-        <div className="max-w-[1920px] mx-auto px-3 md:px-4 py-2.5 flex items-center justify-between gap-2 md:gap-4">
+        <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-3 flex items-center justify-between gap-3 md:gap-6">
           {/* Left: branding */}
-          <div className="flex items-center gap-2 md:gap-4 shrink-0">
-            <h1 className={`text-xs md:text-sm font-bold tracking-[0.12em] md:tracking-[0.15em] ${t.headerText} uppercase`}>
-              WORLD DASHBOARD
+          <div className="flex items-center gap-3 md:gap-5 shrink-0">
+            <h1 className={`text-sm md:text-base font-bold tracking-wide ${t.headerText}`}>
+              World Dashboard
             </h1>
             {feedsSucceeded > 0 && (
-              <span className={`flex items-center gap-1 sm:gap-1.5 text-[10px] sm:text-xs ${t.feedBadge}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${dark ? "bg-emerald-400" : "bg-emerald-500"} animate-pulse`} />
+              <span className={`flex items-center gap-1.5 text-xs ${t.feedBadge}`}>
+                <span className={`w-2 h-2 rounded-full ${dark ? "bg-emerald-400" : "bg-emerald-500"} animate-pulse`} />
                 {feedsSucceeded}/{feedsAttempted}
               </span>
             )}
@@ -241,48 +254,50 @@ export default function DashboardTable() {
                 {filteredItems.length !== totalItems
                   ? `${filteredItems.length}/${totalItems}`
                   : totalItems}{" "}
-                ITEMS
+                items
               </span>
             )}
           </div>
 
-          {/* Center: search — hidden on very small, shown sm+ */}
+          {/* Center: search */}
           <div className="hidden sm:block flex-1 max-w-lg mx-2 md:mx-4">
             <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs">
-                /
-              </span>
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="SEARCH..."
-                className={`w-full pl-7 pr-8 py-1.5 text-xs border rounded focus:outline-none uppercase ${t.searchBg}`}
+                placeholder="Search feeds..."
+                className={`w-full pl-10 pr-8 py-2 text-sm border rounded-lg focus:outline-none transition-colors ${t.searchBg}`}
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery("")}
-                  className={`absolute right-2.5 top-1/2 -translate-y-1/2 text-xs ${dark ? "text-slate-500 hover:text-slate-200" : "text-stone-400 hover:text-stone-700"}`}
+                  className={`absolute right-3 top-1/2 -translate-y-1/2 ${dark ? "text-slate-500 hover:text-slate-200" : "text-gray-400 hover:text-gray-600"}`}
                 >
-                  CLR
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               )}
             </div>
           </div>
 
           {/* Right: controls */}
-          <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
+          <div className="flex items-center gap-2 md:gap-3 shrink-0">
             <button
               onClick={toggleTheme}
-              className={`p-1.5 md:p-2 border rounded transition-colors ${t.btnBg}`}
+              className={`p-2 border rounded-lg transition-colors ${t.btnBg}`}
               title={dark ? "Switch to light mode" : "Switch to dark mode"}
             >
               {dark ? (
-                <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
                 </svg>
               ) : (
-                <svg className="w-3.5 h-3.5 md:w-4 md:h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
                 </svg>
               )}
@@ -291,17 +306,17 @@ export default function DashboardTable() {
             <select
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
-              className={`hidden md:block px-2 py-1.5 text-xs border rounded focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
+              className={`hidden md:block px-3 py-2 text-sm border rounded-lg focus:outline-none cursor-pointer ${t.selectBg}`}
             >
               {categories.map((cat) => (
                 <option key={cat} value={cat}>
-                  {cat === "all" ? "ALL CATEGORIES" : cat.toUpperCase()}
+                  {cat === "all" ? "All Categories" : cat}
                 </option>
               ))}
             </select>
 
             {fetchedAt && (
-              <span className={`hidden lg:inline text-xs ${dark ? "text-slate-500" : "text-stone-400"}`}>
+              <span className={`hidden lg:inline text-xs ${dark ? "text-slate-500" : "text-gray-400"}`}>
                 {timeAgo(fetchedAt)}
               </span>
             )}
@@ -309,10 +324,10 @@ export default function DashboardTable() {
             <button
               onClick={refresh}
               disabled={loading}
-              className={`inline-flex items-center gap-1 md:gap-1.5 px-2 md:px-3 py-1.5 text-[10px] md:text-xs font-semibold border rounded transition-colors disabled:opacity-40 uppercase tracking-wide ${t.btnBg}`}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-40 ${t.btnBg}`}
             >
               <svg
-                className={`w-3 h-3 md:w-3.5 md:h-3.5 ${loading ? "animate-spin" : ""}`}
+                className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -324,123 +339,86 @@ export default function DashboardTable() {
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                 />
               </svg>
-              <span className="hidden sm:inline">REFRESH</span>
+              <span className="hidden sm:inline">Refresh</span>
             </button>
           </div>
         </div>
 
-        {/* Row 2 mobile: search bar (shown on small screens only) */}
-        <div className="sm:hidden max-w-[1920px] mx-auto px-3 pb-1.5">
+        {/* Row 2 mobile: search bar */}
+        <div className="sm:hidden max-w-[1920px] mx-auto px-4 pb-2">
           <div className="relative">
-            <span className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-xs ${dark ? "text-slate-500" : "text-stone-400"}`}>
-              /
-            </span>
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="SEARCH..."
-              className={`w-full pl-7 pr-8 py-1.5 text-xs border rounded focus:outline-none uppercase ${t.searchBg}`}
+              placeholder="Search feeds..."
+              className={`w-full pl-10 pr-8 py-2 text-sm border rounded-lg focus:outline-none transition-colors ${t.searchBg}`}
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery("")}
-                className={`absolute right-2.5 top-1/2 -translate-y-1/2 text-xs ${dark ? "text-slate-500 hover:text-slate-200" : "text-stone-400 hover:text-stone-700"}`}
+                className={`absolute right-3 top-1/2 -translate-y-1/2 ${dark ? "text-slate-500 hover:text-slate-200" : "text-gray-400 hover:text-gray-600"}`}
               >
-                CLR
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
               </button>
             )}
           </div>
         </div>
 
         {/* Row 3: tabs + legend */}
-        <div className={`max-w-[1920px] mx-auto px-3 md:px-4 pb-1.5 flex items-center gap-3 md:gap-6 text-[10px] uppercase tracking-wide ${t.legendText}`}>
-          <div className="flex items-center gap-0.5 mr-1 md:mr-2">
-            <button
-              onClick={() => setActiveTab("feeds")}
-              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
-                activeTab === "feeds"
-                  ? t.tabActive
-                  : t.tabInactive
-              }`}
-            >
-              FEEDS
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab("intel");
-                setEntityFilter(null);
-              }}
-              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
-                activeTab === "intel"
-                  ? t.tabActive
-                  : t.tabInactive
-              }`}
-            >
-              INTEL
-            </button>
-            <button
-              onClick={() => setActiveTab("network")}
-              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
-                activeTab === "network"
-                  ? t.tabActive
-                  : t.tabInactive
-              }`}
-            >
-              NETWORK
-            </button>
-            <button
-              onClick={() => setActiveTab("map")}
-              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
-                activeTab === "map"
-                  ? t.tabActive
-                  : t.tabInactive
-              }`}
-            >
-              MAP
-            </button>
-            <button
-              onClick={() => setActiveTab("signals")}
-              className={`px-2.5 md:px-3 py-1 text-[10px] md:text-xs font-semibold uppercase tracking-wider rounded transition-colors ${
-                activeTab === "signals"
-                  ? t.tabActive
-                  : t.tabInactive
-              }`}
-            >
-              SIGNALS
-            </button>
+        <div className={`max-w-[1920px] mx-auto px-4 md:px-6 flex items-center gap-4 md:gap-8 ${t.legendText}`}>
+          <div className="flex items-center gap-1 mr-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => {
+                  setActiveTab(tab.key);
+                  if (tab.key === "intel") setEntityFilter(null);
+                }}
+                className={`px-3 md:px-4 py-2.5 text-sm font-medium transition-colors ${
+                  activeTab === tab.key ? t.tabActive : t.tabInactive
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
 
           {/* Mobile: category filter inline with tabs */}
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className={`md:hidden px-1.5 py-0.5 text-[10px] border rounded focus:outline-none cursor-pointer uppercase ${t.selectBg}`}
+            className={`md:hidden px-2 py-1 text-xs border rounded-lg focus:outline-none cursor-pointer ${t.selectBg}`}
           >
             {categories.map((cat) => (
               <option key={cat} value={cat}>
-                {cat === "all" ? "ALL" : cat.toUpperCase()}
+                {cat === "all" ? "All" : cat}
               </option>
             ))}
           </select>
 
           {(activeTab === "feeds" || activeTab === "map" || activeTab === "signals") && (
-            <div className="hidden sm:flex items-center gap-3 md:gap-5">
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-1 bg-red-500" />
-                CRITICAL
+            <div className="hidden sm:flex items-center gap-4 text-xs">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                Critical
               </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-1 bg-amber-500" />
-                WARNING
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                Warning
               </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-1 bg-yellow-500" />
-                ADVISORY
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+                Advisory
               </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-1 bg-sky-500" />
-                MONITORING
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
+                Monitoring
               </span>
             </div>
           )}
@@ -448,13 +426,13 @@ export default function DashboardTable() {
       </div>
 
       {/* ─── Scrollable Content Area ─── */}
-      <div className="flex-1 overflow-auto min-h-0">
+      <div className={`flex-1 overflow-auto min-h-0 ${dark ? "dark-scrollbar" : ""}`}>
 
       {/* ─── Entity Filter Banner ─── */}
       {entityFilter && activeTab === "feeds" && (
-        <div className={`${dark ? "bg-blue-950/70 border-b border-blue-800" : "bg-blue-50 border-b border-blue-200"}`}>
-          <div className="max-w-[1920px] mx-auto px-3 md:px-4 py-2 flex items-center justify-between">
-            <span className={`text-xs ${dark ? "text-blue-200" : "text-blue-800"}`}>
+        <div className={`${dark ? "bg-blue-950/50 border-b border-blue-900" : "bg-blue-50 border-b border-blue-100"}`}>
+          <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-2.5 flex items-center justify-between">
+            <span className={`text-sm ${dark ? "text-blue-200" : "text-blue-800"}`}>
               Showing results for <strong>&ldquo;{entityFilter}&rdquo;</strong>
               <span className={`ml-2 ${dark ? "text-blue-400" : "text-blue-500"}`}>
                 ({filteredItems.length} {filteredItems.length === 1 ? "item" : "items"})
@@ -462,20 +440,18 @@ export default function DashboardTable() {
             </span>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => {
-                  setEntityFilter(null);
-                }}
-                className={`text-xs font-semibold px-2.5 py-1 rounded transition-colors ${
+                onClick={() => setEntityFilter(null)}
+                className={`text-sm font-medium px-3 py-1 rounded-lg transition-colors ${
                   dark
                     ? "text-blue-200 hover:bg-blue-900 hover:text-white"
                     : "text-blue-700 hover:bg-blue-100 hover:text-blue-900"
                 }`}
               >
-                SHOW ALL
+                Show All
               </button>
               <button
                 onClick={() => setEntityFilter(null)}
-                className={`p-0.5 rounded transition-colors ${
+                className={`p-1 rounded-lg transition-colors ${
                   dark ? "text-blue-400 hover:text-white" : "text-blue-500 hover:text-blue-900"
                 }`}
                 title="Clear filter"
@@ -491,18 +467,18 @@ export default function DashboardTable() {
 
       {/* ─── Error Banner ─── */}
       {error && (
-        <div className="max-w-[1920px] mx-auto px-3 py-3">
-          <div className="bg-red-950 border border-red-700 text-red-300 text-xs px-4 py-2 uppercase">
-            ERROR: {error}
+        <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-3">
+          <div className={`${dark ? "bg-red-950 border-red-800 text-red-300" : "bg-red-50 border-red-200 text-red-700"} border text-sm px-4 py-3 rounded-xl`}>
+            Error: {error}
           </div>
         </div>
       )}
 
       {/* ─── Loading State ─── */}
       {loading && items.length === 0 && (
-        <div className="max-w-[1920px] mx-auto px-4 py-20 text-center">
+        <div className="max-w-[1920px] mx-auto px-6 py-20 text-center">
           <svg
-            className="w-6 h-6 mx-auto mb-3 animate-spin text-slate-500"
+            className={`w-8 h-8 mx-auto mb-4 animate-spin ${dark ? "text-slate-500" : "text-gray-400"}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -514,11 +490,11 @@ export default function DashboardTable() {
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
             />
           </svg>
-          <p className={`text-xs uppercase tracking-wide ${t.loadingText}`}>
-            FETCHING LIVE FEEDS FROM {feedsAttempted || "140+"} SOURCES...
+          <p className={`text-sm ${t.loadingText}`}>
+            Fetching live feeds from {feedsAttempted || "140+"} sources...
           </p>
-          <p className={`text-xs mt-1 ${t.loadingSub}`}>
-            STAND BY — 10-15 SECONDS
+          <p className={`text-xs mt-1.5 ${t.loadingSub}`}>
+            Stand by — 10-15 seconds
           </p>
         </div>
       )}
@@ -574,47 +550,47 @@ export default function DashboardTable() {
       {/* ─── FEEDS: Desktop Table ─── */}
       {activeTab === "feeds" && items.length > 0 && (
         <>
-          {/* Desktop table — hidden on mobile */}
-          <div className="hidden md:block max-w-[1920px] mx-auto px-2 py-2">
-            <div className={`border overflow-auto ${t.tableBorder}`}>
-              <table className="w-full border-collapse text-xs">
+          {/* Desktop table */}
+          <div className="hidden md:block max-w-[1920px] mx-auto px-4 md:px-6 py-4">
+            <div className={`rounded-xl overflow-hidden shadow-sm ${dark ? "shadow-black/20" : ""} ${t.tableBorder}`}>
+              <table className="w-full border-collapse text-sm">
                 <thead className="sticky top-0 z-10">
                   <tr className={t.theadBg}>
                     <th
                       onClick={() => handleSort("published")}
-                      className={`w-28 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                      className={`w-28 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
                     >
                       DTG{getSortArrow("published")}
                     </th>
                     <th
                       onClick={() => handleSort("sourceName")}
-                      className={`min-w-[130px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                      className={`min-w-[130px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
                     >
-                      SOURCE{getSortArrow("sourceName")}
+                      Source{getSortArrow("sourceName")}
                     </th>
                     <th
                       onClick={() => handleSort("sourceCategory")}
-                      className={`min-w-[110px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                      className={`min-w-[120px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
                     >
-                      CATEGORY{getSortArrow("sourceCategory")}
+                      Category{getSortArrow("sourceCategory")}
                     </th>
                     <th
                       onClick={() => handleSort("title")}
-                      className={`min-w-[400px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                      className={`min-w-[400px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
                     >
-                      HEADLINE{getSortArrow("title")}
+                      Headline{getSortArrow("title")}
                     </th>
                     <th
                       onClick={() => handleSort("summary")}
-                      className={`min-w-[240px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                      className={`min-w-[240px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
                     >
-                      SUMMARY{getSortArrow("summary")}
+                      Summary{getSortArrow("summary")}
                     </th>
                     <th
                       onClick={() => handleSort("sourceTier")}
-                      className={`w-28 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
+                      className={`w-28 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
                     >
-                      TIER{getSortArrow("sourceTier")}
+                      Tier{getSortArrow("sourceTier")}
                     </th>
                   </tr>
                 </thead>
@@ -634,24 +610,24 @@ export default function DashboardTable() {
                             : ""
                         } ${t.rowHover} transition-colors ${t.rowBorder}`}
                       >
-                        <td className={`px-3 py-2 text-xs whitespace-nowrap ${t.dtgText}`}>
+                        <td className={`px-4 py-3 text-xs whitespace-nowrap ${t.dtgText}`}>
                           {formatDate(item.published)}
                         </td>
-                        <td className={`px-3 py-2 text-xs font-semibold whitespace-nowrap ${t.sourceText}`}>
+                        <td className={`px-4 py-3 text-sm font-medium whitespace-nowrap ${t.sourceText}`}>
                           {item.sourceName}
                         </td>
-                        <td className="px-3 py-2 text-xs">
+                        <td className="px-4 py-3">
                           <span className={getUrgencyBadgeClasses(level, dark)}>
                             {item.sourceCategory.toUpperCase()}
                           </span>
                         </td>
-                        <td className="px-3 py-2 max-w-[500px]">
-                          <div className="flex items-start gap-2.5">
+                        <td className="px-4 py-3 max-w-[500px]">
+                          <div className="flex items-start gap-3">
                             {item.imageUrl ? (
                               <img
                                 src={item.imageUrl}
                                 alt=""
-                                className={`w-[74px] h-[50px] object-cover shrink-0 mt-0.5 ${t.imgPlaceholder}`}
+                                className={`w-[74px] h-[50px] object-cover shrink-0 mt-0.5 rounded-lg ${t.imgPlaceholder}`}
                                 loading="lazy"
                                 onError={(e) => {
                                   const img = e.currentTarget;
@@ -664,7 +640,7 @@ export default function DashboardTable() {
                                 }}
                               />
                             ) : (
-                              <div className={`w-[74px] h-[50px] shrink-0 mt-0.5 flex items-center justify-center text-lg font-bold text-white/60 ${t.imgPlaceholder}`}>
+                              <div className={`w-[74px] h-[50px] shrink-0 mt-0.5 flex items-center justify-center text-lg font-semibold ${dark ? "text-slate-500" : "text-gray-400"} ${t.imgPlaceholder}`}>
                                 {item.sourceName.charAt(0)}
                               </div>
                             )}
@@ -672,7 +648,7 @@ export default function DashboardTable() {
                               href={item.link}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className={`text-xs font-semibold hover:underline leading-snug line-clamp-2 ${t.headlineText}`}
+                              className={`text-sm font-medium hover:underline leading-snug line-clamp-2 ${t.headlineText}`}
                               title={item.title}
                             >
                               {item.title}
@@ -680,12 +656,12 @@ export default function DashboardTable() {
                           </div>
                         </td>
                         <td
-                          className={`px-3 py-2 text-xs max-w-[300px] ${t.summaryText}`}
+                          className={`px-4 py-3 text-sm max-w-[300px] ${t.summaryText}`}
                           title={item.summary}
                         >
                           <span className="line-clamp-2">{item.summary}</span>
                         </td>
-                        <td className={`px-3 py-2 text-xs whitespace-nowrap uppercase ${t.tierText}`}>
+                        <td className={`px-4 py-3 text-xs whitespace-nowrap uppercase ${t.tierText}`}>
                           {item.sourceTier}
                         </td>
                       </tr>
@@ -697,7 +673,7 @@ export default function DashboardTable() {
           </div>
 
           {/* ─── FEEDS: Mobile Cards ─── */}
-          <div className="md:hidden max-w-[1920px] mx-auto px-2 py-2 space-y-1.5">
+          <div className="md:hidden max-w-[1920px] mx-auto px-4 py-3 space-y-2">
             {sortedItems.map((item, idx) => {
               const level = getUrgencyLevel(item.sourceCategory);
               const rowColor = getRowClasses(level, dark);
@@ -707,25 +683,25 @@ export default function DashboardTable() {
                   key={item.id + idx}
                   className={`${rowColor} ${
                     level === "neutral" ? t.cardBg : ""
-                  } border ${t.cardBorder} px-3 py-2.5`}
+                  } border ${t.cardBorder} rounded-xl px-4 py-3`}
                 >
                   {/* Top line: source + time */}
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className={`text-[10px] font-bold uppercase ${t.sourceText}`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-semibold ${t.sourceText}`}>
                       {item.sourceName}
                     </span>
-                    <span className={`text-[10px] ${t.dtgText}`}>
+                    <span className={`text-xs ${t.dtgText}`}>
                       {formatDate(item.published)}
                     </span>
                   </div>
 
                   {/* Headline with image */}
-                  <div className="flex items-start gap-2.5 mb-1.5">
+                  <div className="flex items-start gap-3 mb-2">
                     {item.imageUrl ? (
                       <img
                         src={item.imageUrl}
                         alt=""
-                        className={`w-16 h-[46px] object-cover shrink-0 ${t.imgPlaceholder}`}
+                        className={`w-16 h-[46px] object-cover shrink-0 rounded-lg ${t.imgPlaceholder}`}
                         loading="lazy"
                         onError={(e) => {
                           const img = e.currentTarget;
@@ -738,7 +714,7 @@ export default function DashboardTable() {
                         }}
                       />
                     ) : (
-                      <div className={`w-16 h-[46px] shrink-0 flex items-center justify-center text-base font-bold text-white/60 ${t.imgPlaceholder}`}>
+                      <div className={`w-16 h-[46px] shrink-0 flex items-center justify-center text-base font-semibold ${dark ? "text-slate-500" : "text-gray-400"} ${t.imgPlaceholder}`}>
                         {item.sourceName.charAt(0)}
                       </div>
                     )}
@@ -746,7 +722,7 @@ export default function DashboardTable() {
                       href={item.link}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={`text-xs font-semibold hover:underline leading-snug ${t.headlineText}`}
+                      className={`text-sm font-medium hover:underline leading-snug ${t.headlineText}`}
                     >
                       {item.title}
                     </a>
@@ -754,17 +730,17 @@ export default function DashboardTable() {
 
                   {/* Summary */}
                   {item.summary && (
-                    <p className={`text-[10px] leading-snug line-clamp-2 mb-1.5 ${t.summaryText}`}>
+                    <p className={`text-xs leading-relaxed line-clamp-2 mb-2 ${t.summaryText}`}>
                       {item.summary}
                     </p>
                   )}
 
                   {/* Bottom: category + tier */}
                   <div className="flex items-center justify-between">
-                    <span className={`text-[10px] ${getUrgencyBadgeClasses(level, dark)}`}>
+                    <span className={getUrgencyBadgeClasses(level, dark)}>
                       {item.sourceCategory.toUpperCase()}
                     </span>
-                    <span className={`text-[10px] uppercase ${t.tierText}`}>
+                    <span className={`text-xs ${t.tierText}`}>
                       {item.sourceTier}
                     </span>
                   </div>
@@ -777,27 +753,27 @@ export default function DashboardTable() {
 
       {/* ─── Empty State ─── */}
       {!loading && items.length === 0 && !error && (
-        <div className="max-w-[1920px] mx-auto px-4 py-20 text-center">
-          <p className={`text-xs uppercase ${t.loadingText}`}>
-            NO FEED ITEMS — PAST 7 DAYS
+        <div className="max-w-[1920px] mx-auto px-6 py-20 text-center">
+          <p className={`text-sm ${t.loadingText}`}>
+            No feed items — past 7 days
           </p>
           <button
             onClick={refresh}
-            className="mt-3 text-slate-400 text-xs hover:text-slate-200 hover:underline uppercase"
+            className={`mt-3 text-sm font-medium hover:underline ${dark ? "text-blue-400" : "text-blue-600"}`}
           >
-            RETRY
+            Retry
           </button>
         </div>
       )}
 
       {/* ─── Search empty state ─── */}
       {!loading && items.length > 0 && sortedItems.length === 0 && activeTab === "feeds" && (
-        <div className="max-w-[1920px] mx-auto px-4 py-12 text-center">
-          <p className={`text-xs uppercase ${t.loadingText}`}>
-            NO RESULTS{searchQuery ? ` FOR \u201C${searchQuery}\u201D` : ""}
-            {entityFilter ? ` FOR \u201C${entityFilter}\u201D` : ""}
+        <div className="max-w-[1920px] mx-auto px-6 py-12 text-center">
+          <p className={`text-sm ${t.loadingText}`}>
+            No results{searchQuery ? ` for \u201C${searchQuery}\u201D` : ""}
+            {entityFilter ? ` for \u201C${entityFilter}\u201D` : ""}
             {categoryFilter !== "all"
-              ? ` IN ${categoryFilter.toUpperCase()}`
+              ? ` in ${categoryFilter}`
               : ""}
           </p>
           <button
@@ -806,9 +782,9 @@ export default function DashboardTable() {
               setEntityFilter(null);
               setCategoryFilter("all");
             }}
-            className={`mt-2 text-xs hover:underline uppercase ${dark ? "text-slate-400 hover:text-slate-200" : "text-stone-500 hover:text-stone-800"}`}
+            className={`mt-2 text-sm font-medium hover:underline ${dark ? "text-blue-400" : "text-blue-600"}`}
           >
-            CLEAR FILTERS
+            Clear Filters
           </button>
         </div>
       )}
