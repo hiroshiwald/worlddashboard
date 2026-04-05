@@ -8,38 +8,52 @@ html {
 }
 
 body {
-  background: #0f172a;
+  background: #f9fafb;
   transition: background-color 0.2s ease;
 }
 
-/* Scrollbar — dark theme */
+/* Scrollbar — light theme default */
 .overflow-auto::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 .overflow-auto::-webkit-scrollbar-track {
-  background: #1e293b;
+  background: #f3f4f6;
 }
 
 .overflow-auto::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: #d1d5db;
   border-radius: 3px;
 }
 
 .overflow-auto::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Dark theme scrollbar override */
+.dark-scrollbar::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.dark-scrollbar::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 3px;
+}
+
+.dark-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #64748b;
 }
 
 /* Row transitions */
 tr {
-  transition: background-color 0.1s ease;
+  transition: background-color 0.15s ease;
 }
 
-/* Selection highlight for dark theme */
+/* Selection highlight */
 ::selection {
-  background: #334155;
-  color: #f1f5f9;
+  background: #bfdbfe;
+  color: #1e3a5f;
 }
 
 /* Leaflet map overrides */
@@ -50,7 +64,7 @@ tr {
 .map-popup .leaflet-popup-content-wrapper {
   background: transparent;
   border-radius: 0;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: none;
   padding: 0;
 }
 
@@ -60,19 +74,37 @@ tr {
 }
 
 .map-popup .leaflet-popup-tip {
+  background: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.map-popup-dark .leaflet-popup-tip {
   background: #0f172a;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .map-tooltip {
   font-family: inherit;
-  background: #1e293b !important;
-  color: #e2e8f0 !important;
-  border: 1px solid #334155 !important;
-  border-radius: 4px !important;
-  padding: 4px 8px !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+  background: white !important;
+  color: #1f2937 !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 8px !important;
+  padding: 6px 10px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
 }
 
 .map-tooltip::before {
+  border-top-color: #e5e7eb !important;
+}
+
+.map-tooltip-dark {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+  border: 1px solid #334155 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+
+.map-tooltip-dark::before {
   border-top-color: #334155 !important;
 }

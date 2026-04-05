@@ -21,7 +21,6 @@ function loadMutedEntities(): Map<string, number> {
     if (!raw) return new Map();
     const arr: [string, number][] = JSON.parse(raw);
     const now = Date.now();
-    // Filter expired
     return new Map(arr.filter(([, expiry]) => expiry > now));
   } catch {
     return new Map();
@@ -40,7 +39,6 @@ function loadPreviousEntityNames(): Set<string> {
     const raw = localStorage.getItem("wd-entity-snapshot");
     if (!raw) return new Set();
     const { names, timestamp } = JSON.parse(raw);
-    // Only use snapshots less than 2 hours old
     if (Date.now() - timestamp > 2 * 60 * 60 * 1000) return new Set();
     return new Set(names);
   } catch {
@@ -143,12 +141,12 @@ function SentimentBadge({ value, dark }: { value: number; dark: boolean }) {
     colorClass = dark ? "text-emerald-300 bg-emerald-500/10" : "text-emerald-600 bg-emerald-50";
   } else {
     label = "NEU";
-    colorClass = dark ? "text-slate-400 bg-slate-500/10" : "text-stone-500 bg-stone-100";
+    colorClass = dark ? "text-slate-400 bg-slate-500/10" : "text-gray-500 bg-gray-100";
   }
 
   return (
     <span
-      className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${colorClass}`}
+      className={`inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full ${colorClass}`}
       title={`Sentiment: ${value.toFixed(2)}`}
     >
       {label}
@@ -173,13 +171,13 @@ function UrgencyMiniBar({
     {
       key: "neutral",
       count: breakdown.neutral + breakdown.system,
-      color: dark ? "bg-slate-600" : "bg-stone-300",
+      color: dark ? "bg-slate-600" : "bg-gray-300",
     },
   ].filter((s) => s.count > 0);
 
   return (
     <div
-      className="flex h-2 w-14 overflow-hidden"
+      className="flex h-2.5 w-16 rounded-full overflow-hidden"
       title={segments.map((s) => `${s.key}: ${s.count}`).join(", ")}
     >
       {segments.map((seg) => (
@@ -200,7 +198,6 @@ export default function SignalsTab({
 }: SignalsTabProps) {
   const entities = useMemo(() => extractEntities(items), [items]);
 
-  // --- Muting state (persisted to localStorage) ---
   const [mutedEntities, setMutedEntities] = useState<Map<string, number>>(
     () => new Map()
   );
@@ -223,7 +220,6 @@ export default function SignalsTab({
     localStorage.removeItem("wd-muted-entities");
   }, []);
 
-  // --- Novelty tracking (entity snapshot) ---
   const previousEntityNames = useRef<Set<string>>(new Set());
   const lastSnapshotTime = useRef<number>(0);
 
@@ -231,7 +227,6 @@ export default function SignalsTab({
     previousEntityNames.current = loadPreviousEntityNames();
   }, []);
 
-  // Save snapshot periodically
   useEffect(() => {
     const now = Date.now();
     if (
@@ -243,13 +238,11 @@ export default function SignalsTab({
     }
   }, [entities]);
 
-  // --- Signal detection ---
   const signals = useMemo(
     () => detectSignals(entities, items, previousEntityNames.current),
     [entities, items]
   );
 
-  // Filter out signals where ALL entities are muted
   const activeSignals = useMemo(() => {
     if (mutedEntities.size === 0) return signals;
     const now = Date.now();
@@ -273,7 +266,6 @@ export default function SignalsTab({
     ? activeSignals
     : activeSignals.slice(0, INITIAL_LIMIT);
 
-  // Top 20 entities by recent mentions for the velocity grid (excluding muted)
   const topEntities = useMemo(() => {
     const now = Date.now();
     return [...entities]
@@ -285,7 +277,6 @@ export default function SignalsTab({
       .slice(0, 20);
   }, [entities, mutedEntities]);
 
-  // Compute max values for normalizing bars
   const maxHour = useMemo(
     () => Math.max(1, ...topEntities.map((e) => e.recentMentions.hour)),
     [topEntities]
@@ -310,115 +301,117 @@ export default function SignalsTab({
   const t = {
     cardBg: dark
       ? "bg-slate-900 border-slate-700"
-      : "bg-white border-stone-200",
-    summaryBg: dark ? "bg-slate-800/50" : "bg-stone-100",
-    summaryText: dark ? "text-slate-300" : "text-stone-700",
-    summaryBorder: dark ? "border-slate-700" : "border-stone-300",
-    text: dark ? "text-slate-200" : "text-stone-800",
-    textMuted: dark ? "text-slate-400" : "text-stone-500",
+      : "bg-white border-gray-100 shadow-sm",
+    summaryBg: dark ? "bg-slate-900 shadow-lg shadow-black/20" : "bg-white shadow-sm",
+    summaryText: dark ? "text-slate-300" : "text-gray-700",
+    text: dark ? "text-slate-200" : "text-gray-800",
+    textMuted: dark ? "text-slate-400" : "text-gray-500",
     entityName: dark
-      ? "text-amber-300 hover:text-amber-200"
-      : "text-blue-700 hover:text-blue-900",
+      ? "text-blue-400 hover:text-blue-300"
+      : "text-blue-600 hover:text-blue-700",
     tableBorder: dark
-      ? "border-slate-700 bg-slate-900"
-      : "border-stone-300 bg-white",
+      ? "bg-slate-900"
+      : "bg-white",
     theadBg: dark
-      ? "bg-slate-800 border-b border-slate-600"
-      : "bg-stone-200 border-b border-stone-300",
-    theadText: dark ? "text-slate-300" : "text-stone-700",
+      ? "bg-slate-800/60 border-b border-slate-700"
+      : "bg-gray-50/80 border-b border-gray-200",
+    theadText: dark ? "text-slate-400" : "text-gray-500",
     rowAltA: dark ? "bg-slate-900" : "bg-white",
-    rowAltB: dark ? "bg-slate-900/60" : "bg-stone-50",
-    rowHover: dark ? "hover:bg-slate-800" : "hover:bg-stone-100",
+    rowAltB: dark ? "bg-slate-900/60" : "bg-gray-50/50",
+    rowHover: dark ? "hover:bg-slate-800/80" : "hover:bg-blue-50/40",
     rowBorder: dark
-      ? "border-b border-slate-800"
-      : "border-b border-stone-200",
-    confidenceBg: dark ? "bg-slate-700" : "bg-stone-200",
+      ? "border-b border-slate-800/60"
+      : "border-b border-gray-100",
+    confidenceBg: dark ? "bg-slate-700" : "bg-gray-200",
     barHour: "bg-amber-500",
     barSixHour: "bg-sky-500",
-    barDay: dark ? "bg-slate-500" : "bg-stone-400",
+    barDay: dark ? "bg-slate-500" : "bg-gray-400",
     muteBtnBg: dark
       ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
-      : "text-stone-400 hover:text-red-600 hover:bg-red-50",
+      : "text-gray-400 hover:text-red-600 hover:bg-red-50",
   };
 
   return (
-    <div className="max-w-[1920px] mx-auto px-2 py-2">
+    <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-4">
       {/* ─── Summary Strip ─── */}
       <div
-        className={`flex flex-wrap items-center gap-3 md:gap-6 px-3 md:px-4 py-2 md:py-2.5 mb-2 text-[10px] md:text-xs uppercase tracking-wide ${t.summaryBg} ${t.summaryText} border ${t.summaryBorder}`}
+        className={`flex flex-wrap items-center gap-4 md:gap-6 px-4 md:px-5 py-3 mb-4 text-xs rounded-xl ${t.summaryBg} ${t.summaryText}`}
       >
-        <span className="font-bold">{activeSignals.length} SIGNALS</span>
+        <span className="font-bold text-sm">{activeSignals.length} Signals</span>
         {severityCounts.critical > 0 && (
-          <span>
-            <span className="text-red-500 font-bold">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-red-500" />
+            <span className="text-red-500 font-semibold">
               {severityCounts.critical}
             </span>{" "}
-            CRITICAL
+            Critical
           </span>
         )}
         {severityCounts.warning > 0 && (
-          <span>
-            <span className="text-amber-500 font-bold">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-amber-500" />
+            <span className="text-amber-500 font-semibold">
               {severityCounts.warning}
             </span>{" "}
-            WARNING
+            Warning
           </span>
         )}
         {severityCounts.advisory > 0 && (
-          <span>
-            <span className="text-yellow-500 font-bold">
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-yellow-500" />
+            <span className="text-yellow-500 font-semibold">
               {severityCounts.advisory}
             </span>{" "}
-            ADVISORY
+            Advisory
           </span>
         )}
         {mutedCount > 0 && (
           <span className="flex items-center gap-1.5">
             <span className={t.textMuted}>
-              {mutedCount} MUTED
+              {mutedCount} muted
             </span>
             <button
               onClick={handleUnmuteAll}
-              className={`text-[10px] underline ${dark ? "text-slate-500 hover:text-slate-300" : "text-stone-400 hover:text-stone-700"}`}
+              className={`text-xs underline ${dark ? "text-slate-500 hover:text-slate-300" : "text-gray-400 hover:text-gray-700"}`}
             >
-              CLEAR
+              Clear
             </button>
           </span>
         )}
-        <span className={`ml-auto text-[10px] ${t.textMuted}`}>
-          {entities.length} ENTITIES ANALYZED
+        <span className={`ml-auto text-xs ${t.textMuted}`}>
+          {entities.length} entities analyzed
         </span>
       </div>
 
       {/* ─── Signal Cards ─── */}
       {activeSignals.length > 0 ? (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 mb-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-4">
             {visibleSignals.map((signal) => {
               const sc = severityColor(signal.severity, dark);
               return (
                 <div
                   key={signal.id}
-                  className={`border border-l-4 ${sc.border} ${t.cardBg} px-3 py-2.5`}
+                  className={`border border-l-4 rounded-xl ${sc.border} ${t.cardBg} px-4 py-3`}
                 >
                   {/* Header: icon + title + confidence */}
-                  <div className="flex items-start gap-2 mb-1.5">
+                  <div className="flex items-start gap-2.5 mb-2">
                     <span className={`mt-0.5 flex-shrink-0 ${sc.text}`}>
                       <SignalIcon type={signal.type} />
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span
-                          className={`text-[11px] font-bold uppercase tracking-wide ${sc.text} truncate`}
+                          className={`text-xs font-bold uppercase tracking-wide ${sc.text} truncate`}
                         >
                           {signal.title}
                         </span>
                       </div>
                     </div>
                     {/* Confidence bar */}
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
                       <div
-                        className={`w-12 h-1.5 rounded-full overflow-hidden ${t.confidenceBg}`}
+                        className={`w-14 h-2 rounded-full overflow-hidden ${t.confidenceBg}`}
                       >
                         <div
                           className={`h-full rounded-full ${sc.bar}`}
@@ -427,7 +420,7 @@ export default function SignalsTab({
                           }}
                         />
                       </div>
-                      <span className={`text-[9px] ${t.textMuted}`}>
+                      <span className={`text-[10px] ${t.textMuted}`}>
                         {Math.round(signal.confidence * 100)}%
                       </span>
                     </div>
@@ -435,7 +428,7 @@ export default function SignalsTab({
 
                   {/* Description */}
                   <p
-                    className={`text-[10px] leading-tight mb-2 ${t.textMuted}`}
+                    className={`text-xs leading-relaxed mb-2.5 ${t.textMuted}`}
                   >
                     {signal.description}
                   </p>
@@ -446,13 +439,13 @@ export default function SignalsTab({
                       <span key={name} className="inline-flex items-center gap-0.5">
                         <button
                           onClick={() => onEntityClick(name)}
-                          className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded cursor-pointer hover:underline ${sc.bg} ${sc.text}`}
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full cursor-pointer hover:underline ${sc.bg} ${sc.text}`}
                         >
                           {name}
                         </button>
                         <button
                           onClick={() => handleMute(name)}
-                          className={`text-[10px] px-0.5 py-0.5 rounded transition-colors ${t.muteBtnBg}`}
+                          className={`text-[10px] p-0.5 rounded-full transition-colors ${t.muteBtnBg}`}
                           title={`Mute "${name}" for 24h`}
                         >
                           <svg
@@ -472,7 +465,7 @@ export default function SignalsTab({
                       </span>
                     ))}
                     <span
-                      className={`text-[9px] uppercase font-semibold px-1 py-0.5 ${t.textMuted}`}
+                      className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${dark ? "bg-slate-800 text-slate-500" : "bg-gray-100 text-gray-400"}`}
                     >
                       {signal.type.replace(/_/g, " ")}
                     </span>
@@ -486,21 +479,21 @@ export default function SignalsTab({
           {activeSignals.length > INITIAL_LIMIT && (
             <button
               onClick={() => setShowAll(!showAll)}
-              className={`w-full text-center py-1.5 text-[10px] uppercase tracking-wide font-semibold ${t.textMuted} transition-colors`}
+              className={`w-full text-center py-2 text-xs font-medium rounded-lg transition-colors ${dark ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-100"}`}
             >
               {showAll
-                ? "SHOW LESS"
-                : `SHOW ALL ${activeSignals.length} SIGNALS`}
+                ? "Show Less"
+                : `Show All ${activeSignals.length} Signals`}
             </button>
           )}
         </>
       ) : (
         <div
-          className={`text-center py-12 text-xs uppercase tracking-wide ${t.textMuted}`}
+          className={`text-center py-12 text-sm ${t.textMuted}`}
         >
           {mutedCount > 0
-            ? "ALL SIGNALS MUTED — CLEAR MUTES TO VIEW"
-            : "NO SIGNALS DETECTED"}
+            ? "All signals muted — clear mutes to view"
+            : "No signals detected"}
         </div>
       )}
 
@@ -508,15 +501,15 @@ export default function SignalsTab({
       {cascadeChains.length > 0 && (
         <>
           <div
-            className={`flex items-center gap-3 px-3 py-1.5 mt-2 mb-1 text-[10px] uppercase tracking-wide font-bold ${t.summaryBg} ${t.summaryText} border ${t.summaryBorder}`}
+            className={`flex items-center gap-3 px-4 md:px-5 py-3 mt-4 mb-3 text-xs font-bold rounded-xl ${t.summaryBg} ${t.summaryText}`}
           >
-            CASCADING EFFECTS — {cascadeChains.length} CHAINS
+            Cascading Effects — {cascadeChains.length} Chains
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5 mb-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 mb-3">
             {cascadeChains.map((chain, ci) => (
               <div
                 key={ci}
-                className={`flex items-center gap-1 px-2 py-1.5 border rounded text-[10px] ${t.cardBg}`}
+                className={`flex items-center gap-1.5 px-3 py-2 border rounded-xl text-xs ${t.cardBg}`}
               >
                 {chain.nodes.map((node, ni) => {
                   const sev = node.order === 0
@@ -535,12 +528,12 @@ export default function SignalsTab({
                     ? (dark ? "text-amber-400" : "text-amber-700")
                     : (dark ? "text-yellow-400" : "text-yellow-700");
                   return (
-                    <span key={ni} className="flex items-center gap-1 min-w-0">
+                    <span key={ni} className="flex items-center gap-1.5 min-w-0">
                       {ni > 0 && (
                         <span className={`${t.textMuted} flex-shrink-0`}>→</span>
                       )}
                       <span
-                        className={`inline-flex flex-col px-1.5 py-0.5 rounded border ${bg} min-w-0`}
+                        className={`inline-flex flex-col px-2 py-1 rounded-lg border ${bg} min-w-0`}
                       >
                         <span className={`font-bold truncate ${textCol}`}>
                           {DOMAIN_LABELS[node.domain]}
@@ -562,16 +555,16 @@ export default function SignalsTab({
       {topEntities.length > 0 && (
         <>
           <div
-            className={`flex items-center gap-3 px-3 py-1.5 mt-2 mb-1 text-[10px] uppercase tracking-wide font-bold ${t.summaryBg} ${t.summaryText} border ${t.summaryBorder}`}
+            className={`flex items-center gap-3 px-4 md:px-5 py-3 mt-4 mb-3 text-xs font-bold rounded-xl ${t.summaryBg} ${t.summaryText}`}
           >
-            ENTITY VELOCITY — TOP {topEntities.length}
+            Entity Velocity — Top {topEntities.length}
             <span className={`ml-auto font-normal ${t.textMuted}`}>
-              <span className="inline-block w-2 h-2 bg-amber-500 rounded-sm mr-0.5" />{" "}
+              <span className="inline-block w-2.5 h-2.5 bg-amber-500 rounded-full mr-1" />{" "}
               1H
-              <span className="inline-block w-2 h-2 bg-sky-500 rounded-sm ml-2 mr-0.5" />{" "}
+              <span className="inline-block w-2.5 h-2.5 bg-sky-500 rounded-full ml-3 mr-1" />{" "}
               6H
               <span
-                className={`inline-block w-2 h-2 ${t.barDay} rounded-sm ml-2 mr-0.5`}
+                className={`inline-block w-2.5 h-2.5 ${t.barDay} rounded-full ml-3 mr-1`}
               />{" "}
               24H
             </span>
@@ -579,40 +572,40 @@ export default function SignalsTab({
 
           {/* Desktop table */}
           <div
-            className={`hidden md:block border overflow-auto ${t.tableBorder}`}
+            className={`hidden md:block rounded-xl overflow-hidden shadow-sm ${dark ? "shadow-black/20" : ""} ${t.tableBorder}`}
           >
-            <table className="w-full border-collapse text-xs">
+            <table className="w-full border-collapse text-sm">
               <thead className="sticky top-0 z-10">
                 <tr className={t.theadBg}>
                   <th
-                    className={`min-w-[160px] px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                    className={`min-w-[160px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${t.theadText}`}
                   >
-                    ENTITY
+                    Entity
                   </th>
                   <th
-                    className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                    className={`w-32 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${t.theadText}`}
                   >
                     1H
                   </th>
                   <th
-                    className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                    className={`w-32 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${t.theadText}`}
                   >
                     6H
                   </th>
                   <th
-                    className={`w-32 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                    className={`w-32 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${t.theadText}`}
                   >
                     24H
                   </th>
                   <th
-                    className={`w-16 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                    className={`w-16 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${t.theadText}`}
                   >
-                    TONE
+                    Tone
                   </th>
                   <th
-                    className={`w-24 px-3 py-2 text-left text-xs font-bold uppercase tracking-wider ${t.theadText}`}
+                    className={`w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${t.theadText}`}
                   >
-                    URGENCY
+                    Urgency
                   </th>
                 </tr>
               </thead>
@@ -622,59 +615,59 @@ export default function SignalsTab({
                     key={entity.name}
                     className={`${idx % 2 === 0 ? t.rowAltA : t.rowAltB} ${t.rowHover} transition-colors ${t.rowBorder}`}
                   >
-                    <td className="px-3 py-1.5">
+                    <td className="px-4 py-2.5">
                       <button
                         onClick={() => onEntityClick(entity.name)}
-                        className={`text-xs font-bold uppercase cursor-pointer hover:underline ${t.entityName}`}
+                        className={`text-sm font-semibold cursor-pointer hover:underline ${t.entityName}`}
                       >
                         {entity.name}
                       </button>
                     </td>
-                    <td className="px-3 py-1.5">
+                    <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1.5">
                         <div
-                          className={`h-2.5 rounded-sm ${t.barHour}`}
+                          className={`h-3 rounded-full ${t.barHour}`}
                           style={{
                             width: `${(entity.recentMentions.hour / maxHour) * 80}px`,
                           }}
                         />
                         <span
-                          className={`text-[10px] ${entity.recentMentions.hour > 0 ? "text-amber-500 font-bold" : t.textMuted}`}
+                          className={`text-xs ${entity.recentMentions.hour > 0 ? "text-amber-500 font-bold" : t.textMuted}`}
                         >
                           {entity.recentMentions.hour}
                         </span>
                       </div>
                     </td>
-                    <td className="px-3 py-1.5">
+                    <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1.5">
                         <div
-                          className={`h-2.5 rounded-sm ${t.barSixHour}`}
+                          className={`h-3 rounded-full ${t.barSixHour}`}
                           style={{
                             width: `${(entity.recentMentions.sixHour / maxSixHour) * 80}px`,
                           }}
                         />
-                        <span className={`text-[10px] ${t.textMuted}`}>
+                        <span className={`text-xs ${t.textMuted}`}>
                           {entity.recentMentions.sixHour}
                         </span>
                       </div>
                     </td>
-                    <td className="px-3 py-1.5">
+                    <td className="px-4 py-2.5">
                       <div className="flex items-center gap-1.5">
                         <div
-                          className={`h-2.5 rounded-sm ${t.barDay}`}
+                          className={`h-3 rounded-full ${t.barDay}`}
                           style={{
                             width: `${(entity.recentMentions.day / maxDay) * 80}px`,
                           }}
                         />
-                        <span className={`text-[10px] ${t.textMuted}`}>
+                        <span className={`text-xs ${t.textMuted}`}>
                           {entity.recentMentions.day}
                         </span>
                       </div>
                     </td>
-                    <td className="px-3 py-1.5">
+                    <td className="px-4 py-2.5">
                       <SentimentBadge value={entity.sentiment} dark={dark} />
                     </td>
-                    <td className="px-3 py-1.5">
+                    <td className="px-4 py-2.5">
                       <UrgencyMiniBar
                         breakdown={entity.urgencyBreakdown}
                         total={entity.mentions}
@@ -688,79 +681,79 @@ export default function SignalsTab({
           </div>
 
           {/* Mobile cards */}
-          <div className="md:hidden space-y-1.5">
+          <div className="md:hidden space-y-2">
             {topEntities.map((entity) => (
               <div
                 key={entity.name}
-                className={`border px-3 py-2 ${t.cardBg}`}
+                className={`border rounded-xl px-4 py-3 ${t.cardBg}`}
               >
-                <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center justify-between mb-2">
                   <button
                     onClick={() => onEntityClick(entity.name)}
-                    className={`text-xs font-bold uppercase cursor-pointer hover:underline ${t.entityName}`}
+                    className={`text-sm font-semibold cursor-pointer hover:underline ${t.entityName}`}
                   >
                     {entity.name}
                   </button>
                   <SentimentBadge value={entity.sentiment} dark={dark} />
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center gap-1">
-                      <span className={`text-[9px] w-4 ${t.textMuted}`}>
+                  <div className="flex-1 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] w-5 ${t.textMuted}`}>
                         1H
                       </span>
                       <div
-                        className={`h-2 rounded-sm flex-1 ${t.confidenceBg}`}
+                        className={`h-2.5 rounded-full flex-1 ${t.confidenceBg}`}
                       >
                         <div
-                          className={`h-full rounded-sm ${t.barHour}`}
+                          className={`h-full rounded-full ${t.barHour}`}
                           style={{
                             width: `${(entity.recentMentions.hour / maxHour) * 100}%`,
                           }}
                         />
                       </div>
                       <span
-                        className={`text-[9px] w-4 text-right ${entity.recentMentions.hour > 0 ? "text-amber-500 font-bold" : t.textMuted}`}
+                        className={`text-[10px] w-5 text-right ${entity.recentMentions.hour > 0 ? "text-amber-500 font-bold" : t.textMuted}`}
                       >
                         {entity.recentMentions.hour}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className={`text-[9px] w-4 ${t.textMuted}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] w-5 ${t.textMuted}`}>
                         6H
                       </span>
                       <div
-                        className={`h-2 rounded-sm flex-1 ${t.confidenceBg}`}
+                        className={`h-2.5 rounded-full flex-1 ${t.confidenceBg}`}
                       >
                         <div
-                          className={`h-full rounded-sm ${t.barSixHour}`}
+                          className={`h-full rounded-full ${t.barSixHour}`}
                           style={{
                             width: `${(entity.recentMentions.sixHour / maxSixHour) * 100}%`,
                           }}
                         />
                       </div>
                       <span
-                        className={`text-[9px] w-4 text-right ${t.textMuted}`}
+                        className={`text-[10px] w-5 text-right ${t.textMuted}`}
                       >
                         {entity.recentMentions.sixHour}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <span className={`text-[9px] w-4 ${t.textMuted}`}>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] w-5 ${t.textMuted}`}>
                         24H
                       </span>
                       <div
-                        className={`h-2 rounded-sm flex-1 ${t.confidenceBg}`}
+                        className={`h-2.5 rounded-full flex-1 ${t.confidenceBg}`}
                       >
                         <div
-                          className={`h-full rounded-sm ${t.barDay}`}
+                          className={`h-full rounded-full ${t.barDay}`}
                           style={{
                             width: `${(entity.recentMentions.day / maxDay) * 100}%`,
                           }}
                         />
                       </div>
                       <span
-                        className={`text-[9px] w-4 text-right ${t.textMuted}`}
+                        className={`text-[10px] w-5 text-right ${t.textMuted}`}
                       >
                         {entity.recentMentions.day}
                       </span>
