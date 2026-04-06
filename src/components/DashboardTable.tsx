@@ -42,6 +42,15 @@ const SignalsTab = dynamic(() => import("./SignalsTab"), {
   ),
 });
 
+const DiscoveryTab = dynamic(() => import("./DiscoveryTab"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-sm text-gray-400">Loading discovery view...</p>
+    </div>
+  ),
+});
+
 type ColumnKey = keyof FeedItem;
 
 export default function DashboardTable() {
@@ -64,7 +73,7 @@ export default function DashboardTable() {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [dark, setDark] = useState(false);
-  const [activeTab, setActiveTab] = useState<"feeds" | "intel" | "network" | "map" | "signals">("feeds");
+  const [activeTab, setActiveTab] = useState<"feeds" | "intel" | "network" | "map" | "signals" | "discovery">("feeds");
 
   useEffect(() => {
     const saved = localStorage.getItem("wd-theme");
@@ -269,6 +278,11 @@ export default function DashboardTable() {
       {/* ─── SIGNALS Tab ─── */}
       {activeTab === "signals" && items.length > 0 && (
         <SignalsTab items={items} dark={dark} onEntityClick={handleEntityClick} />
+      )}
+
+      {/* ─── DISCOVERY Tab ─── */}
+      {activeTab === "discovery" && items.length > 0 && (
+        <DiscoveryTab items={items} dark={dark} onEntityClick={handleEntityClick} />
       )}
 
       {/* ─── FEEDS: Desktop Table ─── */}

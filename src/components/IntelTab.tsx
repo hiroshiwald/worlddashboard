@@ -1,24 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { FeedItem, ExtractedEntity, EntityType } from "@/lib/types";
+import { FeedItem, EnrichedEntity, Situation, NoveltyReasonType } from "@/lib/types";
 import { extractEntities } from "@/lib/entity-extractor";
+import { enrichEntities, isKnownSituation } from "@/lib/novelty-scorer";
+import { buildSituations } from "@/lib/situation-builder";
+import { getThemeClasses } from "@/lib/theme";
 
 interface IntelTabProps {
   items: FeedItem[];
   dark: boolean;
   onEntityClick: (name: string) => void;
 }
-
-type SortKey =
-  | "name"
-  | "type"
-  | "mentions"
-  | "recentHour"
-  | "lastSeen"
-  | "urgency"
-  | "cooccurrences"
-  | "sentiment";
 
 function timeAgo(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
@@ -34,464 +27,454 @@ function timeAgo(isoString: string): string {
   return `${days}d ago`;
 }
 
-function typeLabel(t: EntityType): string {
-  switch (t) {
-    case "country":
-      return "Country";
-    case "organization":
-      return "Org";
-    case "region":
-      return "Region";
-    case "person":
-      return "Person";
+const URGENCY_DOT_COLORS: Record<string, string> = {
+  critical: "bg-red-500",
+  warning: "bg-amber-500",
+  advisory: "bg-yellow-500",
+  monitoring: "bg-sky-500",
+  system: "bg-slate-500",
+  neutral: "bg-gray-400",
+};
+
+const TEMPO_STYLES: Record<string, { dark: string; light: string }> = {
+  accelerating: {
+    dark: "text-red-400 bg-red-500/15",
+    light: "text-red-700 bg-red-50",
+  },
+  steady: {
+    dark: "text-slate-400 bg-slate-500/10",
+    light: "text-gray-500 bg-gray-100",
+  },
+  fading: {
+    dark: "text-slate-500 bg-slate-500/10 italic",
+    light: "text-gray-400 bg-gray-100 italic",
+  },
+  new: {
+    dark: "text-emerald-400 bg-emerald-500/15",
+    light: "text-emerald-700 bg-emerald-50",
+  },
+};
+
+function reasonBadgeClasses(type: NoveltyReasonType, dark: boolean): string {
+  const base = "text-[10px] font-semibold px-2 py-0.5 rounded-full";
+  switch (type) {
+    case "novel_edge":
+      return `${base} ${dark ? "bg-emerald-500/15 text-emerald-400" : "bg-emerald-50 text-emerald-700"}`;
+    case "category_crossover":
+      return `${base} ${dark ? "bg-orange-500/15 text-orange-400" : "bg-orange-50 text-orange-700"}`;
+    case "quiet_mover":
+      return `${base} ${dark ? "bg-amber-500/15 text-amber-400" : "bg-amber-50 text-amber-700"}`;
+    case "entity_emergence":
+      return `${base} ${dark ? "bg-violet-500/15 text-violet-400" : "bg-violet-50 text-violet-700"}`;
+    case "baseline_surprise":
+      return `${base} ${dark ? "bg-blue-500/15 text-blue-400" : "bg-blue-50 text-blue-700"}`;
   }
 }
 
-function typeBadgeClasses(type: EntityType, dark: boolean): string {
-  if (dark) {
-    switch (type) {
-      case "country":
-        return "text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full text-[10px] font-semibold";
-      case "organization":
-        return "text-violet-400 bg-violet-500/15 px-2 py-0.5 rounded-full text-[10px] font-semibold";
-      case "region":
-        return "text-cyan-400 bg-cyan-500/15 px-2 py-0.5 rounded-full text-[10px] font-semibold";
-      case "person":
-        return "text-orange-400 bg-orange-500/15 px-2 py-0.5 rounded-full text-[10px] font-semibold";
-    }
-  } else {
-    switch (type) {
-      case "country":
-        return "text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full text-[10px] font-semibold";
-      case "organization":
-        return "text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full text-[10px] font-semibold";
-      case "region":
-        return "text-cyan-700 bg-cyan-100 px-2 py-0.5 rounded-full text-[10px] font-semibold";
-      case "person":
-        return "text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full text-[10px] font-semibold";
-    }
+function reasonTypeLabel(type: NoveltyReasonType): string {
+  switch (type) {
+    case "novel_edge": return "Novel Link";
+    case "category_crossover": return "Cross-Category";
+    case "quiet_mover": return "Quiet Mover";
+    case "entity_emergence": return "New Entity";
+    case "baseline_surprise": return "Spiking";
   }
 }
 
-function SentimentBadge({ value, dark }: { value: number; dark: boolean }) {
-  let label: string;
-  let colorClass: string;
-
-  if (value <= -0.3) {
-    label = "NEG";
-    colorClass = dark ? "text-red-400 bg-red-500/15" : "text-red-700 bg-red-100";
-  } else if (value <= -0.1) {
-    label = "NEG";
-    colorClass = dark ? "text-red-300 bg-red-500/10" : "text-red-600 bg-red-50";
-  } else if (value >= 0.3) {
-    label = "POS";
-    colorClass = dark ? "text-emerald-400 bg-emerald-500/15" : "text-emerald-700 bg-emerald-100";
-  } else if (value >= 0.1) {
-    label = "POS";
-    colorClass = dark ? "text-emerald-300 bg-emerald-500/10" : "text-emerald-600 bg-emerald-50";
-  } else {
-    label = "NEU";
-    colorClass = dark ? "text-slate-400 bg-slate-500/10" : "text-gray-500 bg-gray-100";
-  }
-
-  return (
-    <span className={`inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full ${colorClass}`} title={`Sentiment: ${value.toFixed(2)}`}>
-      {label}
-    </span>
-  );
-}
-
-function UrgencyBar({
-  breakdown,
-  total,
-  dark,
-}: {
-  breakdown: ExtractedEntity["urgencyBreakdown"];
-  total: number;
-  dark: boolean;
-}) {
-  const segments = [
-    { key: "critical", count: breakdown.critical, color: "bg-red-500" },
-    { key: "warning", count: breakdown.warning, color: "bg-amber-500" },
-    { key: "advisory", count: breakdown.advisory, color: "bg-yellow-500" },
-    { key: "monitoring", count: breakdown.monitoring, color: "bg-sky-500" },
-    {
-      key: "neutral",
-      count: breakdown.neutral + breakdown.system,
-      color: dark ? "bg-slate-600" : "bg-gray-300",
-    },
-  ].filter((s) => s.count > 0);
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <div
-        className="flex h-3 w-20 md:w-24 rounded-full overflow-hidden"
-        title={segments.map((s) => `${s.key}: ${s.count}`).join(", ")}
-      >
-        {segments.map((seg) => (
-          <div
-            key={seg.key}
-            className={`${seg.color} h-full`}
-            style={{ width: `${(seg.count / total) * 100}%` }}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export default function IntelTab({
-  items,
-  dark,
-  onEntityClick,
-}: IntelTabProps) {
+export default function IntelTab({ items, dark, onEntityClick }: IntelTabProps) {
   const entities = useMemo(() => extractEntities(items), [items]);
+  const enriched = useMemo(() => enrichEntities(entities, items), [entities, items]);
+  const situations = useMemo(() => buildSituations(enriched, items), [enriched, items]);
 
-  const [sortKey, setSortKey] = useState<SortKey>("mentions");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [typeFilter, setTypeFilter] = useState<EntityType | "all">("all");
+  const [expandedSituations, setExpandedSituations] = useState<Set<string>>(new Set());
+  const [showAllKnown, setShowAllKnown] = useState(false);
+  const [showAllNovel, setShowAllNovel] = useState(false);
 
-  const handleSort = (key: SortKey) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
-  };
+  // Entity lookup for situation classification
+  const entityLookup = useMemo(() => {
+    const map = new Map<string, EnrichedEntity>();
+    for (const e of enriched) map.set(e.name, e);
+    return map;
+  }, [enriched]);
 
-  const filtered = useMemo(() => {
-    let result = entities;
-    if (typeFilter !== "all") {
-      result = result.filter((e) => e.type === typeFilter);
-    }
-    return result;
-  }, [entities, typeFilter]);
+  // Separate known vs novel situations
+  const { knownSituations, novelSituations } = useMemo(() => {
+    const known: Situation[] = [];
+    const novel: Situation[] = [];
 
-  const sorted = useMemo(() => {
-    const arr = [...filtered];
-    arr.sort((a, b) => {
-      let cmp: number;
-      const urgencyPriority: Record<string, number> = {
-        critical: 6, warning: 5, advisory: 4, monitoring: 3, system: 2, neutral: 1,
-      };
-      const getMaxUrgency = (e: ExtractedEntity) => {
-        for (const level of ["critical", "warning", "advisory", "monitoring", "system", "neutral"] as const) {
-          if (e.urgencyBreakdown[level] > 0) return urgencyPriority[level];
-        }
-        return 0;
-      };
-      switch (sortKey) {
-        case "name":
-          cmp = a.name.localeCompare(b.name);
-          break;
-        case "type":
-          cmp = a.type.localeCompare(b.type);
-          break;
-        case "mentions":
-          cmp = a.mentions - b.mentions;
-          break;
-        case "recentHour":
-          cmp = a.recentMentions.hour - b.recentMentions.hour;
-          break;
-        case "lastSeen":
-          cmp =
-            new Date(a.lastSeen).getTime() - new Date(b.lastSeen).getTime();
-          break;
-        case "urgency":
-          cmp = getMaxUrgency(a) - getMaxUrgency(b);
-          break;
-        case "cooccurrences":
-          cmp = a.cooccurrences.length - b.cooccurrences.length;
-          break;
-        case "sentiment":
-          cmp = a.sentiment - b.sentiment;
-          break;
-        default:
-          cmp = 0;
+    for (const sit of situations) {
+      // A situation is "known" if its dominant entity (most mentions) is a known situation
+      const dominantEntity = sit.entities
+        .map((n) => entityLookup.get(n))
+        .filter(Boolean)
+        .sort((a, b) => b!.mentions - a!.mentions)[0];
+
+      if (dominantEntity && isKnownSituation(dominantEntity)) {
+        known.push(sit);
+      } else {
+        novel.push(sit);
       }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return arr;
-  }, [filtered, sortKey, sortDir]);
+    }
 
-  const getSortArrow = (key: SortKey): string => {
-    if (sortKey !== key) return "";
-    return sortDir === "asc" ? " ↑" : " ↓";
+    return { knownSituations: known, novelSituations: novel };
+  }, [situations, entityLookup]);
+
+  // Standalone novel entities not in any situation
+  const situationEntityNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const sit of situations) {
+      for (const n of sit.entities) names.add(n);
+    }
+    return names;
+  }, [situations]);
+
+  const standaloneNovelEntities = useMemo(() => {
+    return enriched
+      .filter((e) => !situationEntityNames.has(e.name) && !isKnownSituation(e) && e.noveltyScore > 0)
+      .sort((a, b) => b.noveltyScore - a.noveltyScore);
+  }, [enriched, situationEntityNames]);
+
+  const toggleSituation = (id: string) => {
+    setExpandedSituations((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
-  const counts = useMemo(() => {
-    const c = { country: 0, organization: 0, region: 0, person: 0 };
-    for (const e of entities) {
-      c[e.type]++;
-    }
-    return c;
-  }, [entities]);
+  const KNOWN_LIMIT = 6;
+  const NOVEL_LIMIT = 15;
+  const visibleKnown = showAllKnown ? knownSituations : knownSituations.slice(0, KNOWN_LIMIT);
+  const visibleNovel = showAllNovel ? novelSituations : novelSituations.slice(0, NOVEL_LIMIT);
 
   const t = {
-    tableBorder: dark
-      ? "bg-slate-900"
-      : "bg-white",
-    theadBg: dark
-      ? "bg-slate-800/60 border-b border-slate-700"
-      : "bg-gray-50/80 border-b border-gray-200",
-    theadText: dark
-      ? "text-slate-400 hover:text-slate-200"
-      : "text-gray-500 hover:text-gray-700",
-    rowAltA: dark ? "bg-slate-900" : "bg-white",
-    rowAltB: dark ? "bg-slate-900/60" : "bg-gray-50/50",
-    rowHover: dark ? "hover:bg-slate-800/80" : "hover:bg-blue-50/40",
-    rowBorder: dark
-      ? "border-b border-slate-800/60"
-      : "border-b border-gray-100",
-    text: dark ? "text-slate-200" : "text-gray-800",
-    textMuted: dark ? "text-slate-400" : "text-gray-500",
-    entityName: dark
-      ? "text-blue-400 hover:text-blue-300"
-      : "text-blue-600 hover:text-blue-700",
     summaryBg: dark ? "bg-slate-900 shadow-lg shadow-black/20" : "bg-white shadow-sm",
     summaryText: dark ? "text-slate-300" : "text-gray-700",
-    filterBg: dark
-      ? "bg-slate-800 border-slate-700 text-slate-200"
-      : "bg-gray-100 border-gray-200 text-gray-700",
-    cardBg: dark
-      ? "bg-slate-900 border-slate-700"
-      : "bg-white border-gray-100 shadow-sm",
+    text: dark ? "text-slate-200" : "text-gray-800",
+    textMuted: dark ? "text-slate-400" : "text-gray-500",
+    entityName: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
+    cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-gray-100 shadow-sm",
+    knownBg: dark ? "bg-slate-900/80" : "bg-gray-50",
+    knownRowBorder: dark ? "border-slate-800/60" : "border-gray-100",
+    knownRowHover: dark ? "hover:bg-slate-800/80" : "hover:bg-blue-50/40",
+    sectionLabel: dark ? "text-slate-300" : "text-gray-700",
+    confidenceBg: dark ? "bg-slate-700" : "bg-gray-200",
+    noveltyBar: dark ? "bg-emerald-500" : "bg-emerald-500",
+    linkText: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
   };
+
+  const hasFewItems = items.length < 10;
 
   return (
     <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-4">
-      {/* Summary strip */}
-      <div
-        className={`flex flex-wrap items-center gap-4 md:gap-6 px-4 md:px-5 py-3 mb-4 text-xs rounded-xl ${t.summaryBg} ${t.summaryText}`}
-      >
-        <span className="font-bold text-sm">{entities.length} Entities</span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-          <span className="font-semibold">{counts.country}</span> Countries
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-violet-500" />
-          <span className="font-semibold">{counts.organization}</span> Orgs
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-orange-500" />
-          <span className="font-semibold">{counts.person}</span> Persons
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-cyan-500" />
-          <span className="font-semibold">{counts.region}</span> Regions
-        </span>
-        <select
-          value={typeFilter}
-          onChange={(e) =>
-            setTypeFilter(e.target.value as EntityType | "all")
-          }
-          className={`ml-auto px-3 py-1.5 text-xs border rounded-lg focus:outline-none cursor-pointer ${t.filterBg}`}
-        >
-          <option value="all">All Types</option>
-          <option value="country">Countries</option>
-          <option value="organization">Orgs</option>
-          <option value="person">Persons</option>
-          <option value="region">Regions</option>
-        </select>
+      {/* ─── Summary ─── */}
+      <div className={`flex flex-wrap items-center gap-4 md:gap-6 px-4 md:px-5 py-3 mb-4 text-xs rounded-xl ${t.summaryBg} ${t.summaryText}`}>
+        <span className="font-bold text-sm">{enriched.length} Entities</span>
+        <span>{situations.length} situations</span>
+        <span>{knownSituations.length} known</span>
+        <span>{novelSituations.length + standaloneNovelEntities.length} emerging</span>
       </div>
 
-      {/* ─── Desktop: Entity table ─── */}
-      <div
-        className={`hidden md:block rounded-xl overflow-hidden shadow-sm ${dark ? "shadow-black/20" : ""} ${t.tableBorder}`}
-      >
-        <table className="w-full border-collapse text-sm">
-          <thead className="sticky top-0 z-10">
-            <tr className={t.theadBg}>
-              <th
-                onClick={() => handleSort("name")}
-                className={`min-w-[180px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-              >
-                Entity{getSortArrow("name")}
-              </th>
-              <th
-                onClick={() => handleSort("type")}
-                className={`w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-              >
-                Type{getSortArrow("type")}
-              </th>
-              <th
-                onClick={() => handleSort("mentions")}
-                className={`w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-              >
-                Mentions{getSortArrow("mentions")}
-              </th>
-              <th
-                onClick={() => handleSort("urgency")}
-                className={`w-36 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-              >
-                Urgency{getSortArrow("urgency")}
-              </th>
-              <th
-                onClick={() => handleSort("recentHour")}
-                className={`w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-              >
-                1H{getSortArrow("recentHour")}
-              </th>
-              <th
-                onClick={() => handleSort("sentiment")}
-                className={`w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-              >
-                Tone{getSortArrow("sentiment")}
-              </th>
-              <th
-                onClick={() => handleSort("lastSeen")}
-                className={`w-28 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-              >
-                Last Seen{getSortArrow("lastSeen")}
-              </th>
-              <th
-                onClick={() => handleSort("cooccurrences")}
-                className={`min-w-[200px] px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors whitespace-nowrap ${t.theadText}`}
-              >
-                Co-occurs With{getSortArrow("cooccurrences")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((entity, idx) => (
-              <tr
-                key={entity.name}
-                className={`${
-                  idx % 2 === 0 ? t.rowAltA : t.rowAltB
-                } ${t.rowHover} transition-colors ${t.rowBorder}`}
-              >
-                <td className="px-4 py-3">
+      {hasFewItems && situations.length === 0 && (
+        <div className={`text-center py-8 text-sm ${t.textMuted}`}>
+          Not enough data for situation clustering. Showing enriched entities below.
+        </div>
+      )}
+
+      {/* ═══ Section 1: Known Situations Strip ═══ */}
+      {knownSituations.length > 0 && (
+        <div className="mb-6">
+          <h3 className={`text-xs font-bold uppercase tracking-wider mb-2 px-1 ${t.sectionLabel}`}>
+            Known Situations
+          </h3>
+          <div className={`rounded-xl overflow-hidden border ${dark ? "border-slate-800" : "border-gray-200"} ${t.knownBg}`}>
+            {visibleKnown.map((sit) => {
+              const isExpanded = expandedSituations.has(sit.id);
+              const tempoStyle = TEMPO_STYLES[sit.tempo] || TEMPO_STYLES.steady;
+              return (
+                <div key={sit.id} className={`border-b last:border-b-0 ${t.knownRowBorder}`}>
                   <button
-                    onClick={() => onEntityClick(entity.name)}
-                    className={`text-sm font-semibold cursor-pointer hover:underline ${t.entityName}`}
-                    title={`Filter feeds for "${entity.name}"`}
+                    onClick={() => toggleSituation(sit.id)}
+                    className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${t.knownRowHover}`}
                   >
-                    {entity.name}
-                  </button>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={typeBadgeClasses(entity.type, dark)}>
-                    {typeLabel(entity.type)}
-                  </span>
-                </td>
-                <td className={`px-4 py-3 text-sm font-semibold ${t.text}`}>
-                  {entity.mentions}
-                </td>
-                <td className="px-4 py-3">
-                  <UrgencyBar
-                    breakdown={entity.urgencyBreakdown}
-                    total={entity.mentions}
-                    dark={dark}
-                  />
-                </td>
-                <td className={`px-4 py-3 text-sm ${t.text}`}>
-                  {entity.recentMentions.hour > 0 ? (
-                    <span className="text-amber-500 font-bold">
-                      +{entity.recentMentions.hour}
+                    {/* Urgency dot */}
+                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${URGENCY_DOT_COLORS[sit.urgency]}`} />
+
+                    {/* Entities */}
+                    <span className={`text-sm font-semibold flex-shrink-0 ${t.text}`}>
+                      {sit.entities.slice(0, 3).join(", ")}
                     </span>
-                  ) : (
-                    <span className={t.textMuted}>—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <SentimentBadge value={entity.sentiment} dark={dark} />
-                </td>
-                <td
-                  className={`px-4 py-3 text-xs whitespace-nowrap ${t.textMuted}`}
-                >
-                  {timeAgo(entity.lastSeen)}
-                </td>
-                <td className={`px-4 py-3 text-xs ${t.textMuted}`}>
-                  {entity.cooccurrences.length > 0
-                    ? entity.cooccurrences
-                        .slice(0, 3)
-                        .map(([name, count]) => (
-                          <button
-                            key={name}
-                            onClick={() => onEntityClick(name)}
-                            className={`inline-block mr-2 cursor-pointer hover:underline ${t.entityName}`}
-                            title={`${count} co-occurrences`}
-                          >
-                            {name}
-                            <span className="opacity-50 ml-0.5">
-                              ({count})
-                            </span>
-                          </button>
-                        ))
-                    : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
 
-      {/* ─── Mobile: Entity cards ─── */}
-      <div className="md:hidden space-y-2">
-        {sorted.map((entity) => (
-          <div
-            key={entity.name}
-            className={`border rounded-xl px-4 py-3 ${t.cardBg}`}
-          >
-            {/* Row 1: entity name + type badge */}
-            <div className="flex items-center justify-between mb-2">
-              <button
-                onClick={() => onEntityClick(entity.name)}
-                className={`text-sm font-semibold cursor-pointer hover:underline ${t.entityName}`}
-              >
-                {entity.name}
-              </button>
-              <span className={typeBadgeClasses(entity.type, dark)}>
-                {typeLabel(entity.type)}
-              </span>
-            </div>
+                    {/* Article + source count */}
+                    <span className={`text-xs flex-shrink-0 ${t.textMuted}`}>
+                      {sit.articleCount} articles &middot; {sit.sourceCount} sources
+                    </span>
 
-            {/* Row 2: mentions, urgency bar, trend */}
-            <div className="flex items-center gap-3 mb-2">
-              <span className={`text-sm font-semibold ${t.text}`}>
-                {entity.mentions} mentions
-              </span>
-              <UrgencyBar
-                breakdown={entity.urgencyBreakdown}
-                total={entity.mentions}
-                dark={dark}
-              />
-              {entity.recentMentions.hour > 0 && (
-                <span className="text-amber-500 text-xs font-bold">
-                  +{entity.recentMentions.hour} 1H
-                </span>
-              )}
-              <SentimentBadge value={entity.sentiment} dark={dark} />
-              <span className={`text-xs ml-auto ${t.textMuted}`}>
-                {timeAgo(entity.lastSeen)}
-              </span>
-            </div>
+                    {/* Latest headline */}
+                    <span className={`text-xs truncate flex-1 min-w-0 ${t.textMuted}`}>
+                      {sit.latestArticle?.title}
+                    </span>
 
-            {/* Row 3: co-occurrences */}
-            {entity.cooccurrences.length > 0 && (
-              <div className={`flex flex-wrap gap-2 text-xs ${t.textMuted}`}>
-                {entity.cooccurrences.slice(0, 3).map(([name, count]) => (
-                  <button
-                    key={name}
-                    onClick={() => onEntityClick(name)}
-                    className={`cursor-pointer hover:underline ${t.entityName}`}
-                  >
-                    {name} ({count})
+                    {/* Source + time */}
+                    <span className={`text-[10px] flex-shrink-0 ${t.textMuted}`}>
+                      {sit.latestArticle?.sourceName} &middot; {timeAgo(sit.latestArticle?.published)}
+                    </span>
+
+                    {/* Tempo badge */}
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${dark ? tempoStyle.dark : tempoStyle.light}`}>
+                      {sit.tempo}
+                    </span>
+
+                    {/* Expand chevron */}
+                    <svg className={`w-4 h-4 flex-shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""} ${t.textMuted}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
                   </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
 
-      {sorted.length === 0 && (
+                  {/* Expanded articles */}
+                  {isExpanded && (
+                    <div className={`px-4 pb-3 pt-1 space-y-1.5 ${dark ? "bg-slate-800/30" : "bg-gray-50/80"}`}>
+                      {sit.articles.slice(0, 10).map((article) => (
+                        <div key={article.id} className="flex items-center gap-2 text-xs">
+                          <span className={`flex-shrink-0 font-medium ${t.textMuted}`}>
+                            {article.sourceName}
+                          </span>
+                          <a
+                            href={article.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`truncate hover:underline ${t.linkText}`}
+                          >
+                            {article.title}
+                          </a>
+                          <span className={`flex-shrink-0 ${t.textMuted}`}>
+                            {timeAgo(article.published)}
+                          </span>
+                        </div>
+                      ))}
+                      {sit.articles.length > 10 && (
+                        <span className={`text-[10px] ${t.textMuted}`}>
+                          +{sit.articles.length - 10} more articles
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {knownSituations.length > KNOWN_LIMIT && (
+            <button
+              onClick={() => setShowAllKnown(!showAllKnown)}
+              className={`w-full text-center py-2 mt-1 text-xs font-medium rounded-lg transition-colors ${dark ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-100"}`}
+            >
+              {showAllKnown ? "Show Less" : `${knownSituations.length - KNOWN_LIMIT} more known situations`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ═══ Section 2: Emerging & Novel Cards ═══ */}
+      {(novelSituations.length > 0 || standaloneNovelEntities.length > 0) && (
+        <div>
+          <h3 className={`text-xs font-bold uppercase tracking-wider mb-3 px-1 ${t.sectionLabel}`}>
+            Emerging &amp; Novel
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {/* Situation cards */}
+            {visibleNovel.map((sit) => (
+              <SituationCard
+                key={sit.id}
+                situation={sit}
+                dark={dark}
+                t={t}
+                onEntityClick={onEntityClick}
+              />
+            ))}
+
+            {/* Standalone entity cards */}
+            {standaloneNovelEntities.slice(0, showAllNovel ? undefined : Math.max(0, NOVEL_LIMIT - novelSituations.length)).map((entity) => (
+              <EntityCard
+                key={entity.name}
+                entity={entity}
+                dark={dark}
+                t={t}
+                onEntityClick={onEntityClick}
+              />
+            ))}
+          </div>
+
+          {(novelSituations.length > NOVEL_LIMIT || standaloneNovelEntities.length > NOVEL_LIMIT - novelSituations.length) && (
+            <button
+              onClick={() => setShowAllNovel(!showAllNovel)}
+              className={`w-full text-center py-2 mt-2 text-xs font-medium rounded-lg transition-colors ${dark ? "text-slate-400 hover:bg-slate-800" : "text-gray-500 hover:bg-gray-100"}`}
+            >
+              {showAllNovel ? "Show Less" : "Show All"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {enriched.length === 0 && (
         <div className={`text-center py-12 text-sm ${t.textMuted}`}>
           No entities with 2+ mentions
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Sub-Components ───
+
+interface CardTheme {
+  cardBg: string;
+  text: string;
+  textMuted: string;
+  entityName: string;
+  linkText: string;
+  confidenceBg: string;
+  noveltyBar: string;
+}
+
+function SituationCard({
+  situation: sit,
+  dark,
+  t,
+  onEntityClick,
+}: {
+  situation: Situation;
+  dark: boolean;
+  t: CardTheme;
+  onEntityClick: (name: string) => void;
+}) {
+  const topReason = sit.noveltyReasons[0];
+
+  return (
+    <div className={`border rounded-xl px-4 py-3 ${t.cardBg}`}>
+      {/* Title */}
+      <h4 className={`text-sm font-semibold mb-1.5 line-clamp-2 ${t.text}`}>
+        {sit.title}
+      </h4>
+
+      {/* Novelty score + why badge */}
+      <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-1.5">
+          <div className={`w-12 h-2 rounded-full overflow-hidden ${t.confidenceBg}`}>
+            <div className={`h-full rounded-full ${t.noveltyBar}`} style={{ width: `${sit.noveltyScore}%` }} />
+          </div>
+          <span className={`text-[10px] font-semibold ${t.textMuted}`}>{sit.noveltyScore}</span>
+        </div>
+        {topReason && (
+          <span className={reasonBadgeClasses(topReason.type, dark)}>
+            {reasonTypeLabel(topReason.type)}
+          </span>
+        )}
+      </div>
+
+      {/* Description from top reason */}
+      {topReason && (
+        <p className={`text-xs leading-relaxed mb-2 ${t.textMuted}`}>
+          {topReason.label}
+        </p>
+      )}
+
+      {/* Entity chips */}
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {sit.entities.slice(0, 5).map((name) => (
+          <button
+            key={name}
+            onClick={() => onEntityClick(name)}
+            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full cursor-pointer hover:underline ${
+              dark ? "bg-slate-800 text-slate-300" : "bg-gray-100 text-gray-600"
+            }`}
+          >
+            {name}
+          </button>
+        ))}
+        {sit.entities.length > 5 && (
+          <span className={`text-[10px] ${t.textMuted}`}>+{sit.entities.length - 5}</span>
+        )}
+      </div>
+
+      {/* Meta line */}
+      <div className={`text-[10px] mb-1.5 ${t.textMuted}`}>
+        {sit.articleCount} articles &middot; {sit.sourceCount} sources &middot; {sit.categorySpread} categories &middot; {timeAgo(sit.firstSeen)}
+      </div>
+
+      {/* Latest article peek */}
+      {sit.latestArticle && (
+        <div className={`text-xs flex items-center gap-1.5 ${t.textMuted}`}>
+          <span className="font-medium flex-shrink-0">{sit.latestArticle.sourceName}</span>
+          <a
+            href={sit.latestArticle.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`truncate hover:underline ${t.linkText}`}
+          >
+            {sit.latestArticle.title}
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EntityCard({
+  entity,
+  dark,
+  t,
+  onEntityClick,
+}: {
+  entity: EnrichedEntity;
+  dark: boolean;
+  t: CardTheme;
+  onEntityClick: (name: string) => void;
+}) {
+  const topReason = entity.noveltyReasons[0];
+
+  return (
+    <div className={`border rounded-xl px-4 py-3 ${t.cardBg}`}>
+      {/* Name + type */}
+      <div className="flex items-center gap-2 mb-1.5">
+        <button
+          onClick={() => onEntityClick(entity.name)}
+          className={`text-sm font-semibold cursor-pointer hover:underline ${t.entityName}`}
+        >
+          {entity.name}
+        </button>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${dark ? "bg-slate-800 text-slate-500" : "bg-gray-100 text-gray-400"}`}>
+          {entity.type}
+        </span>
+      </div>
+
+      {/* Novelty score + why badge */}
+      <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-1.5">
+          <div className={`w-12 h-2 rounded-full overflow-hidden ${t.confidenceBg}`}>
+            <div className={`h-full rounded-full ${t.noveltyBar}`} style={{ width: `${entity.noveltyScore}%` }} />
+          </div>
+          <span className={`text-[10px] font-semibold ${t.textMuted}`}>{entity.noveltyScore}</span>
+        </div>
+        {topReason && (
+          <span className={reasonBadgeClasses(topReason.type, dark)}>
+            {reasonTypeLabel(topReason.type)}
+          </span>
+        )}
+      </div>
+
+      {topReason && (
+        <p className={`text-xs leading-relaxed mb-2 ${t.textMuted}`}>
+          {topReason.label}
+        </p>
+      )}
+
+      {/* Meta */}
+      <div className={`text-[10px] ${t.textMuted}`}>
+        {entity.mentions} mentions &middot; {entity.sourceCount} sources &middot; {entity.categorySpread} categories
+      </div>
     </div>
   );
 }

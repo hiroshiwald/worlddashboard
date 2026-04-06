@@ -3,7 +3,7 @@
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
 
-type TabKey = "feeds" | "intel" | "network" | "map" | "signals";
+type TabKey = "feeds" | "intel" | "network" | "map" | "signals" | "discovery";
 
 interface HeaderBarProps {
   dark: boolean;
@@ -32,6 +32,7 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: "network", label: "Network" },
   { key: "map", label: "Map" },
   { key: "signals", label: "Signals" },
+  { key: "discovery", label: "Discovery" },
 ];
 
 function SearchInput({
@@ -219,7 +220,7 @@ export default function HeaderBar({
           ))}
         </select>
 
-        {(activeTab === "feeds" || activeTab === "map" || activeTab === "signals") && (
+        {(activeTab === "feeds" || activeTab === "map" || activeTab === "signals" || activeTab === "discovery") && (
           <div className="hidden sm:flex items-center gap-4 text-xs">
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500" />

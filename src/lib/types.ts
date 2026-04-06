@@ -91,3 +91,57 @@ export interface Signal {
   detectedAt: string;
   metric: number;
 }
+
+/** Extended entity with novelty-relevant fields */
+export interface EnrichedEntity extends ExtractedEntity {
+  categorySpread: number;
+  categories: string[];
+  sourceCount: number;
+  noveltyScore: number;
+  noveltyReasons: NoveltyReason[];
+}
+
+export type NoveltyReasonType =
+  | "novel_edge"
+  | "category_crossover"
+  | "quiet_mover"
+  | "entity_emergence"
+  | "baseline_surprise";
+
+export interface NoveltyReason {
+  type: NoveltyReasonType;
+  label: string;
+  score: number;
+}
+
+export interface Situation {
+  id: string;
+  title: string;
+  entities: string[];
+  articleCount: number;
+  sourceCount: number;
+  articles: SituationArticle[];
+  urgency: UrgencyLevel;
+  tempo: "accelerating" | "steady" | "fading" | "new";
+  noveltyScore: number;
+  noveltyReasons: NoveltyReason[];
+  sentiment: number;
+  firstSeen: string;
+  latestArticle: SituationArticle;
+  categorySpread: number;
+}
+
+export interface SituationArticle {
+  id: string;
+  title: string;
+  sourceName: string;
+  published: string;
+  link: string;
+  sourceCategory: string;
+}
+
+export interface EdgeHistoryEntry {
+  firstSeen: string;
+  lastSeen: string;
+  count: number;
+}
