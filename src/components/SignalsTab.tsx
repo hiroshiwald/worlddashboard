@@ -5,55 +5,20 @@ import { FeedItem, ExtractedEntity, Signal, SignalSeverity, SignalType } from "@
 import { extractEntities } from "@/lib/entity-extractor";
 import { detectSignals } from "@/lib/signal-detector";
 import { computeCascades, CascadeChain, CascadeNode, DOMAIN_LABELS } from "@/lib/cascade-graph";
+import {
+  MUTE_DURATION,
+  SNAPSHOT_INTERVAL,
+  loadMutedEntities,
+  saveMutedEntities,
+  loadPreviousEntityNames,
+  saveEntitySnapshot,
+} from "@/lib/signal-storage";
 
 interface SignalsTabProps {
   items: FeedItem[];
   dark: boolean;
   onEntityClick: (name: string) => void;
 }
-
-const MUTE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
-const SNAPSHOT_INTERVAL = 5 * 60 * 1000; // 5 minutes
-
-function loadMutedEntities(): Map<string, number> {
-  try {
-    const raw = localStorage.getItem("wd-muted-entities");
-    if (!raw) return new Map();
-    const arr: [string, number][] = JSON.parse(raw);
-    const now = Date.now();
-    return new Map(arr.filter(([, expiry]) => expiry > now));
-  } catch {
-    return new Map();
-  }
-}
-
-function saveMutedEntities(muted: Map<string, number>) {
-  localStorage.setItem(
-    "wd-muted-entities",
-    JSON.stringify(Array.from(muted.entries()))
-  );
-}
-
-function loadPreviousEntityNames(): Set<string> {
-  try {
-    const raw = localStorage.getItem("wd-entity-snapshot");
-    if (!raw) return new Set();
-    const { names, timestamp } = JSON.parse(raw);
-    if (Date.now() - timestamp > 2 * 60 * 60 * 1000) return new Set();
-    return new Set(names);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveEntitySnapshot(entities: ExtractedEntity[]) {
-  const names = entities.map((e) => e.name);
-  localStorage.setItem(
-    "wd-entity-snapshot",
-    JSON.stringify({ names, timestamp: Date.now() })
-  );
-}
-
 function SignalIcon({ type, className }: { type: SignalType; className?: string }) {
   const cls = className || "w-4 h-4";
   switch (type) {

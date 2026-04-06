@@ -9,7 +9,11 @@ import {
   getRowClasses,
   getUrgencyBadgeClasses,
 } from "@/lib/urgency";
+import { getThemeClasses } from "@/lib/theme";
+import { formatDate } from "@/lib/date-utils";
 import IntelTab from "./IntelTab";
+import HeaderBar from "./HeaderBar";
+import FeedItemImage from "./FeedItemImage";
 
 const MapTab = dynamic(() => import("./MapTab"), {
   ssr: false,
@@ -39,50 +43,6 @@ const SignalsTab = dynamic(() => import("./SignalsTab"), {
 });
 
 type ColumnKey = keyof FeedItem;
-
-function timeAgo(isoString: string): string {
-  const diff = Date.now() - new Date(isoString).getTime();
-  const secs = Math.floor(diff / 1000);
-  if (secs < 0) return "NOW";
-  if (secs < 5) return "NOW";
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d`;
-}
-
-function formatDate(isoString: string): string {
-  const d = new Date(isoString);
-  if (isNaN(d.getTime())) return "—";
-  const now = new Date();
-  const diffMs = now.getTime() - d.getTime();
-  const diffHrs = diffMs / (1000 * 60 * 60);
-
-  if (diffHrs < 1) return timeAgo(isoString) + " ago";
-  if (diffHrs < 24) return `${Math.floor(diffHrs)}h ago`;
-
-  return d
-    .toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
-    .toUpperCase();
-}
-
-function fallbackSourceImage(link: string): string {
-  try {
-    const domain = new URL(link).hostname;
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
-  } catch {
-    return "";
-  }
-}
 
 export default function DashboardTable() {
   const {
@@ -186,244 +146,36 @@ export default function DashboardTable() {
     return sort.direction === "asc" ? " ↑" : " ↓";
   };
 
-  // Theme classes — refreshed design
-  const t = {
-    bg: dark ? "bg-slate-950" : "bg-gray-50",
-    headerBg: dark ? "bg-slate-900/95 backdrop-blur border-b border-slate-800" : "bg-white/95 backdrop-blur shadow-sm",
-    headerText: dark ? "text-slate-100" : "text-gray-900",
-    feedBadge: dark ? "text-emerald-400" : "text-emerald-600",
-    itemCount: dark ? "text-slate-400" : "text-gray-500",
-    searchBg: dark
-      ? "bg-slate-800 border-slate-700 text-slate-100 placeholder-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
-      : "bg-gray-100 border-gray-200 text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20",
-    selectBg: dark
-      ? "bg-slate-800 border-slate-700 text-slate-200 focus:border-blue-500"
-      : "bg-gray-100 border-gray-200 text-gray-700 focus:border-blue-500",
-    btnBg: dark
-      ? "bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200"
-      : "bg-white hover:bg-gray-50 border-gray-200 text-gray-700 shadow-sm",
-    legendText: dark ? "text-slate-500" : "text-gray-400",
-    tableBorder: dark ? "bg-slate-900 border-slate-800" : "bg-white",
-    theadBg: dark ? "bg-slate-800/60 border-b border-slate-700" : "bg-gray-50/80 border-b border-gray-200",
-    theadText: dark ? "text-slate-400 hover:text-slate-200" : "text-gray-500 hover:text-gray-700",
-    rowAltA: dark ? "bg-slate-900" : "bg-white",
-    rowAltB: dark ? "bg-slate-900/60" : "bg-gray-50/50",
-    rowHover: dark ? "hover:bg-slate-800/80" : "hover:bg-blue-50/40",
-    rowBorder: dark ? "border-b border-slate-800/60" : "border-b border-gray-100",
-    dtgText: dark ? "text-slate-400" : "text-gray-500",
-    sourceText: dark ? "text-slate-100" : "text-gray-800",
-    headlineText: dark ? "text-slate-100 hover:text-blue-300" : "text-gray-900 hover:text-blue-600",
-    summaryText: dark ? "text-slate-400" : "text-gray-500",
-    tierText: dark ? "text-slate-500" : "text-gray-400",
-    imgPlaceholder: dark ? "bg-slate-800 rounded-lg" : "bg-gray-100 rounded-lg",
-    loadingText: dark ? "text-slate-400" : "text-gray-500",
-    loadingSub: dark ? "text-slate-600" : "text-gray-400",
-    cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-gray-100 shadow-sm",
-    cardBorder: dark ? "border-slate-800" : "border-gray-100",
-    tabActive: dark ? "text-blue-400 border-b-2 border-blue-400" : "text-blue-600 border-b-2 border-blue-600",
-    tabInactive: dark ? "text-slate-500 hover:text-slate-300 border-b-2 border-transparent" : "text-gray-400 hover:text-gray-600 border-b-2 border-transparent",
-  };
+  const t = getThemeClasses(dark);
 
-  const tabs = [
-    { key: "feeds" as const, label: "Feeds" },
-    { key: "intel" as const, label: "Intel" },
-    { key: "network" as const, label: "Network" },
-    { key: "map" as const, label: "Map" },
-    { key: "signals" as const, label: "Signals" },
-  ];
+  const handleEntityClick = (name: string) => {
+    setEntityFilter(name);
+    setActiveTab("feeds");
+  };
 
   return (
     <div className={`h-screen flex flex-col ${t.bg} transition-colors duration-200 ${dark ? "dark-scrollbar" : ""}`}>
       {/* ─── Header Bar ─── */}
-      <div className={`shrink-0 z-30 ${t.headerBg}`}>
-        {/* Row 1: brand + controls */}
-        <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-3 flex items-center justify-between gap-3 md:gap-6">
-          {/* Left: branding */}
-          <div className="flex items-center gap-3 md:gap-5 shrink-0">
-            <h1 className={`text-sm md:text-base font-bold tracking-wide ${t.headerText}`}>
-              World Dashboard
-            </h1>
-            {feedsSucceeded > 0 && (
-              <span className={`flex items-center gap-1.5 text-xs ${t.feedBadge}`}>
-                <span className={`w-2 h-2 rounded-full ${dark ? "bg-emerald-400" : "bg-emerald-500"} animate-pulse`} />
-                {feedsSucceeded}/{feedsAttempted}
-              </span>
-            )}
-            {totalItems > 0 && (
-              <span className={`hidden md:inline text-xs ${t.itemCount}`}>
-                {filteredItems.length !== totalItems
-                  ? `${filteredItems.length}/${totalItems}`
-                  : totalItems}{" "}
-                items
-              </span>
-            )}
-          </div>
-
-          {/* Center: search */}
-          <div className="hidden sm:block flex-1 max-w-lg mx-2 md:mx-4">
-            <div className="relative">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search feeds..."
-                className={`w-full pl-10 pr-8 py-2 text-sm border rounded-lg focus:outline-none transition-colors ${t.searchBg}`}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className={`absolute right-3 top-1/2 -translate-y-1/2 ${dark ? "text-slate-500 hover:text-slate-200" : "text-gray-400 hover:text-gray-600"}`}
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Right: controls */}
-          <div className="flex items-center gap-2 md:gap-3 shrink-0">
-            <button
-              onClick={toggleTheme}
-              className={`p-2 border rounded-lg transition-colors ${t.btnBg}`}
-              title={dark ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              {dark ? (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                </svg>
-              )}
-            </button>
-
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className={`hidden md:block px-3 py-2 text-sm border rounded-lg focus:outline-none cursor-pointer ${t.selectBg}`}
-            >
-              {categories.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat === "all" ? "All Categories" : cat}
-                </option>
-              ))}
-            </select>
-
-            {fetchedAt && (
-              <span className={`hidden lg:inline text-xs ${dark ? "text-slate-500" : "text-gray-400"}`}>
-                {timeAgo(fetchedAt)}
-              </span>
-            )}
-
-            <button
-              onClick={refresh}
-              disabled={loading}
-              className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-40 ${t.btnBg}`}
-            >
-              <svg
-                className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              <span className="hidden sm:inline">Refresh</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Row 2 mobile: search bar */}
-        <div className="sm:hidden max-w-[1920px] mx-auto px-4 pb-2">
-          <div className="relative">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search feeds..."
-              className={`w-full pl-10 pr-8 py-2 text-sm border rounded-lg focus:outline-none transition-colors ${t.searchBg}`}
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className={`absolute right-3 top-1/2 -translate-y-1/2 ${dark ? "text-slate-500 hover:text-slate-200" : "text-gray-400 hover:text-gray-600"}`}
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Row 3: tabs + legend */}
-        <div className={`max-w-[1920px] mx-auto px-4 md:px-6 flex items-center gap-4 md:gap-8 ${t.legendText}`}>
-          <div className="flex items-center gap-1 mr-2">
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => {
-                  setActiveTab(tab.key);
-                  if (tab.key === "intel") setEntityFilter(null);
-                }}
-                className={`px-3 md:px-4 py-2.5 text-sm font-medium transition-colors ${
-                  activeTab === tab.key ? t.tabActive : t.tabInactive
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Mobile: category filter inline with tabs */}
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className={`md:hidden px-2 py-1 text-xs border rounded-lg focus:outline-none cursor-pointer ${t.selectBg}`}
-          >
-            {categories.map((cat) => (
-              <option key={cat} value={cat}>
-                {cat === "all" ? "All" : cat}
-              </option>
-            ))}
-          </select>
-
-          {(activeTab === "feeds" || activeTab === "map" || activeTab === "signals") && (
-            <div className="hidden sm:flex items-center gap-4 text-xs">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                Critical
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                Warning
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
-                Advisory
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
-                Monitoring
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
+      <HeaderBar
+        dark={dark}
+        toggleTheme={toggleTheme}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        categoryFilter={categoryFilter}
+        setCategoryFilter={setCategoryFilter}
+        categories={categories}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        feedsSucceeded={feedsSucceeded}
+        feedsAttempted={feedsAttempted}
+        totalItems={totalItems}
+        filteredItemCount={filteredItems.length}
+        fetchedAt={fetchedAt}
+        loading={loading}
+        refresh={refresh}
+        setEntityFilter={setEntityFilter}
+        t={t}
+      />
 
       {/* ─── Scrollable Content Area ─── */}
       <div className={`flex-1 overflow-auto min-h-0 ${dark ? "dark-scrollbar" : ""}`}>
@@ -501,50 +253,22 @@ export default function DashboardTable() {
 
       {/* ─── MAP Tab ─── */}
       {activeTab === "map" && items.length > 0 && (
-        <MapTab
-          items={filteredItems}
-          dark={dark}
-          onEntityClick={(name) => {
-            setEntityFilter(name);
-            setActiveTab("feeds");
-          }}
-        />
+        <MapTab items={filteredItems} dark={dark} onEntityClick={handleEntityClick} />
       )}
 
       {/* ─── NETWORK Tab ─── */}
       {activeTab === "network" && items.length > 0 && (
-        <NetworkTab
-          items={items}
-          dark={dark}
-          onEntityClick={(name) => {
-            setEntityFilter(name);
-            setActiveTab("feeds");
-          }}
-        />
+        <NetworkTab items={items} dark={dark} onEntityClick={handleEntityClick} />
       )}
 
       {/* ─── INTEL Tab ─── */}
       {activeTab === "intel" && items.length > 0 && (
-        <IntelTab
-          items={items}
-          dark={dark}
-          onEntityClick={(name) => {
-            setEntityFilter(name);
-            setActiveTab("feeds");
-          }}
-        />
+        <IntelTab items={items} dark={dark} onEntityClick={handleEntityClick} />
       )}
 
       {/* ─── SIGNALS Tab ─── */}
       {activeTab === "signals" && items.length > 0 && (
-        <SignalsTab
-          items={items}
-          dark={dark}
-          onEntityClick={(name) => {
-            setEntityFilter(name);
-            setActiveTab("feeds");
-          }}
-        />
+        <SignalsTab items={items} dark={dark} onEntityClick={handleEntityClick} />
       )}
 
       {/* ─── FEEDS: Desktop Table ─── */}
@@ -623,27 +347,14 @@ export default function DashboardTable() {
                         </td>
                         <td className="px-4 py-3 max-w-[500px]">
                           <div className="flex items-start gap-3">
-                            {item.imageUrl ? (
-                              <img
-                                src={item.imageUrl}
-                                alt=""
-                                className={`w-[74px] h-[50px] object-cover shrink-0 mt-0.5 rounded-lg ${t.imgPlaceholder}`}
-                                loading="lazy"
-                                onError={(e) => {
-                                  const img = e.currentTarget;
-                                  const sourceFallback = fallbackSourceImage(item.link);
-                                  if (sourceFallback && img.src !== sourceFallback) {
-                                    img.src = sourceFallback;
-                                    return;
-                                  }
-                                  img.style.display = "none";
-                                }}
-                              />
-                            ) : (
-                              <div className={`w-[74px] h-[50px] shrink-0 mt-0.5 flex items-center justify-center text-lg font-semibold ${dark ? "text-slate-500" : "text-gray-400"} ${t.imgPlaceholder}`}>
-                                {item.sourceName.charAt(0)}
-                              </div>
-                            )}
+                            <FeedItemImage
+                              imageUrl={item.imageUrl}
+                              link={item.link}
+                              sourceName={item.sourceName}
+                              dark={dark}
+                              size="desktop"
+                              imgPlaceholder={t.imgPlaceholder}
+                            />
                             <a
                               href={item.link}
                               target="_blank"
@@ -697,27 +408,14 @@ export default function DashboardTable() {
 
                   {/* Headline with image */}
                   <div className="flex items-start gap-3 mb-2">
-                    {item.imageUrl ? (
-                      <img
-                        src={item.imageUrl}
-                        alt=""
-                        className={`w-16 h-[46px] object-cover shrink-0 rounded-lg ${t.imgPlaceholder}`}
-                        loading="lazy"
-                        onError={(e) => {
-                          const img = e.currentTarget;
-                          const sourceFallback = fallbackSourceImage(item.link);
-                          if (sourceFallback && img.src !== sourceFallback) {
-                            img.src = sourceFallback;
-                            return;
-                          }
-                          img.style.display = "none";
-                        }}
-                      />
-                    ) : (
-                      <div className={`w-16 h-[46px] shrink-0 flex items-center justify-center text-base font-semibold ${dark ? "text-slate-500" : "text-gray-400"} ${t.imgPlaceholder}`}>
-                        {item.sourceName.charAt(0)}
-                      </div>
-                    )}
+                    <FeedItemImage
+                      imageUrl={item.imageUrl}
+                      link={item.link}
+                      sourceName={item.sourceName}
+                      dark={dark}
+                      size="mobile"
+                      imgPlaceholder={t.imgPlaceholder}
+                    />
                     <a
                       href={item.link}
                       target="_blank"

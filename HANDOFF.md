@@ -20,22 +20,34 @@ A live intelligence dashboard deployed at **https://worlddashboard.vercel.app/**
 
 | File | Purpose |
 |------|---------|
-| `src/components/DashboardTable.tsx` | Main component: header bar, tab switching (FEEDS/INTEL), desktop table + mobile cards, search, category filter, theme toggle, sort |
+| `src/components/DashboardTable.tsx` | Main component: state management, filtering/sorting, tab routing, feeds table/cards |
+| `src/components/HeaderBar.tsx` | Header bar: branding, search (desktop+mobile unified), tabs, category filter, theme toggle, refresh |
+| `src/components/FeedItemImage.tsx` | Shared image component with fallback logic for desktop and mobile |
 | `src/components/IntelTab.tsx` | INTEL tab: entity table (desktop) + entity cards (mobile), sorting, type filter, urgency bars, co-occurrence links |
-| `src/lib/feed-fetcher.ts` | Server-side RSS/Atom fetcher: parallel fetch with 8s timeout, regex XML parser, 3-tier ad filter (URL patterns, title regex, financial ad detection), image extraction, 15-item-per-feed cap |
+| `src/components/SignalsTab.tsx` | SIGNALS tab: anomaly detection, cascade visualization, entity velocity grid |
+| `src/components/NetworkTab.tsx` | Force-directed entity co-occurrence graph |
+| `src/components/MapTab.tsx` | Leaflet geospatial markers |
+| `src/lib/feed-fetcher.ts` | Server-side RSS/Atom fetcher: parallel fetch with 3-phase fallback, caching, request dedup |
+| `src/lib/ad-filter.ts` | Ad/spam content detection: 50+ title patterns, 14 URL patterns, 28 financial ad patterns |
+| `src/lib/xml-helpers.ts` | HTML stripping, XML tag extraction, attribute extraction |
+| `src/lib/image-extractor.ts` | 6-method image URL extraction hierarchy from RSS/Atom blocks |
 | `src/lib/entity-extractor.ts` | Client-side NER: dictionary matching (countries/orgs/regions) + person name heuristic, co-occurrence computation, trend velocity |
 | `src/lib/entity-dictionaries.ts` | 120+ countries with aliases, 50+ orgs, 30 regions, person-name stopwords |
-| `src/lib/urgency.ts` | Maps categories to urgency levels (critical/warning/advisory/monitoring/system/neutral), returns dark/light theme row and badge classes |
-| `src/lib/types.ts` | FeedItem, SourceMeta, SortConfig, UrgencyLevel, EntityType, ExtractedEntity |
+| `src/lib/signal-detector.ts` | Anomaly detection: surge, sentiment deterioration, cross-category, novel emergence, escalation |
+| `src/lib/signal-storage.ts` | Signal muting and entity snapshot localStorage persistence |
+| `src/lib/cascade-graph.ts` | Second/third-order impact chain modeling |
+| `src/lib/urgency.ts` | Maps categories to urgency levels, returns dark/light theme row and badge classes |
+| `src/lib/theme.ts` | Dark/light theme class definitions (`getThemeClasses()`) |
+| `src/lib/date-utils.ts` | `timeAgo()` and `formatDate()` utilities |
+| `src/lib/types.ts` | FeedItem, SourceMeta, SortConfig, UrgencyLevel, EntityType, ExtractedEntity, Signal |
+| `src/lib/geo-coordinates.ts` | Country/region lat/lng lookup table |
 | `src/lib/sources-data.json` | Pre-generated JSON from CSV (147 sources). Must regenerate if CSV changes. |
 | `Dashboard Sources.csv` | Master source list: 147 entries with name, category, tier, URL, type |
 | `src/hooks/useSources.ts` | `useFeed()` hook: fetches `/api/sources`, returns items/loading/error/stats/refresh |
 | `src/app/api/sources/route.ts` | API route: reads sources-data.json, calls fetchAllFeeds(), returns JSON. `force-dynamic`, `maxDuration=30` |
 | `src/app/layout.tsx` | Root layout with `font-mono` body class |
 | `src/app/globals.css` | Tailwind directives, dark scrollbar, row transitions |
-| `tailwind.config.ts` | Consolas/Menlo/Monaco font stack |
-| `vercel.json` | `{"framework": "nextjs"}` |
-| `next.config.mjs` | `images: { unoptimized: true }` |
+| `src/lib/__tests__/` | 124 unit tests across 8 files (Vitest) |
 
 ### Data Flow
 1. User loads page → `useFeed()` calls `/api/sources`
