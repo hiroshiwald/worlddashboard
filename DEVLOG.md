@@ -1,5 +1,32 @@
 # World Dashboard Development Log
 
+## 2026-04-09 — Fix: Stale RSS Feeds Due to Next.js Data Cache
+
+### Problem
+
+RSS feeds returned articles 14+ hours old despite the `/api/sources` route handler running live (`x-vercel-cache: MISS`, fresh `fetchedAt` timestamps). The route reported 68/73 feeds succeeded, but all content was stale.
+
+### Root Cause
+
+Next.js 14 caches `fetch()` responses in its **Data Cache** by default. `export const dynamic = "force-dynamic"` prevents full-route static generation but does **not** disable the Data Cache for individual `fetch()` calls within route handlers.
+
+During the PR #23 refactor (2026-04-06), `{ cache: 'no-store' }` was dropped from the client-side fetch in `useSources.ts`. The three server-side `fetch()` calls in `feed-fetcher.ts` (direct, relay, altUrl) never had it — so every outbound RSS request silently returned cached XML from hours ago.
+
+### Fix
+
+1. Added `cache: 'no-store'` to all three server-side `fetch()` calls in `src/lib/feed-fetcher.ts`
+2. Restored `cache: 'no-store'` on the client-side fetch in `src/hooks/useSources.ts`
+3. Added `export const fetchCache = 'force-no-store'` to `src/app/api/sources/route.ts` as defense-in-depth
+
+### Caching Architecture (After Fix)
+
+| Layer | Mechanism | TTL | Purpose |
+|-------|-----------|-----|---------|
+| Next.js Data Cache | `cache: 'no-store'` + `fetchCache: 'force-no-store'` | Disabled | Ensures fresh RSS XML on every invocation |
+| In-memory `feedCache` | 5 min fresh / 30 min stale | 5 min | Deduplicates within a single serverless instance lifetime |
+| CDN (Vercel Edge) | `s-maxage=60, stale-while-revalidate=300` | 60s fresh / 5 min stale | Coalesces concurrent client requests |
+| Browser | `cache: 'no-store'` on client fetch | Disabled | Ensures client always hits CDN |
+
 ## 2026-04-06 — Major Refactoring: Module Extraction + Test Suite
 
 ### Summary

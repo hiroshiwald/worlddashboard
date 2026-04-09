@@ -5,6 +5,7 @@ import { SourceMeta } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+export const fetchCache = "force-no-store";
 
 export async function GET() {
   const sources: SourceMeta[] = sourcesData.map((s) => ({
