@@ -264,6 +264,7 @@ async function doFetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> 
       const res = await fetch(source.url, {
         signal: dc.signal,
         headers: FETCH_HEADERS,
+        cache: 'no-store',
       });
       if (res.ok) {
         const text = await res.text();
@@ -311,7 +312,7 @@ async function doFetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> 
       if (relaySecret) headers["x-relay-key"] = relaySecret;
       const res = await fetch(
         `${relayUrl}/rss?url=${encodeURIComponent(source.url)}`,
-        { signal: rc.signal, headers }
+        { signal: rc.signal, headers, cache: 'no-store' }
       );
       if (res.ok) {
         const text = await res.text();
@@ -347,6 +348,7 @@ async function doFetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> 
       const res = await fetch(source.altUrl, {
         signal: ac.signal,
         headers: FETCH_HEADERS,
+        cache: 'no-store',
       });
       if (res.ok) {
         const text = await res.text();
