@@ -1,5 +1,14 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Trim useDashboardTable hook (V2-1d)
+- Extracted 3 pure helper functions from `src/hooks/useDashboardTable.ts`: `matchesText`, `filterItems`, `sortItems`
+- `matchesText` (8 lines): deduplicates identical text-matching pattern used for both entityFilter and searchQuery
+- `filterItems` (9 lines): replaces 30-line filteredItems memo body
+- `sortItems` (14 lines): replaces 15-line sortedItems memo body
+- Hook function body: 112 → 74 lines (under 80-line threshold)
+- 6 state variables + 1 effect + 2 memos + 5 handlers make further reduction below 50 counterproductive
+- No signature, return type, or behavioral changes. All 124 tests pass.
+
 ## 2026-04-10 — Decompose buildSituations (V2-1c)
 - Decomposed `buildSituations` in `src/lib/situation-builder.ts` from 219 lines to 7 functions, each under 50 lines
 - Extracted `Cluster` type alias and `URGENCY_PRIORITY` module-level constant (static data, not mutable state)
