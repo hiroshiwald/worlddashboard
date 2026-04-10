@@ -3,6 +3,59 @@
 import { useState, useEffect, useCallback } from "react";
 import { FeedItem, FeedDiagnostic } from "@/lib/types";
 
+interface ValidatedResponse {
+  items: FeedItem[];
+  fetchedAt: string | null;
+  feedsAttempted: number;
+  feedsSucceeded: number;
+  count: number;
+  feedDiagnostics: FeedDiagnostic[];
+}
+
+function validateApiResponse(data: unknown): ValidatedResponse {
+  const obj = (data && typeof data === "object" ? data : {}) as Record<
+    string,
+    unknown
+  >;
+
+  if (!Array.isArray(obj.items)) {
+    console.warn("[useSources] data.items is not an array, defaulting to []");
+  }
+  if (typeof obj.feedsAttempted !== "number") {
+    console.warn(
+      "[useSources] data.feedsAttempted is not a number, defaulting to 0",
+    );
+  }
+  if (typeof obj.feedsSucceeded !== "number") {
+    console.warn(
+      "[useSources] data.feedsSucceeded is not a number, defaulting to 0",
+    );
+  }
+  if (typeof obj.count !== "number") {
+    console.warn(
+      "[useSources] data.count is not a number, defaulting to 0",
+    );
+  }
+  if (obj.feedDiagnostics !== undefined && !Array.isArray(obj.feedDiagnostics)) {
+    console.warn(
+      "[useSources] data.feedDiagnostics is not an array, defaulting to []",
+    );
+  }
+
+  return {
+    items: Array.isArray(obj.items) ? (obj.items as FeedItem[]) : [],
+    fetchedAt: typeof obj.fetchedAt === "string" ? obj.fetchedAt : null,
+    feedsAttempted:
+      typeof obj.feedsAttempted === "number" ? obj.feedsAttempted : 0,
+    feedsSucceeded:
+      typeof obj.feedsSucceeded === "number" ? obj.feedsSucceeded : 0,
+    count: typeof obj.count === "number" ? obj.count : 0,
+    feedDiagnostics: Array.isArray(obj.feedDiagnostics)
+      ? (obj.feedDiagnostics as FeedDiagnostic[])
+      : [],
+  };
+}
+
 interface UseFeedReturn {
   items: FeedItem[];
   loading: boolean;
@@ -32,12 +85,13 @@ export function useFeed(): UseFeedReturn {
       const res = await fetch("/api/sources", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setItems(data.items);
-      setFetchedAt(data.fetchedAt);
-      setFeedsAttempted(data.feedsAttempted);
-      setFeedsSucceeded(data.feedsSucceeded);
-      setTotalItems(data.count);
-      setFeedDiagnostics(data.feedDiagnostics || []);
+      const validated = validateApiResponse(data);
+      setItems(validated.items);
+      setFetchedAt(validated.fetchedAt);
+      setFeedsAttempted(validated.feedsAttempted);
+      setFeedsSucceeded(validated.feedsSucceeded);
+      setTotalItems(validated.count);
+      setFeedDiagnostics(validated.feedDiagnostics);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch feed");
     } finally {

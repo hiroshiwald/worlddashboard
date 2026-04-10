@@ -1,5 +1,15 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Fix: Validate API Response in useSources.ts (Audit Violation #5)
+- Added `validateApiResponse` function to `src/hooks/useSources.ts` that validates the shape of the `/api/sources` JSON response at the module boundary
+- `data.items`: validated as array, defaults to `[]` with console warning
+- `data.feedsAttempted`, `data.feedsSucceeded`, `data.count`: validated as numbers, default to `0` with console warning
+- `data.feedDiagnostics`: validated as array if present, defaults to `[]` with console warning
+- `data.fetchedAt`: validated as string, defaults to `null`
+- Malformed API responses now produce a degraded but functional dashboard (empty table, zeroed counters) instead of a crash
+- Addresses AUDIT.md Violation #5: "No schema validation on API response"
+- All 124 existing tests pass; TypeScript compiles clean
+
 ## 2026-04-10 — Fix: Eliminate Shared Mutable State in feed-fetcher.ts (Audit Violation #4)
 - Removed two module-level mutable variables from `src/lib/feed-fetcher.ts`:
   - `feedCache` (Map): now passed as a `cache` parameter through `fetchAllFeeds` → `fetchSingleFeed`
