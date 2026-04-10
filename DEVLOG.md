@@ -1,5 +1,12 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Fix: Swallowed Errors in signal-storage.ts (Audit Violation #1)
+- Added `console.error` logging to all 6 empty catch blocks in `src/lib/signal-storage.ts`
+- Functions fixed: `loadMutedEntities`, `loadPreviousEntityNames`, `loadEdgeHistory`, `saveEdgeHistory`, `loadEntityBaselines`, `updateEntityBaselines`
+- Each catch now logs function name, the error object, and which fallback is returned
+- Fallback behavior (empty Map/Set, void) unchanged — only the silence is removed
+- All 124 existing tests pass
+
 ## 2026-04-10 — Fix: RSS Input Validation (Audit Violation #3)
 - Added input validation to `parseRssItems()` and `parseAtomEntries()` in `src/lib/feed-fetcher.ts`
 - URL protocol whitelist: `link` and `imageUrl` fields now only allow `https:` and `http:` (via `new URL()` constructor). Non-conforming URLs replaced with empty string, triggering existing fallbacks (`source.url` for links, favicon API for images).
