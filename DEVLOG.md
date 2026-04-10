@@ -1,5 +1,15 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — AUDIT-3: verify fixes, fresh scan, 6 remaining violations
+- All 9 prior violations confirmed fixed (AUDIT.md V1–V5, AUDIT-2.md V2-1 to V2-4)
+- Fresh scan found 6 violations of 50-line function limit:
+  - V3-1: 3 hooks (useSignalsTab 177 lines, useDiscoveryTab 139, useIntelTab 101) — introduced during V2-1 tab decomposition
+  - V3-2: enrichEntities 128 lines in novelty-scorer.ts — AUDIT-2 miscount (reported as ~50)
+  - V3-3: matchPersonNames ~80 lines in entity-extractor.ts — pre-existing, previously undetected
+  - V3-4: extractImageUrl 71 lines in image-extractor.ts — pre-existing, previously undetected
+- MANIFEST.md updated: added 8 missing exports (signal-storage.ts, feed-fetcher.ts), corrected cache description
+- No code changes. Audit and documentation only.
+
 ## 2026-04-10 — Add fire-and-forget comment and freeze LOOKUP_MAP (V2-3, V2-4)
 - `src/hooks/useSources.ts`: added comment above `fetchFeed()` in useEffect explaining why the promise is not awaited (React pattern: useEffect cannot be async; errors handled inside fetchFeed)
 - `src/lib/entity-extractor.ts`: added `Object.freeze(LOOKUP_MAP)` after initialization to enforce read-only access post module load
