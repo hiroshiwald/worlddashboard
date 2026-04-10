@@ -3,6 +3,24 @@ import { stripHtml, extractTag, extractAttr } from "./xml-helpers";
 import { isAdContent, isFinancialAd } from "./ad-filter";
 import { extractImageUrl, getSourceImageUrl } from "./image-extractor";
 
+// --- Input validation helpers ---
+const MIN_DATE_MS = new Date("2000-01-01T00:00:00Z").getTime();
+const FUTURE_TOLERANCE_MS = 48 * 60 * 60 * 1000;
+
+function sanitizeUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? url : "";
+  } catch {
+    return "";
+  }
+}
+
+function isDateInBounds(date: Date): boolean {
+  const t = date.getTime();
+  return t >= MIN_DATE_MS && t <= Date.now() + FUTURE_TOLERANCE_MS;
+}
+
 // Max items to keep per individual feed
 const MAX_ITEMS_PER_FEED = 15;
 
@@ -20,12 +38,13 @@ export function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
     if (items.length >= MAX_ITEMS_PER_FEED) break;
 
     const block = match[1];
-    const title = stripHtml(extractTag(block, "title"));
+    const title = stripHtml(extractTag(block, "title")).slice(0, 500);
     let link = extractTag(block, "link");
     if (!link) {
       const linkMatch = block.match(/<link[^>]*\/?\s*>\s*([^<\s]+)/i);
       if (linkMatch) link = linkMatch[1].trim();
     }
+    link = sanitizeUrl(link);
     const pubDate =
       extractTag(block, "pubDate") || extractTag(block, "dc:date");
     const description =
@@ -34,6 +53,7 @@ export function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
 
     const published = pubDate ? new Date(pubDate) : null;
     const hasValidDate = published && !isNaN(published.getTime());
+    const isDateBounded = hasValidDate && isDateInBounds(published!);
 
     // If this feed generally has dates but THIS item doesn't, it's likely an injected ad
     if (feedHasDates && !hasValidDate) {
@@ -56,17 +76,17 @@ export function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
     }
 
     const imageUrl =
-      extractImageUrl(block) || getSourceImageUrl(link || "", source.url);
+      sanitizeUrl(extractImageUrl(block)) || getSourceImageUrl(link || "", source.url);
 
     if (title) {
       items.push({
         id: `${source.name}-${title.slice(0, 40)}-${pubDate || Math.random()}`,
         title,
         link: link || source.url,
-        published: hasValidDate
+        published: isDateBounded
           ? published!.toISOString()
           : new Date().toISOString(),
-        summary: stripHtml(description).slice(0, 300),
+        summary: stripHtml(description).slice(0, 1000),
         sourceName: source.name,
         sourceCategory: source.category,
         sourceTier: source.tier,
@@ -92,9 +112,10 @@ export function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
     if (items.length >= MAX_ITEMS_PER_FEED) break;
 
     const block = match[1];
-    const title = stripHtml(extractTag(block, "title"));
+    const title = stripHtml(extractTag(block, "title")).slice(0, 500);
     let link = extractAttr(block, "link", "href");
     if (!link) link = extractTag(block, "link");
+    link = sanitizeUrl(link);
     const updated =
       extractTag(block, "updated") || extractTag(block, "published");
     const summary =
@@ -102,6 +123,7 @@ export function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
 
     const published = updated ? new Date(updated) : null;
     const hasValidDate = published && !isNaN(published.getTime());
+    const isDateBounded = hasValidDate && isDateInBounds(published!);
 
     if (feedHasDates && !hasValidDate) {
       continue;
@@ -121,17 +143,17 @@ export function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
     }
 
     const imageUrl =
-      extractImageUrl(block) || getSourceImageUrl(link || "", source.url);
+      sanitizeUrl(extractImageUrl(block)) || getSourceImageUrl(link || "", source.url);
 
     if (title) {
       items.push({
         id: `${source.name}-${title.slice(0, 40)}-${updated || Math.random()}`,
         title,
         link: link || source.url,
-        published: hasValidDate
+        published: isDateBounded
           ? published!.toISOString()
           : new Date().toISOString(),
-        summary: stripHtml(summary).slice(0, 300),
+        summary: stripHtml(summary).slice(0, 1000),
         sourceName: source.name,
         sourceCategory: source.category,
         sourceTier: source.tier,

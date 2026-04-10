@@ -1,5 +1,14 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Fix: RSS Input Validation (Audit Violation #3)
+- Added input validation to `parseRssItems()` and `parseAtomEntries()` in `src/lib/feed-fetcher.ts`
+- URL protocol whitelist: `link` and `imageUrl` fields now only allow `https:` and `http:` (via `new URL()` constructor). Non-conforming URLs replaced with empty string, triggering existing fallbacks (`source.url` for links, favicon API for images).
+- Title capped at 500 characters
+- Date bounds: rejects dates >48h future or before 2000-01-01; uses current timestamp as fallback. Existing skip logic (`hasValidDate`) unchanged — bounds only affect the final `published` field.
+- Summary cap raised from 300 to 1000 characters
+- No function signature or return type changes. No other files modified.
+- All 124 existing tests pass
+
 ## 2026-04-10
 - Created AUDIT.md from codebase audit — 5 violations documented
 - Initialized project governance files (CLAUDE.md, MANIFEST.md, DEVLOG.md)
