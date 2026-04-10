@@ -274,137 +274,148 @@ async function fetchSingleFeed(
   return result;
 }
 
-async function doFetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> {
-  const start = Date.now();
-  let lastError = "";
-  let lastErrorType: FeedErrorType | undefined;
-  let lastHttpStatus: number | undefined;
+// ─── Phase outcome type for fetch decomposition ───
+type PhaseOutcome =
+  | { ok: true; items: FeedItem[] }
+  | { ok: false; error?: string; errorType?: FeedErrorType; httpStatus?: number };
 
-  // Phase 1: Direct fetch with single retry on transient failures — 5s timeout each.
+// Phase 1: Direct fetch with single retry on 5xx/timeout — 5s timeout each.
+async function fetchDirect(source: SourceMeta): Promise<PhaseOutcome> {
+  let error: string | undefined;
+  let errorType: FeedErrorType | undefined;
+  let httpStatus: number | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const dc = new AbortController();
-    const dt = setTimeout(() => dc.abort(), 5000);
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 5000);
     try {
       const res = await fetch(source.url, {
-        signal: dc.signal,
-        headers: FETCH_HEADERS,
-        cache: 'no-store',
+        signal: ac.signal, headers: FETCH_HEADERS, cache: 'no-store',
       });
       if (res.ok) {
         const text = await res.text();
         const items = parseFeedXml(text, source);
-        if (items.length > 0) {
-          return {
-            items,
-            diagnostic: { sourceName: source.name, sourceUrl: source.url, phase: "direct", durationMs: Date.now() - start },
-          };
-        }
-        break; // Got response but no items — don't retry
-      } else {
-        const classified = classifyError(null, res);
-        lastError = classified.message;
-        lastErrorType = classified.errorType;
-        lastHttpStatus = classified.httpStatus;
-        if (attempt === 0 && classified.errorType === "http_5xx") {
-          await new Promise((r) => setTimeout(r, 1000));
-          continue;
-        }
-        break;
+        if (items.length > 0) return { ok: true, items };
+        break; // 200 OK but no items — don't retry
       }
+      const classified = classifyError(null, res);
+      error = classified.message;
+      errorType = classified.errorType;
+      httpStatus = classified.httpStatus;
+      if (attempt === 0 && classified.errorType === "http_5xx") {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      break;
     } catch (e) {
       const classified = classifyError(e);
-      lastError = classified.message;
-      lastErrorType = classified.errorType;
+      error = classified.message;
+      errorType = classified.errorType;
       if (attempt === 0 && classified.errorType === "timeout") {
         await new Promise((r) => setTimeout(r, 1000));
         continue;
       }
       break;
     } finally {
-      clearTimeout(dt);
+      clearTimeout(timer);
     }
   }
+  return { ok: false, error, errorType, httpStatus };
+}
 
-  // Phase 2: Relay fallback — 10s timeout.
+// Phase 2: Relay proxy fallback — 10s timeout.
+async function fetchViaRelay(
+  source: SourceMeta,
+  relayUrl: string,
+): Promise<PhaseOutcome> {
+  const relaySecret = getRelaySecret();
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 10000);
+  try {
+    const headers: Record<string, string> = {};
+    if (relaySecret) headers["x-relay-key"] = relaySecret;
+    const res = await fetch(
+      `${relayUrl}/rss?url=${encodeURIComponent(source.url)}`,
+      { signal: ac.signal, headers, cache: 'no-store' },
+    );
+    if (res.ok) {
+      const text = await res.text();
+      if (text.includes("<rss") || text.includes("<feed") || text.includes("<channel")) {
+        const items = parseFeedXml(text, source);
+        if (items.length > 0) return { ok: true, items };
+      }
+      return { ok: false };
+    }
+    const classified = classifyError(null, res);
+    return { ok: false, error: classified.message, errorType: classified.errorType, httpStatus: classified.httpStatus };
+  } catch (e) {
+    const classified = classifyError(e);
+    return { ok: false, error: classified.message, errorType: classified.errorType };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Phase 3: altUrl fallback (RSSHub mirror) — 5s timeout.
+async function fetchFromAltUrl(source: SourceMeta): Promise<PhaseOutcome> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 5000);
+  try {
+    const res = await fetch(source.altUrl!, {
+      signal: ac.signal, headers: FETCH_HEADERS, cache: 'no-store',
+    });
+    if (res.ok) {
+      const text = await res.text();
+      const items = parseFeedXml(text, source);
+      if (items.length > 0) return { ok: true, items };
+      return { ok: false };
+    }
+    const classified = classifyError(null, res);
+    return { ok: false, error: classified.message, errorType: classified.errorType, httpStatus: classified.httpStatus };
+  } catch (e) {
+    const classified = classifyError(e);
+    return { ok: false, error: classified.message, errorType: classified.errorType };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Orchestrator: tries direct → relay → altUrl, returns first success.
+async function doFetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> {
+  const start = Date.now();
+  let lastError = "";
+  let lastErrorType: FeedErrorType | undefined;
+  let lastHttpStatus: number | undefined;
+
+  const makeDiag = (phase: FeedDiagnostic["phase"]): FeedDiagnostic => ({
+    sourceName: source.name, sourceUrl: source.url, phase, durationMs: Date.now() - start,
+  });
+
+  const accumulate = (o: PhaseOutcome & { ok: false }) => {
+    if (o.error) { lastError = o.error; lastErrorType = o.errorType; }
+    if (o.httpStatus !== undefined) lastHttpStatus = o.httpStatus;
+  };
+
+  const direct = await fetchDirect(source);
+  if (direct.ok) return { items: direct.items, diagnostic: makeDiag("direct") };
+  accumulate(direct);
+
   const relayUrl = getRelayUrl();
   if (relayUrl) {
-    const relaySecret = getRelaySecret();
-    const rc = new AbortController();
-    const rt = setTimeout(() => rc.abort(), 10000);
-    try {
-      const headers: Record<string, string> = {};
-      if (relaySecret) headers["x-relay-key"] = relaySecret;
-      const res = await fetch(
-        `${relayUrl}/rss?url=${encodeURIComponent(source.url)}`,
-        { signal: rc.signal, headers, cache: 'no-store' }
-      );
-      if (res.ok) {
-        const text = await res.text();
-        if (text.includes("<rss") || text.includes("<feed") || text.includes("<channel")) {
-          const items = parseFeedXml(text, source);
-          if (items.length > 0) {
-            return {
-              items,
-              diagnostic: { sourceName: source.name, sourceUrl: source.url, phase: "relay", durationMs: Date.now() - start },
-            };
-          }
-        }
-      } else {
-        const classified = classifyError(null, res);
-        lastError = classified.message;
-        lastErrorType = classified.errorType;
-        lastHttpStatus = classified.httpStatus;
-      }
-    } catch (e) {
-      const classified = classifyError(e);
-      lastError = classified.message;
-      lastErrorType = classified.errorType;
-    } finally {
-      clearTimeout(rt);
-    }
+    const relay = await fetchViaRelay(source, relayUrl);
+    if (relay.ok) return { items: relay.items, diagnostic: makeDiag("relay") };
+    accumulate(relay);
   }
 
-  // Phase 3: altUrl fallback (RSSHub mirror) — 5s timeout.
   if (source.altUrl) {
-    const ac = new AbortController();
-    const at = setTimeout(() => ac.abort(), 5000);
-    try {
-      const res = await fetch(source.altUrl, {
-        signal: ac.signal,
-        headers: FETCH_HEADERS,
-        cache: 'no-store',
-      });
-      if (res.ok) {
-        const text = await res.text();
-        const items = parseFeedXml(text, source);
-        if (items.length > 0) {
-          return {
-            items,
-            diagnostic: { sourceName: source.name, sourceUrl: source.url, phase: "altUrl", durationMs: Date.now() - start },
-          };
-        }
-      } else {
-        const classified = classifyError(null, res);
-        lastError = classified.message;
-        lastErrorType = classified.errorType;
-        lastHttpStatus = classified.httpStatus;
-      }
-    } catch (e) {
-      const classified = classifyError(e);
-      lastError = classified.message;
-      lastErrorType = classified.errorType;
-    } finally {
-      clearTimeout(at);
-    }
+    const alt = await fetchFromAltUrl(source);
+    if (alt.ok) return { items: alt.items, diagnostic: makeDiag("altUrl") };
+    accumulate(alt);
   }
 
   return {
     items: [],
     diagnostic: {
-      sourceName: source.name,
-      sourceUrl: source.url,
-      phase: "failed",
-      durationMs: Date.now() - start,
+      ...makeDiag("failed"),
       error: lastError || "All phases returned no items",
       errorType: lastErrorType,
       httpStatus: lastHttpStatus,
