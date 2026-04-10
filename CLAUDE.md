@@ -7,7 +7,7 @@ Every line of code is a liability. Prefer deletion over addition, modification o
 3. If a task feels complex, decompose into subtasks. Complete and verify each one before moving to the next.
 
 ## Coding Rules
-- Max 50 lines per function. If longer, extract.
+- Max 50 lines per function. If longer, extract. Exception: if splitting would scatter tightly related state or logic across files in a way that hurts readability, note why in a comment and keep it together.
 - No shared mutable state between modules. Data flows through arguments and return values.
 - Functions do one thing. If the name needs "and", split it.
 - Prefer explicit logic over clever abstractions. No ternary chains, no nested short-circuits, no implicit coercions. A new reader should parse intent in one pass.
