@@ -1,6 +1,7 @@
 # World Dashboard Development Log
 
 ## 2026-04-10
+- Created AUDIT.md from codebase audit — 5 violations documented
 - Initialized project governance files (CLAUDE.md, MANIFEST.md, DEVLOG.md)
 - No code changes
 
