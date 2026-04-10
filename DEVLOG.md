@@ -1,5 +1,19 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Refactor: Decompose DashboardTable.tsx (Audit Violation #2)
+- Decomposed `src/components/DashboardTable.tsx` from ~450 lines (9x over 50-line limit) to 79 lines
+- Addresses AUDIT.md Violation #2: "Massive Component Functions"
+- **New files created:**
+  - `src/hooks/useDashboardTable.ts` — custom hook with all state, memos, effects, and handlers
+  - `src/components/dashboard/EntityFilterBanner.tsx` — entity filter notification bar
+  - `src/components/dashboard/FeedTable.tsx` — desktop sortable table with header and row sub-components
+  - `src/components/dashboard/FeedCardList.tsx` — mobile card layout
+  - `src/components/dashboard/TabContent.tsx` — lazy-loaded tab switcher (absorbs dynamic imports)
+  - `src/components/dashboard/index.ts` — barrel export
+- **DashboardTable.tsx** is now a thin composition shell: imports hook + sub-components, composes JSX
+- No behavioral or visual changes — purely structural refactor
+- All 124 existing tests pass; build succeeds
+
 ## 2026-04-10 — Fix: Swallowed Errors in signal-storage.ts (Audit Violation #1)
 - Added `console.error` logging to all 6 empty catch blocks in `src/lib/signal-storage.ts`
 - Functions fixed: `loadMutedEntities`, `loadPreviousEntityNames`, `loadEdgeHistory`, `saveEdgeHistory`, `loadEntityBaselines`, `updateEntityBaselines`

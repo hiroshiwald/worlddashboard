@@ -6,7 +6,12 @@
 | `src/app/page.tsx` | Home page — renders the main dashboard | `Home` component |
 | `src/app/layout.tsx` | Root HTML layout with metadata and font loading | `RootLayout` component |
 | `src/app/globals.css` | Tailwind directives and dark-scrollbar styles | — |
-| `src/components/DashboardTable.tsx` | Main orchestrator: tabs, filtering, sorting, theming, responsive layout | `DashboardTable` |
+| `src/components/DashboardTable.tsx` | Thin composition shell: imports hook + sub-components, composes layout | `DashboardTable` |
+| `src/components/dashboard/EntityFilterBanner.tsx` | Entity filter notification bar with clear controls | `EntityFilterBanner` |
+| `src/components/dashboard/FeedTable.tsx` | Desktop sortable table with header and row sub-components | `FeedTable` |
+| `src/components/dashboard/FeedCardList.tsx` | Mobile responsive card layout for feed items | `FeedCardList` |
+| `src/components/dashboard/TabContent.tsx` | Lazy-loaded tab switcher for Intel, Signals, Network, Map, Discovery | `TabContent` |
+| `src/components/dashboard/index.ts` | Barrel export for dashboard sub-components | — |
 | `src/components/HeaderBar.tsx` | Top navigation with search, category filter, theme toggle, tab switcher | `HeaderBar` |
 | `src/components/IntelTab.tsx` | Entity extraction and situation clustering view | `IntelTab` |
 | `src/components/SignalsTab.tsx` | Anomaly detection UI with signal cards and cascade chains | `SignalsTab` |
@@ -14,6 +19,7 @@
 | `src/components/MapTab.tsx` | Leaflet geospatial map with entity markers | `MapTab` |
 | `src/components/DiscoveryTab.tsx` | 2D scatter plot for novelty discovery | `DiscoveryTab` |
 | `src/components/FeedItemImage.tsx` | Image component with Google favicon and text-initial fallbacks | `FeedItemImage` |
+| `src/hooks/useDashboardTable.ts` | Custom hook: all DashboardTable state, memos, effects, handlers | `useDashboardTable`, `TabKey`, `ColumnKey` |
 | `src/hooks/useSources.ts` | React hook for fetching feed data from `/api/sources` | `useFeed` |
 | `src/lib/types.ts` | All shared TypeScript interfaces | `FeedItem`, `SourceMeta`, `ExtractedEntity`, `EnrichedEntity`, `Signal`, `Situation`, `UrgencyLevel`, `SortConfig`, etc. |
 | `src/lib/feed-fetcher.ts` | RSS/Atom fetching with 3-phase fallback (direct → relay → altUrl), parsing, and in-memory cache | `fetchAllFeeds`, `parseFeedXml`, `parseRssItems`, `parseAtomEntries` |
@@ -84,7 +90,10 @@
 - Theme preference stored as `wd-theme`
 
 **Internal Module Dependencies**
-- `DashboardTable` → all tab components + `useFeed` + `theme`
+- `DashboardTable` → `useDashboardTable` + `HeaderBar` + dashboard sub-components
+- `useDashboardTable` → `useFeed` + `theme`
+- `TabContent` → all tab components (dynamic imports)
+- `FeedTable` / `FeedCardList` → `FeedItemImage` + `urgency` + `date-utils`
 - All analysis tabs → `entity-extractor` → `entity-dictionaries` + `urgency` + `compromise`
 - `SignalsTab` → `signal-detector` + `novelty-scorer` + `situation-builder` + `cascade-graph` + `signal-storage`
 - `MapTab` → `geo-coordinates` + `react-leaflet`
