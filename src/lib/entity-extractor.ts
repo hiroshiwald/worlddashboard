@@ -245,157 +245,111 @@ function scoreSentiment(text: string): number {
   if (words.length === 0) return 0;
   return Math.max(-1, Math.min(1, score / Math.max(1, Math.sqrt(words.length))));
 }
+interface EntityAccumulator {
+  name: string;
+  type: "country" | "organization" | "region" | "person";
+  mentions: number;
+  itemIds: string[];
+  urgency: Record<UrgencyLevel, number>;
+  lastSeen: number;
+  recentHour: number;
+  recentSixHour: number;
+  recentDay: number;
+  sentimentSum: number;
+  sentimentCount: number;
+}
 
-export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
-  const now = Date.now();
-  const ONE_HOUR = 60 * 60 * 1000;
-  const SIX_HOURS = 6 * ONE_HOUR;
-  const ONE_DAY = 24 * ONE_HOUR;
+interface TimeThresholds {
+  now: number;
+  oneHour: number;
+  sixHours: number;
+  oneDay: number;
+}
 
-  // entity name -> accumulator
-  const entityMap = new Map<
-    string,
-    {
-      name: string;
-      type: "country" | "organization" | "region" | "person";
-      mentions: number;
-      itemIds: string[];
-      urgency: Record<UrgencyLevel, number>;
-      lastSeen: number;
-      recentHour: number;
-      recentSixHour: number;
-      recentDay: number;
-      sentimentSum: number;
-      sentimentCount: number;
-    }
-  >();
-
-  // Track which entities appear in each item (for co-occurrence)
-  const itemEntities: Map<string, Set<string>> = new Map();
-
-  // Collect all source names for person-name filtering
-  const sourceNames = new Set<string>();
+function collectSourceNames(items: FeedItem[]): Set<string> {
+  const names = new Set<string>();
   for (const item of items) {
-    sourceNames.add(item.sourceName.toLowerCase());
-    // Also add common fragments: "The Hill" → "hill", "Bangkok Post" → "bangkok post"
+    names.add(item.sourceName.toLowerCase());
     const parts = item.sourceName.split(/\s*[-–—|:]\s*/);
     for (const part of parts) {
-      sourceNames.add(part.trim().toLowerCase());
+      names.add(part.trim().toLowerCase());
     }
   }
+  return names;
+}
 
-  for (const item of items) {
-    const text = item.title + " " + item.summary;
-    const urgency = getUrgencyLevel(item.sourceCategory);
-    const itemTime = new Date(item.published).getTime();
-    const age = now - itemTime;
-    const itemSentiment = scoreSentiment(text);
-
-    // Dictionary matches
-    const dictMatches = matchDictionary(text);
-
-    // Person name matches
-    const personMatches = matchPersonNames(text, dictMatches, sourceNames);
-
-    // Combine all entities for this item
-    const allEntities = new Set<string>();
-
-    for (const name of dictMatches) {
-      allEntities.add(name);
-      const entry = entityMap.get(name);
-      if (entry) {
-        entry.mentions++;
-        entry.itemIds.push(item.id);
-        entry.urgency[urgency]++;
-        if (itemTime > entry.lastSeen) entry.lastSeen = itemTime;
-        if (age <= ONE_HOUR) entry.recentHour++;
-        if (age <= SIX_HOURS) entry.recentSixHour++;
-        if (age <= ONE_DAY) entry.recentDay++;
-        entry.sentimentSum += itemSentiment;
-        entry.sentimentCount++;
-      } else {
-        const lookup = LOOKUP_MAP.get(name.toLowerCase());
-        entityMap.set(name, {
-          name,
-          type: lookup?.type || "country",
-          mentions: 1,
-          itemIds: [item.id],
-          urgency: { ...emptyUrgency(), [urgency]: 1 },
-          lastSeen: itemTime,
-          recentHour: age <= ONE_HOUR ? 1 : 0,
-          recentSixHour: age <= SIX_HOURS ? 1 : 0,
-          recentDay: age <= ONE_DAY ? 1 : 0,
-          sentimentSum: itemSentiment,
-          sentimentCount: 1,
-        });
-      }
-    }
-
-    for (const name of personMatches) {
-      allEntities.add(name);
-      const entry = entityMap.get(name);
-      if (entry) {
-        entry.mentions++;
-        entry.itemIds.push(item.id);
-        entry.urgency[urgency]++;
-        if (itemTime > entry.lastSeen) entry.lastSeen = itemTime;
-        if (age <= ONE_HOUR) entry.recentHour++;
-        if (age <= SIX_HOURS) entry.recentSixHour++;
-        if (age <= ONE_DAY) entry.recentDay++;
-        entry.sentimentSum += itemSentiment;
-        entry.sentimentCount++;
-      } else {
-        entityMap.set(name, {
-          name,
-          type: "person",
-          mentions: 1,
-          itemIds: [item.id],
-          urgency: { ...emptyUrgency(), [urgency]: 1 },
-          lastSeen: itemTime,
-          recentHour: age <= ONE_HOUR ? 1 : 0,
-          recentSixHour: age <= SIX_HOURS ? 1 : 0,
-          recentDay: age <= ONE_DAY ? 1 : 0,
-          sentimentSum: itemSentiment,
-          sentimentCount: 1,
-        });
-      }
-    }
-
-    itemEntities.set(item.id, allEntities);
+function accumulateEntityMatch(
+  entityMap: Map<string, EntityAccumulator>,
+  name: string,
+  defaultType: EntityAccumulator["type"],
+  itemId: string,
+  urgency: UrgencyLevel,
+  itemTime: number,
+  age: number,
+  t: TimeThresholds,
+  sentiment: number,
+): void {
+  const entry = entityMap.get(name);
+  if (entry) {
+    entry.mentions++;
+    entry.itemIds.push(itemId);
+    entry.urgency[urgency]++;
+    if (itemTime > entry.lastSeen) entry.lastSeen = itemTime;
+    if (age <= t.oneHour) entry.recentHour++;
+    if (age <= t.sixHours) entry.recentSixHour++;
+    if (age <= t.oneDay) entry.recentDay++;
+    entry.sentimentSum += sentiment;
+    entry.sentimentCount++;
+  } else {
+    entityMap.set(name, {
+      name,
+      type: defaultType,
+      mentions: 1,
+      itemIds: [itemId],
+      urgency: { ...emptyUrgency(), [urgency]: 1 },
+      lastSeen: itemTime,
+      recentHour: age <= t.oneHour ? 1 : 0,
+      recentSixHour: age <= t.sixHours ? 1 : 0,
+      recentDay: age <= t.oneDay ? 1 : 0,
+      sentimentSum: sentiment,
+      sentimentCount: 1,
+    });
   }
+}
 
-  // Compute co-occurrences
-  const cooccurrenceMap = new Map<string, Map<string, number>>();
-
+function computeCooccurrences(
+  itemEntities: Map<string, Set<string>>,
+): Map<string, Map<string, number>> {
+  const coMap = new Map<string, Map<string, number>>();
   for (const entities of itemEntities.values()) {
     const arr = Array.from(entities);
     for (let i = 0; i < arr.length; i++) {
       for (let j = i + 1; j < arr.length; j++) {
         const a = arr[i];
         const b = arr[j];
-
-        if (!cooccurrenceMap.has(a)) cooccurrenceMap.set(a, new Map());
-        if (!cooccurrenceMap.has(b)) cooccurrenceMap.set(b, new Map());
-
-        cooccurrenceMap.get(a)!.set(b, (cooccurrenceMap.get(a)!.get(b) || 0) + 1);
-        cooccurrenceMap.get(b)!.set(a, (cooccurrenceMap.get(b)!.get(a) || 0) + 1);
+        if (!coMap.has(a)) coMap.set(a, new Map());
+        if (!coMap.has(b)) coMap.set(b, new Map());
+        coMap.get(a)!.set(b, (coMap.get(a)!.get(b) || 0) + 1);
+        coMap.get(b)!.set(a, (coMap.get(b)!.get(a) || 0) + 1);
       }
     }
   }
+  return coMap;
+}
 
-  // Build final array, filtering to 2+ mentions
+function buildEntityResults(
+  entityMap: Map<string, EntityAccumulator>,
+  cooccurrenceMap: Map<string, Map<string, number>>,
+): ExtractedEntity[] {
   const results: ExtractedEntity[] = [];
-
   for (const entry of entityMap.values()) {
     if (entry.mentions < 2) continue;
-
     const cooc = cooccurrenceMap.get(entry.name);
     const topCooccurrences: [string, number][] = cooc
       ? Array.from(cooc.entries())
           .sort((a, b) => b[1] - a[1])
           .slice(0, 5)
       : [];
-
     results.push({
       name: entry.name,
       type: entry.type,
@@ -414,9 +368,54 @@ export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
         : 0,
     });
   }
-
-  // Sort by mentions descending
   results.sort((a, b) => b.mentions - a.mentions);
-
   return results;
+}
+
+export function extractEntities(items: FeedItem[]): ExtractedEntity[] {
+  const now = Date.now();
+  const thresholds: TimeThresholds = {
+    now,
+    oneHour: 60 * 60 * 1000,
+    sixHours: 6 * 60 * 60 * 1000,
+    oneDay: 24 * 60 * 60 * 1000,
+  };
+
+  const sourceNames = collectSourceNames(items);
+  const entityMap = new Map<string, EntityAccumulator>();
+  const itemEntities = new Map<string, Set<string>>();
+
+  for (const item of items) {
+    const text = item.title + " " + item.summary;
+    const urgency = getUrgencyLevel(item.sourceCategory);
+    const itemTime = new Date(item.published).getTime();
+    const age = now - itemTime;
+    const itemSentiment = scoreSentiment(text);
+
+    const dictMatches = matchDictionary(text);
+    const personMatches = matchPersonNames(text, dictMatches, sourceNames);
+    const allEntities = new Set<string>();
+
+    for (const name of dictMatches) {
+      allEntities.add(name);
+      const lookup = LOOKUP_MAP.get(name.toLowerCase());
+      accumulateEntityMatch(
+        entityMap, name, lookup?.type || "country",
+        item.id, urgency, itemTime, age, thresholds, itemSentiment,
+      );
+    }
+
+    for (const name of personMatches) {
+      allEntities.add(name);
+      accumulateEntityMatch(
+        entityMap, name, "person",
+        item.id, urgency, itemTime, age, thresholds, itemSentiment,
+      );
+    }
+
+    itemEntities.set(item.id, allEntities);
+  }
+
+  const cooccurrenceMap = computeCooccurrences(itemEntities);
+  return buildEntityResults(entityMap, cooccurrenceMap);
 }

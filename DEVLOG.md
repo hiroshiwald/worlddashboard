@@ -1,5 +1,15 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Decompose extractEntities (V2-1b)
+- Decomposed `extractEntities` in `src/lib/entity-extractor.ts` from 173 lines to 5 functions, each under 50 lines
+- Extracted `EntityAccumulator` and `TimeThresholds` interfaces to replace inline anonymous types
+- Extracted `collectSourceNames` (11 lines): gathers lowercased source names and fragments for person-name filtering
+- Extracted `accumulateEntityMatch` (38 lines): unified upsert for dict and person matches (eliminated 29-line duplication)
+- Extracted `computeCooccurrences` (19 lines): builds bidirectional co-occurrence map from per-item entity sets
+- Extracted `buildEntityResults` (34 lines): filters to 2+ mentions, attaches top-5 co-occurrences, computes average sentiment, sorts
+- `extractEntities` is now a 47-line orchestrator
+- No signature, return type, or behavioral changes. All 124 tests pass.
+
 ## 2026-04-10 — Decompose doFetchSingleFeed (V2-1a)
 - Decomposed `doFetchSingleFeed` in `src/lib/feed-fetcher.ts` from 136 lines to 4 functions, each under 50 lines
 - Introduced `PhaseOutcome` discriminated union type for phase function returns
