@@ -35,6 +35,9 @@ addToLookup(COUNTRY_DICT);
 addToLookup(ORG_DICT);
 addToLookup(REGION_DICT);
 
+// Immutable after module load — frozen to enforce read-only access.
+Object.freeze(LOOKUP_MAP);
+
 // Sort lookup keys by length descending so longer matches take priority
 const SORTED_TERMS = Array.from(LOOKUP_MAP.keys()).sort(
   (a, b) => b.length - a.length

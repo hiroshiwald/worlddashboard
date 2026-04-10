@@ -100,6 +100,7 @@ export function useFeed(): UseFeedReturn {
   }, []);
 
   useEffect(() => {
+    // Fire-and-forget: useEffect cannot return a promise. Errors handled inside fetchFeed.
     fetchFeed();
   }, [fetchFeed]);
 
