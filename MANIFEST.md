@@ -13,7 +13,14 @@
 | `src/components/dashboard/TabContent.tsx` | Lazy-loaded tab switcher for Intel, Signals, Network, Map, Discovery | `TabContent` |
 | `src/components/dashboard/index.ts` | Barrel export for dashboard sub-components | — |
 | `src/components/HeaderBar.tsx` | Top navigation with search, category filter, theme toggle, tab switcher | `HeaderBar` |
-| `src/components/IntelTab.tsx` | Entity extraction and situation clustering view | `IntelTab` |
+| `src/components/IntelTab.tsx` | Thin composition shell: imports hook + sub-components, composes layout | `IntelTab` |
+| `src/components/intel/IntelSummary.tsx` | Summary bar with entity/situation counts and low-data warning | `IntelSummary` |
+| `src/components/intel/KnownSituationsSection.tsx` | Expandable row strip for known situations with article drill-down | `KnownSituationsSection` |
+| `src/components/intel/NovelSection.tsx` | Card grid for emerging situations and standalone novel entities | `NovelSection` |
+| `src/components/intel/SituationCard.tsx` | Single situation card with novelty score, entity chips, and latest article | `SituationCard` |
+| `src/components/intel/EntityCard.tsx` | Single entity card with novelty score and reason badge | `EntityCard` |
+| `src/components/intel/utils.ts` | Shared helpers and constants: timeAgo, reasonBadgeClasses, URGENCY_DOT_COLORS, TEMPO_STYLES | `timeAgo`, `reasonBadgeClasses`, `reasonTypeLabel`, `CardTheme` |
+| `src/components/intel/index.ts` | Barrel export for intel sub-components | — |
 | `src/components/SignalsTab.tsx` | Thin composition shell: imports hook + sub-components, composes layout | `SignalsTab` |
 | `src/components/signals/SignalsSummaryStrip.tsx` | Signal count, severity dots, muted count, entity analysis summary | `SignalsSummaryStrip` |
 | `src/components/signals/SignalCard.tsx` | Single signal card with header, confidence, evidence, entity chips | `SignalCard` |
@@ -34,6 +41,7 @@
 | `src/hooks/useDashboardTable.ts` | Custom hook: all DashboardTable state, memos, effects, handlers | `useDashboardTable`, `TabKey`, `ColumnKey` |
 | `src/hooks/useSignalsTab.ts` | Custom hook: all SignalsTab state, memos, effects, handlers, theme | `useSignalsTab`, `SignalsTabTheme` |
 | `src/hooks/useDiscoveryTab.ts` | Custom hook: all DiscoveryTab state, memos, callbacks, theme | `useDiscoveryTab`, `EdgeMode`, `EdgeData`, `DiscoveryTabTheme` |
+| `src/hooks/useIntelTab.ts` | Custom hook: all IntelTab state, memos, callbacks, theme | `useIntelTab`, `IntelTabTheme` |
 | `src/hooks/useSources.ts` | React hook for fetching feed data from `/api/sources` | `useFeed` |
 | `src/lib/types.ts` | All shared TypeScript interfaces | `FeedItem`, `SourceMeta`, `ExtractedEntity`, `EnrichedEntity`, `Signal`, `Situation`, `UrgencyLevel`, `SortConfig`, etc. |
 | `src/lib/feed-fetcher.ts` | RSS/Atom fetching with 3-phase fallback (direct → relay → altUrl), parsing, and in-memory cache | `fetchAllFeeds`, `parseFeedXml`, `parseRssItems`, `parseAtomEntries` |
@@ -113,6 +121,8 @@
 - `useSignalsTab` → `entity-extractor` + `signal-detector` + `novelty-scorer` + `situation-builder` + `signal-storage`
 - `DiscoveryTab` → `useDiscoveryTab` + discovery sub-components
 - `useDiscoveryTab` → `entity-extractor` + `novelty-scorer` + `signal-storage`
+- `IntelTab` → `useIntelTab` + intel sub-components
+- `useIntelTab` → `entity-extractor` + `novelty-scorer` + `situation-builder`
 - `MapTab` → `geo-coordinates` + `react-leaflet`
 - `NetworkTab` → `react-force-graph-2d`
 - `feed-fetcher` → `ad-filter` + `xml-helpers` + `image-extractor`
