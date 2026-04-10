@@ -1,5 +1,15 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Decompose doFetchSingleFeed (V2-1a)
+- Decomposed `doFetchSingleFeed` in `src/lib/feed-fetcher.ts` from 136 lines to 4 functions, each under 50 lines
+- Introduced `PhaseOutcome` discriminated union type for phase function returns
+- Extracted `fetchDirect` (41 lines): direct fetch with 5s timeout, retry on 5xx/timeout
+- Extracted `fetchViaRelay` (31 lines): relay proxy fallback with 10s timeout, XML content sniff
+- Extracted `fetchFromAltUrl` (22 lines): altUrl fallback with 5s timeout
+- `doFetchSingleFeed` is now a 42-line orchestrator: tries phases in sequence, accumulates errors, builds diagnostics
+- `httpStatus` guard (`!== undefined`) prevents network errors from overwriting prior HTTP status values
+- No signature, return type, or behavioral changes. All 124 tests pass.
+
 ## 2026-04-10 — Decompose IntelTab.tsx (Audit Violation #2 — final)
 - Extracted all state, memos, and callbacks into `src/hooks/useIntelTab.ts`
 - Moved helper functions (`timeAgo`, `reasonBadgeClasses`, `reasonTypeLabel`) and constants (`URGENCY_DOT_COLORS`, `TEMPO_STYLES`, `CardTheme`) to `src/components/intel/utils.ts`
