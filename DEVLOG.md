@@ -1,5 +1,16 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Decompose IntelTab.tsx (Audit Violation #2 — final)
+- Extracted all state, memos, and callbacks into `src/hooks/useIntelTab.ts`
+- Moved helper functions (`timeAgo`, `reasonBadgeClasses`, `reasonTypeLabel`) and constants (`URGENCY_DOT_COLORS`, `TEMPO_STYLES`, `CardTheme`) to `src/components/intel/utils.ts`
+- Created 5 sub-components in `src/components/intel/`: `IntelSummary`, `KnownSituationsSection`, `NovelSection`, `SituationCard`, `EntityCard`
+- Barrel export at `src/components/intel/index.ts`
+- `IntelTab.tsx`: 481 → 65 lines (main component is a thin composition shell)
+- `IntelTabTheme extends CardTheme` — section components get full theme, card components keep narrow `CardTheme` typing
+- Removed dead import (`getThemeClasses`) from original file
+- Same pattern as DashboardTable, SignalsTab, and DiscoveryTab decompositions (hook + sub-components + barrel)
+- All 4 audit violation #2 components now decomposed. No behavioral or visual changes. All 124 tests pass.
+
 ## 2026-04-10 — Decompose DiscoveryTab.tsx (Audit Violation #2)
 - Extracted all state, memos, and callbacks into `src/hooks/useDiscoveryTab.ts`
 - Moved helper function (`getDotColor`) and shared constant (`TYPE_DOT_COLORS`) to `src/components/discovery/utils.ts`
