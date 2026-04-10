@@ -222,13 +222,12 @@ function classifyError(
 }
 
 // ─── In-memory feed cache ───
-interface CacheEntry {
+export interface CacheEntry {
   items: FeedItem[];
   diagnostic: FeedDiagnostic;
   timestamp: number;
 }
 
-const feedCache = new Map<string, CacheEntry>();
 const CACHE_FRESH_MS = 5 * 60 * 1000; // 5 minutes
 const CACHE_STALE_MAX_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -238,9 +237,12 @@ interface SingleFeedResult {
 }
 
 // ─── Core fetch for a single feed ───
-async function fetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> {
+async function fetchSingleFeed(
+  source: SourceMeta,
+  cache: Map<string, CacheEntry>,
+): Promise<SingleFeedResult> {
   // Check cache first
-  const cached = feedCache.get(source.url);
+  const cached = cache.get(source.url);
   const now = Date.now();
   if (cached && now - cached.timestamp < CACHE_FRESH_MS) {
     return {
@@ -253,7 +255,7 @@ async function fetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> {
 
   // On success, update cache
   if (result.items.length > 0) {
-    feedCache.set(source.url, {
+    cache.set(source.url, {
       items: result.items,
       diagnostic: result.diagnostic,
       timestamp: now,
@@ -410,7 +412,6 @@ async function doFetchSingleFeed(source: SourceMeta): Promise<SingleFeedResult> 
   };
 }
 
-// ─── Request deduplication ───
 interface FetchAllResult {
   items: FeedItem[];
   feedsAttempted: number;
@@ -419,19 +420,10 @@ interface FetchAllResult {
   feedDiagnostics: FeedDiagnostic[];
 }
 
-let inFlightFetch: Promise<FetchAllResult> | null = null;
-
-export function fetchAllFeeds(sources: SourceMeta[]): Promise<FetchAllResult> {
-  if (inFlightFetch) return inFlightFetch;
-
-  inFlightFetch = doFetchAllFeeds(sources).finally(() => {
-    inFlightFetch = null;
-  });
-
-  return inFlightFetch;
-}
-
-async function doFetchAllFeeds(sources: SourceMeta[]): Promise<FetchAllResult> {
+export async function fetchAllFeeds(
+  sources: SourceMeta[],
+  cache: Map<string, CacheEntry>,
+): Promise<FetchAllResult> {
   const rssFeeds = sources.filter(
     (s) =>
       (s.type.includes("RSS") || s.type.includes("Atom")) &&
@@ -439,7 +431,7 @@ async function doFetchAllFeeds(sources: SourceMeta[]): Promise<FetchAllResult> {
   );
 
   const results = await Promise.allSettled(
-    rssFeeds.map((source) => fetchSingleFeed(source))
+    rssFeeds.map((source) => fetchSingleFeed(source, cache))
   );
 
   const allItems: FeedItem[] = [];
