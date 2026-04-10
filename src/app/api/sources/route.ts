@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import sourcesData from "@/lib/sources-data.json";
-import { fetchAllFeeds } from "@/lib/feed-fetcher";
+import { fetchAllFeeds, CacheEntry } from "@/lib/feed-fetcher";
 import { SourceMeta } from "@/lib/types";
+
+const feedCache = new Map<string, CacheEntry>();
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -18,7 +20,7 @@ export async function GET() {
   }));
 
   const { items, feedsAttempted, feedsSucceeded, relayConfigured, feedDiagnostics } =
-    await fetchAllFeeds(sources);
+    await fetchAllFeeds(sources, feedCache);
 
   return NextResponse.json(
     {

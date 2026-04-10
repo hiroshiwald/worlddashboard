@@ -1,5 +1,14 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Fix: Eliminate Shared Mutable State in feed-fetcher.ts (Audit Violation #4)
+- Removed two module-level mutable variables from `src/lib/feed-fetcher.ts`:
+  - `feedCache` (Map): now passed as a `cache` parameter through `fetchAllFeeds` → `fetchSingleFeed`
+  - `inFlightFetch` (Promise dedup): removed entirely — had a bug where caller B silently received caller A's results for a different source list. CDN layer already coalesces concurrent requests.
+- `CacheEntry` interface exported so callers can type the cache they own
+- **Caller updated:** `src/app/api/sources/route.ts` creates and owns the `feedCache` Map at module scope, passes it to `fetchAllFeeds`
+- No return type changes. Caching behavior (5-min fresh, 30-min stale fallback) unchanged.
+- All 124 existing tests pass; TypeScript compiles clean
+
 ## 2026-04-10 — Refactor: Decompose DashboardTable.tsx (Audit Violation #2)
 - Decomposed `src/components/DashboardTable.tsx` from ~450 lines (9x over 50-line limit) to 79 lines
 - Addresses AUDIT.md Violation #2: "Massive Component Functions"
