@@ -11,7 +11,8 @@ function sanitizeUrl(url: string): string {
   try {
     const parsed = new URL(url);
     return parsed.protocol === "https:" || parsed.protocol === "http:" ? url : "";
-  } catch {
+  } catch (e) {
+    console.warn("sanitizeUrl: malformed URL", url, e);
     return "";
   }
 }
