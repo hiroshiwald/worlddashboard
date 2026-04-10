@@ -1,5 +1,10 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Add fire-and-forget comment and freeze LOOKUP_MAP (V2-3, V2-4)
+- `src/hooks/useSources.ts`: added comment above `fetchFeed()` in useEffect explaining why the promise is not awaited (React pattern: useEffect cannot be async; errors handled inside fetchFeed)
+- `src/lib/entity-extractor.ts`: added `Object.freeze(LOOKUP_MAP)` after initialization to enforce read-only access post module load
+- Comment and freeze changes only — no behavioral changes. All 124 tests pass.
+
 ## 2026-04-10 — Fix silent catch blocks in URL helpers (V2-2)
 - Added `console.warn` to 3 silent catch blocks in URL parsing functions
 - `sanitizeUrl` in `src/lib/feed-fetcher.ts`: logs function name, malformed URL, and error
