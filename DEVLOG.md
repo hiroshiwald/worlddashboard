@@ -1,5 +1,18 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Decompose buildSituations (V2-1c)
+- Decomposed `buildSituations` in `src/lib/situation-builder.ts` from 219 lines to 7 functions, each under 50 lines
+- Extracted `Cluster` type alias and `URGENCY_PRIORITY` module-level constant (static data, not mutable state)
+- Extracted `buildItemEntityIndex` (17 lines): builds itemId→entityNames reverse index and name→entity lookup
+- Extracted `findSignificantPairs` (21 lines): generates entity pair keys, filters to pairs sharing ≥2 articles
+- Extracted `clusterPairs` (37 lines): greedy merge at >50% article overlap
+- Extracted `collectClusterArticles` (48 lines): builds SituationArticle[], tracks sources/categories/time bounds
+- Extracted `aggregateEntityMetrics` (44 lines): computes max novelty, urgency, sentiment sum, deduplicated top-3 reasons
+- Extracted `computeTempo` (22 lines): determines tempo from mention velocity (new/accelerating/fading/steady)
+- Extracted `situationTitle` (13 lines): picks latest article title or top-2 entity names
+- `buildSituations` is now a 45-line orchestrator
+- No signature, return type, or behavioral changes. All 124 tests pass.
+
 ## 2026-04-10 — Decompose extractEntities (V2-1b)
 - Decomposed `extractEntities` in `src/lib/entity-extractor.ts` from 173 lines to 5 functions, each under 50 lines
 - Extracted `EntityAccumulator` and `TimeThresholds` interfaces to replace inline anonymous types
