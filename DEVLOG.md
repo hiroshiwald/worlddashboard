@@ -1,5 +1,14 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Decompose SignalsTab.tsx (Audit Violation #2)
+- Extracted all state, refs, effects, memos, and callbacks into `src/hooks/useSignalsTab.ts`
+- Moved helper functions (`SignalIcon`, `severityColor`, `timeAgo`, `SentimentBadge`) to `src/components/signals/utils.tsx`
+- Created 5 sub-components in `src/components/signals/`: `SignalsSummaryStrip`, `SignalCard`, `SignalCardGrid`, `WatchlistCard`, `WatchlistSection`
+- Barrel export at `src/components/signals/index.ts`
+- `SignalsTab.tsx`: 512 → 57 lines (main component is a thin composition shell)
+- Same pattern as DashboardTable decomposition (hook + sub-components + barrel)
+- No behavioral or visual changes. All 124 tests pass; TypeScript compiles clean.
+
 ## 2026-04-10 — Fix: Validate API Response in useSources.ts (Audit Violation #5)
 - Added `validateApiResponse` function to `src/hooks/useSources.ts` that validates the shape of the `/api/sources` JSON response at the module boundary
 - `data.items`: validated as array, defaults to `[]` with console warning

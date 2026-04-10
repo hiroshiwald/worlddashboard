@@ -14,12 +14,20 @@
 | `src/components/dashboard/index.ts` | Barrel export for dashboard sub-components | — |
 | `src/components/HeaderBar.tsx` | Top navigation with search, category filter, theme toggle, tab switcher | `HeaderBar` |
 | `src/components/IntelTab.tsx` | Entity extraction and situation clustering view | `IntelTab` |
-| `src/components/SignalsTab.tsx` | Anomaly detection UI with signal cards and cascade chains | `SignalsTab` |
+| `src/components/SignalsTab.tsx` | Thin composition shell: imports hook + sub-components, composes layout | `SignalsTab` |
+| `src/components/signals/SignalsSummaryStrip.tsx` | Signal count, severity dots, muted count, entity analysis summary | `SignalsSummaryStrip` |
+| `src/components/signals/SignalCard.tsx` | Single signal card with header, confidence, evidence, entity chips | `SignalCard` |
+| `src/components/signals/SignalCardGrid.tsx` | Responsive grid of signal cards with show more/less and empty state | `SignalCardGrid` |
+| `src/components/signals/WatchlistCard.tsx` | Entity sparkline card with sentiment badge and mention stats | `WatchlistCard` |
+| `src/components/signals/WatchlistSection.tsx` | Watchlist header and card grid for top entities | `WatchlistSection` |
+| `src/components/signals/utils.tsx` | Shared helpers: SignalIcon, severityColor, timeAgo, SentimentBadge | `SignalIcon`, `severityColor`, `timeAgo`, `SentimentBadge` |
+| `src/components/signals/index.ts` | Barrel export for signals sub-components | — |
 | `src/components/NetworkTab.tsx` | Force-directed graph of entity co-occurrences | `NetworkTab` |
 | `src/components/MapTab.tsx` | Leaflet geospatial map with entity markers | `MapTab` |
 | `src/components/DiscoveryTab.tsx` | 2D scatter plot for novelty discovery | `DiscoveryTab` |
 | `src/components/FeedItemImage.tsx` | Image component with Google favicon and text-initial fallbacks | `FeedItemImage` |
 | `src/hooks/useDashboardTable.ts` | Custom hook: all DashboardTable state, memos, effects, handlers | `useDashboardTable`, `TabKey`, `ColumnKey` |
+| `src/hooks/useSignalsTab.ts` | Custom hook: all SignalsTab state, memos, effects, handlers, theme | `useSignalsTab`, `SignalsTabTheme` |
 | `src/hooks/useSources.ts` | React hook for fetching feed data from `/api/sources` | `useFeed` |
 | `src/lib/types.ts` | All shared TypeScript interfaces | `FeedItem`, `SourceMeta`, `ExtractedEntity`, `EnrichedEntity`, `Signal`, `Situation`, `UrgencyLevel`, `SortConfig`, etc. |
 | `src/lib/feed-fetcher.ts` | RSS/Atom fetching with 3-phase fallback (direct → relay → altUrl), parsing, and in-memory cache | `fetchAllFeeds`, `parseFeedXml`, `parseRssItems`, `parseAtomEntries` |
@@ -95,7 +103,8 @@
 - `TabContent` → all tab components (dynamic imports)
 - `FeedTable` / `FeedCardList` → `FeedItemImage` + `urgency` + `date-utils`
 - All analysis tabs → `entity-extractor` → `entity-dictionaries` + `urgency` + `compromise`
-- `SignalsTab` → `signal-detector` + `novelty-scorer` + `situation-builder` + `cascade-graph` + `signal-storage`
+- `SignalsTab` → `useSignalsTab` + signals sub-components
+- `useSignalsTab` → `entity-extractor` + `signal-detector` + `novelty-scorer` + `situation-builder` + `signal-storage`
 - `MapTab` → `geo-coordinates` + `react-leaflet`
 - `NetworkTab` → `react-force-graph-2d`
 - `feed-fetcher` → `ad-filter` + `xml-helpers` + `image-extractor`
