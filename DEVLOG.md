@@ -1,5 +1,14 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Decompose DiscoveryTab.tsx (Audit Violation #2)
+- Extracted all state, memos, and callbacks into `src/hooks/useDiscoveryTab.ts`
+- Moved helper function (`getDotColor`) and shared constant (`TYPE_DOT_COLORS`) to `src/components/discovery/utils.ts`
+- Created 3 sub-components in `src/components/discovery/`: `DiscoveryControls`, `ScatterPlot`, `DiscoveryLegend`
+- Barrel export at `src/components/discovery/index.ts`
+- `DiscoveryTab.tsx`: 359 → 53 lines (main component is a thin composition shell)
+- Same pattern as DashboardTable and SignalsTab decompositions (hook + sub-components + barrel)
+- No behavioral or visual changes. All 124 tests pass.
+
 ## 2026-04-10 — Decompose SignalsTab.tsx (Audit Violation #2)
 - Extracted all state, refs, effects, memos, and callbacks into `src/hooks/useSignalsTab.ts`
 - Moved helper functions (`SignalIcon`, `severityColor`, `timeAgo`, `SentimentBadge`) to `src/components/signals/utils.tsx`
