@@ -24,10 +24,16 @@
 | `src/components/signals/index.ts` | Barrel export for signals sub-components | — |
 | `src/components/NetworkTab.tsx` | Force-directed graph of entity co-occurrences | `NetworkTab` |
 | `src/components/MapTab.tsx` | Leaflet geospatial map with entity markers | `MapTab` |
-| `src/components/DiscoveryTab.tsx` | 2D scatter plot for novelty discovery | `DiscoveryTab` |
+| `src/components/DiscoveryTab.tsx` | Thin composition shell: imports hook + sub-components, composes layout | `DiscoveryTab` |
+| `src/components/discovery/DiscoveryControls.tsx` | Edge mode toggle, entity type filter, min mentions slider | `DiscoveryControls` |
+| `src/components/discovery/ScatterPlot.tsx` | 2D scatter plot with SVG edges, entity dots, and hover tooltip | `ScatterPlot` |
+| `src/components/discovery/DiscoveryLegend.tsx` | Color legend for novelty types | `DiscoveryLegend` |
+| `src/components/discovery/utils.ts` | Shared constants and helpers: TYPE_DOT_COLORS, getDotColor | `TYPE_DOT_COLORS`, `getDotColor` |
+| `src/components/discovery/index.ts` | Barrel export for discovery sub-components | — |
 | `src/components/FeedItemImage.tsx` | Image component with Google favicon and text-initial fallbacks | `FeedItemImage` |
 | `src/hooks/useDashboardTable.ts` | Custom hook: all DashboardTable state, memos, effects, handlers | `useDashboardTable`, `TabKey`, `ColumnKey` |
 | `src/hooks/useSignalsTab.ts` | Custom hook: all SignalsTab state, memos, effects, handlers, theme | `useSignalsTab`, `SignalsTabTheme` |
+| `src/hooks/useDiscoveryTab.ts` | Custom hook: all DiscoveryTab state, memos, callbacks, theme | `useDiscoveryTab`, `EdgeMode`, `EdgeData`, `DiscoveryTabTheme` |
 | `src/hooks/useSources.ts` | React hook for fetching feed data from `/api/sources` | `useFeed` |
 | `src/lib/types.ts` | All shared TypeScript interfaces | `FeedItem`, `SourceMeta`, `ExtractedEntity`, `EnrichedEntity`, `Signal`, `Situation`, `UrgencyLevel`, `SortConfig`, etc. |
 | `src/lib/feed-fetcher.ts` | RSS/Atom fetching with 3-phase fallback (direct → relay → altUrl), parsing, and in-memory cache | `fetchAllFeeds`, `parseFeedXml`, `parseRssItems`, `parseAtomEntries` |
@@ -105,6 +111,8 @@
 - All analysis tabs → `entity-extractor` → `entity-dictionaries` + `urgency` + `compromise`
 - `SignalsTab` → `useSignalsTab` + signals sub-components
 - `useSignalsTab` → `entity-extractor` + `signal-detector` + `novelty-scorer` + `situation-builder` + `signal-storage`
+- `DiscoveryTab` → `useDiscoveryTab` + discovery sub-components
+- `useDiscoveryTab` → `entity-extractor` + `novelty-scorer` + `signal-storage`
 - `MapTab` → `geo-coordinates` + `react-leaflet`
 - `NetworkTab` → `react-force-graph-2d`
 - `feed-fetcher` → `ad-filter` + `xml-helpers` + `image-extractor`
