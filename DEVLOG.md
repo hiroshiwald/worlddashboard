@@ -1,5 +1,13 @@
 # World Dashboard Development Log
 
+## 2026-04-10 — Fix silent catch blocks in URL helpers (V2-2)
+- Added `console.warn` to 3 silent catch blocks in URL parsing functions
+- `sanitizeUrl` in `src/lib/feed-fetcher.ts`: logs function name, malformed URL, and error
+- `getDomainFromUrl` in `src/lib/image-extractor.ts`: logs function name, malformed URL, and error
+- `fallbackSourceImage` in `src/components/FeedItemImage.tsx`: logs function name, malformed URL, and error
+- Empty string fallbacks unchanged — only the silence is removed
+- All 124 tests pass
+
 ## 2026-04-10 — Trim useDashboardTable hook (V2-1d)
 - Extracted 3 pure helper functions from `src/hooks/useDashboardTable.ts`: `matchesText`, `filterItems`, `sortItems`
 - `matchesText` (8 lines): deduplicates identical text-matching pattern used for both entityFilter and searchQuery

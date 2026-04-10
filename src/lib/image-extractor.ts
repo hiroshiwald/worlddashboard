@@ -3,7 +3,8 @@ import { extractTag } from "./xml-helpers";
 export function getDomainFromUrl(rawUrl: string): string {
   try {
     return new URL(rawUrl).hostname;
-  } catch {
+  } catch (e) {
+    console.warn("getDomainFromUrl: malformed URL", rawUrl, e);
     return "";
   }
 }

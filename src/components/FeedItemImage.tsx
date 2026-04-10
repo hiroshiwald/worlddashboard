@@ -13,7 +13,8 @@ function fallbackSourceImage(link: string): string {
   try {
     const domain = new URL(link).hostname;
     return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
-  } catch {
+  } catch (e) {
+    console.warn("fallbackSourceImage: malformed URL", link, e);
     return "";
   }
 }
