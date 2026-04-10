@@ -1,5 +1,9 @@
 # World Dashboard Development Log
 
+## 2026-04-10
+- Initialized project governance files (CLAUDE.md, MANIFEST.md, DEVLOG.md)
+- No code changes
+
 ## 2026-04-09 — Fix: Stale RSS Feeds Due to Next.js Data Cache
 
 ### Problem
