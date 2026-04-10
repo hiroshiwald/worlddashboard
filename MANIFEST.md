@@ -44,7 +44,7 @@
 | `src/hooks/useIntelTab.ts` | Custom hook: all IntelTab state, memos, callbacks, theme | `useIntelTab`, `IntelTabTheme` |
 | `src/hooks/useSources.ts` | React hook for fetching feed data from `/api/sources` | `useFeed` |
 | `src/lib/types.ts` | All shared TypeScript interfaces | `FeedItem`, `SourceMeta`, `ExtractedEntity`, `EnrichedEntity`, `Signal`, `Situation`, `UrgencyLevel`, `SortConfig`, etc. |
-| `src/lib/feed-fetcher.ts` | RSS/Atom fetching with 3-phase fallback (direct → relay → altUrl), parsing, and in-memory cache | `fetchAllFeeds`, `parseFeedXml`, `parseRssItems`, `parseAtomEntries` |
+| `src/lib/feed-fetcher.ts` | RSS/Atom fetching with 3-phase fallback (direct → relay → altUrl), parsing, and caller-owned cache | `fetchAllFeeds`, `parseFeedXml`, `parseRssItems`, `parseAtomEntries`, `CacheEntry` |
 | `src/lib/entity-extractor.ts` | Dictionary-based NER from feed text with sentiment via compromise.js | `extractEntities` |
 | `src/lib/entity-dictionaries.ts` | Country, org, region dictionaries and person stopwords | `COUNTRY_DICT`, `ORG_DICT`, `REGION_DICT`, `PERSON_STOPWORDS` |
 | `src/lib/signal-detector.ts` | Six-type anomaly detection (surge, sentiment, cross-category, novel co-occurrence, escalation, emergence) | `detectSignals` |
@@ -54,7 +54,7 @@
 | `src/lib/ad-filter.ts` | Ad and sponsored content detection with 50+ title patterns and URL/description filters | `isAdContent`, `isFinancialAd` |
 | `src/lib/image-extractor.ts` | Six-method image URL extraction from RSS/Atom XML | `extractImageUrl`, `getSourceImageUrl`, `getDomainFromUrl` |
 | `src/lib/xml-helpers.ts` | HTML stripping, XML tag/attribute extraction | `stripHtml`, `extractTag`, `extractAttr` |
-| `src/lib/signal-storage.ts` | localStorage persistence for muted signals, edge history, entity snapshots, baselines | `loadMutedEntities`, `saveMutedEntities`, `loadEdgeHistory`, `saveEdgeHistory`, `loadEntityBaselines`, `updateEntityBaselines` |
+| `src/lib/signal-storage.ts` | localStorage persistence for muted signals, edge history, entity snapshots, baselines | `MUTE_DURATION`, `SNAPSHOT_INTERVAL`, `loadMutedEntities`, `saveMutedEntities`, `loadPreviousEntityNames`, `saveEntitySnapshot`, `edgeKey`, `loadEdgeHistory`, `saveEdgeHistory`, `loadEntityBaselines`, `updateEntityBaselines`, `getBaselineRate`, `EntityBaseline` |
 | `src/lib/geo-coordinates.ts` | Lookup map of 100+ countries/regions to [lat, lng] centroids | `getCoordinates` |
 | `src/lib/date-utils.ts` | Relative and absolute date formatting | `timeAgo`, `formatDate` |
 | `src/lib/urgency.ts` | Deterministic category-to-urgency mapping and Tailwind styling | `getUrgencyLevel`, `getRowClasses`, `getUrgencyBadgeClasses` |
