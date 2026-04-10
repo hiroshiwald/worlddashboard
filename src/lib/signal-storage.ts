@@ -10,7 +10,8 @@ export function loadMutedEntities(): Map<string, number> {
     const arr: [string, number][] = JSON.parse(raw);
     const now = Date.now();
     return new Map(arr.filter(([, expiry]) => expiry > now));
-  } catch {
+  } catch (e) {
+    console.error("loadMutedEntities: failed to load from localStorage, returning empty Map", e);
     return new Map();
   }
 }
@@ -29,7 +30,8 @@ export function loadPreviousEntityNames(): Set<string> {
     const { names, timestamp } = JSON.parse(raw);
     if (Date.now() - timestamp > 2 * 60 * 60 * 1000) return new Set();
     return new Set(names);
-  } catch {
+  } catch (e) {
+    console.error("loadPreviousEntityNames: failed to load from localStorage, returning empty Set", e);
     return new Set();
   }
 }
@@ -66,7 +68,8 @@ export function loadEdgeHistory(): Map<string, EdgeHistoryEntry> {
       }
     }
     return result;
-  } catch {
+  } catch (e) {
+    console.error("loadEdgeHistory: failed to load from localStorage, returning empty Map", e);
     return new Map();
   }
 }
@@ -98,8 +101,8 @@ export function saveEdgeHistory(
       }
     }
     localStorage.setItem(EDGE_HISTORY_KEY, JSON.stringify({ edges, lastUpdated: now }));
-  } catch {
-    // localStorage full or unavailable — degrade gracefully
+  } catch (e) {
+    console.error("saveEdgeHistory: failed to save to localStorage, edge history not persisted", e);
   }
 }
 
@@ -119,7 +122,8 @@ export function loadEntityBaselines(): Map<string, EntityBaseline> {
     if (!raw) return new Map();
     const data: Record<string, EntityBaseline> = JSON.parse(raw);
     return new Map(Object.entries(data));
-  } catch {
+  } catch (e) {
+    console.error("loadEntityBaselines: failed to load from localStorage, returning empty Map", e);
     return new Map();
   }
 }
@@ -152,8 +156,8 @@ export function updateEntityBaselines(
       obj[key] = val;
     }
     localStorage.setItem(ENTITY_BASELINE_KEY, JSON.stringify(obj));
-  } catch {
-    // localStorage full or unavailable
+  } catch (e) {
+    console.error("updateEntityBaselines: failed to save to localStorage, baselines not persisted", e);
   }
 }
 
