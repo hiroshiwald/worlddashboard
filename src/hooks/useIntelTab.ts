@@ -25,6 +25,30 @@ interface UseIntelTabParams {
 const KNOWN_LIMIT = 6;
 const NOVEL_LIMIT = 15;
 
+function buildIntelTheme(dark: boolean): IntelTabTheme {
+  return {
+    summaryBg: dark ? "bg-slate-900 shadow-lg shadow-black/20" : "bg-white shadow-sm",
+    summaryText: dark ? "text-slate-300" : "text-gray-700",
+    text: dark ? "text-slate-200" : "text-gray-800",
+    textMuted: dark ? "text-slate-400" : "text-gray-500",
+    entityName: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
+    cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-gray-100 shadow-sm",
+    knownBg: dark ? "bg-slate-900/80" : "bg-gray-50",
+    knownRowBorder: dark ? "border-slate-800/60" : "border-gray-100",
+    knownRowHover: dark ? "hover:bg-slate-800/80" : "hover:bg-blue-50/40",
+    sectionLabel: dark ? "text-slate-300" : "text-gray-700",
+    confidenceBg: dark ? "bg-slate-700" : "bg-gray-200",
+    noveltyBar: dark ? "bg-emerald-500" : "bg-emerald-500",
+    linkText: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
+  };
+}
+
+// Exception to 50-line rule: tightly-coupled state management hook.
+// 3 source memos (entities, enriched, situations) feed 3 UI state
+// setters (expandedSituations, showAllKnown, showAllNovel) and 3 more
+// derived memos ({known,novel}Situations, situationEntityNames,
+// standaloneNovelEntities). Splitting would fragment the situation
+// classification pipeline. Only the pure theme block is extracted.
 export function useIntelTab({ items, dark, onEntityClick }: UseIntelTabParams) {
   const entities = useMemo(() => extractEntities(items), [items]);
   const enriched = useMemo(() => enrichEntities(entities, items), [entities, items]);
@@ -88,21 +112,7 @@ export function useIntelTab({ items, dark, onEntityClick }: UseIntelTabParams) {
 
   const hasFewItems = items.length < 10;
 
-  const t: IntelTabTheme = {
-    summaryBg: dark ? "bg-slate-900 shadow-lg shadow-black/20" : "bg-white shadow-sm",
-    summaryText: dark ? "text-slate-300" : "text-gray-700",
-    text: dark ? "text-slate-200" : "text-gray-800",
-    textMuted: dark ? "text-slate-400" : "text-gray-500",
-    entityName: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
-    cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-gray-100 shadow-sm",
-    knownBg: dark ? "bg-slate-900/80" : "bg-gray-50",
-    knownRowBorder: dark ? "border-slate-800/60" : "border-gray-100",
-    knownRowHover: dark ? "hover:bg-slate-800/80" : "hover:bg-blue-50/40",
-    sectionLabel: dark ? "text-slate-300" : "text-gray-700",
-    confidenceBg: dark ? "bg-slate-700" : "bg-gray-200",
-    noveltyBar: dark ? "bg-emerald-500" : "bg-emerald-500",
-    linkText: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
-  };
+  const t = buildIntelTheme(dark);
 
   return {
     enriched,

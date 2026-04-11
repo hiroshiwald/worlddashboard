@@ -1,5 +1,15 @@
 # World Dashboard Development Log
 
+## 2026-04-11 — Resolve AUDIT-3 violations (V3-1 through V3-4 + borderline)
+- `src/lib/novelty-scorer.ts`: decomposed `enrichEntities` (128 lines → 19-line orchestrator) into 5 pure scoring helpers (`scoreCategorySpread`, `scoreSourceDiversity`, `scoreEdgeNovelty`, `scoreBaselineSurprise`, `scoreQuietMover`) plus `buildCurrentEdges` and `enrichSingleEntity`. Module-private `CategorySpreadResult` and `ScoredReason` interfaces added for typed returns. Imported `EntityBaseline` type from `./signal-storage`. Reason ordering, state persistence, and arithmetic preserved verbatim.
+- `src/lib/entity-extractor.ts`: extracted `stripTitlePrefixes(candidates)` (20 lines) from `matchPersonNames`; further extracted candidate validation into `isPlausiblePersonName(candidate, knownEntities, sourceNames)` (27 lines); hoisted inline `FILLER_WORDS` Set to module scope. `matchPersonNames` shrank from ~80 lines to 18 lines.
+- `src/hooks/useSignalsTab.ts`: extracted pure `buildSignalsTheme(dark)` (13-property `SignalsTabTheme`); added exception comment on `useSignalsTab` explaining tightly-coupled state (4 source memos + mute state + snapshot refs + 4 derived memos + 4 display memos).
+- `src/hooks/useDiscoveryTab.ts`: extracted pure `buildDiscoveryTheme(dark)` (9-property `DiscoveryTabTheme`); added exception comment on `useDiscoveryTab` explaining 5-state/8-memo dependency chain coupling.
+- `src/hooks/useIntelTab.ts`: extracted pure `buildIntelTheme(dark)` (13-property `IntelTabTheme` extending `CardTheme`); added exception comment on `useIntelTab` explaining situation-classification pipeline coupling.
+- `src/lib/image-extractor.ts`: added exception comment on `extractImageUrl` explaining linear regex-sequence structure.
+- `src/hooks/useDashboardTable.ts`: added exception comment on `useDashboardTable` matching the prior DEVLOG justification (6 state + 1 effect + 2 memos + 5 handlers).
+- No public signature, return type, or behavioral changes. All 124 tests pass.
+
 ## 2026-04-10 — AUDIT-3: verify fixes, fresh scan, 6 remaining violations
 - All 9 prior violations confirmed fixed (AUDIT.md V1–V5, AUDIT-2.md V2-1 to V2-4)
 - Fresh scan found 6 violations of 50-line function limit:

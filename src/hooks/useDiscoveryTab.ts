@@ -35,6 +35,26 @@ interface UseDiscoveryTabParams {
 
 const ENTITY_TYPES: EntityType[] = ["country", "organization", "person", "region"];
 
+function buildDiscoveryTheme(dark: boolean): DiscoveryTabTheme {
+  return {
+    bg: dark ? "bg-slate-950" : "bg-white",
+    text: dark ? "text-slate-200" : "text-gray-800",
+    textMuted: dark ? "text-slate-400" : "text-gray-500",
+    textFaint: dark ? "text-slate-600" : "text-gray-300",
+    controlBg: dark ? "bg-slate-900 border-slate-700" : "bg-gray-50 border-gray-200",
+    controlActive: dark ? "bg-slate-700 text-slate-200" : "bg-gray-200 text-gray-800",
+    controlInactive: dark ? "bg-transparent text-slate-500 hover:text-slate-300" : "bg-transparent text-gray-400 hover:text-gray-700",
+    tooltipBg: dark ? "bg-slate-800 border-slate-600" : "bg-white border-gray-200 shadow-lg",
+    legendBg: dark ? "bg-slate-900/80" : "bg-gray-50/80",
+  };
+}
+
+// Exception to 50-line rule: tightly-coupled state management hook.
+// 5 pieces of UI state (edgeMode, typeFilter, minMentions, hoveredEntity,
+// tooltipPos) feeding 8+ interleaved memoized computations (filteredEntities,
+// maxCat, maxMentions, entityPositions, edges, itemMap, entityLookup,
+// hoveredLatestArticle) that depend on each other. Splitting would fragment
+// the memo dependency chain. Only the pure theme block is extracted.
 export function useDiscoveryTab({ items, dark }: UseDiscoveryTabParams) {
   const entities = useMemo(() => extractEntities(items), [items]);
   const enriched = useMemo(() => enrichEntities(entities, items), [entities, items]);
@@ -143,17 +163,7 @@ export function useDiscoveryTab({ items, dark }: UseDiscoveryTabParams) {
     return latest;
   }, [hoveredEntityData, itemMap]);
 
-  const t: DiscoveryTabTheme = {
-    bg: dark ? "bg-slate-950" : "bg-white",
-    text: dark ? "text-slate-200" : "text-gray-800",
-    textMuted: dark ? "text-slate-400" : "text-gray-500",
-    textFaint: dark ? "text-slate-600" : "text-gray-300",
-    controlBg: dark ? "bg-slate-900 border-slate-700" : "bg-gray-50 border-gray-200",
-    controlActive: dark ? "bg-slate-700 text-slate-200" : "bg-gray-200 text-gray-800",
-    controlInactive: dark ? "bg-transparent text-slate-500 hover:text-slate-300" : "bg-transparent text-gray-400 hover:text-gray-700",
-    tooltipBg: dark ? "bg-slate-800 border-slate-600" : "bg-white border-gray-200 shadow-lg",
-    legendBg: dark ? "bg-slate-900/80" : "bg-gray-50/80",
-  };
+  const t = buildDiscoveryTheme(dark);
 
   return {
     filteredEntities,

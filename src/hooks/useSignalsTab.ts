@@ -39,6 +39,33 @@ interface UseSignalsTabParams {
 
 const INITIAL_LIMIT = 12;
 
+function buildSignalsTheme(dark: boolean): SignalsTabTheme {
+  return {
+    cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-gray-100 shadow-sm",
+    summaryBg: dark ? "bg-slate-900 shadow-lg shadow-black/20" : "bg-white shadow-sm",
+    summaryText: dark ? "text-slate-300" : "text-gray-700",
+    text: dark ? "text-slate-200" : "text-gray-800",
+    textMuted: dark ? "text-slate-400" : "text-gray-500",
+    entityName: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
+    confidenceBg: dark ? "bg-slate-700" : "bg-gray-200",
+    muteBtnBg: dark
+      ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
+      : "text-gray-400 hover:text-red-600 hover:bg-red-50",
+    sectionLabel: dark ? "text-slate-300" : "text-gray-700",
+    evidenceBg: dark ? "bg-slate-800/50 border-slate-700" : "bg-gray-50 border-gray-200",
+    linkText: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
+    sparkBarActive: dark ? "bg-emerald-500" : "bg-emerald-500",
+    sparkBarEmpty: dark ? "bg-slate-700" : "bg-gray-200",
+  };
+}
+
+// Exception to 50-line rule: tightly-coupled state management hook.
+// 4 source memos (entities, enriched, situations, signals), 2 pieces
+// of persisted UI state (mute map, snapshot refs), 4 derived memos
+// (activeSignals, itemMap, entityLookup, entitySituationMap), plus
+// 4 display memos (topEntities, sparklineData, severityCounts,
+// visibleSignals). Splitting would fragment related state wiring
+// across files. Only the pure theme block is extracted (buildSignalsTheme).
 export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParams) {
   const entities = useMemo(() => extractEntities(items), [items]);
   const enriched = useMemo(() => enrichEntities(entities, items), [entities, items]);
@@ -177,23 +204,7 @@ export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParam
 
   const mutedCount = mutedEntities.size;
 
-  const t: SignalsTabTheme = {
-    cardBg: dark ? "bg-slate-900 border-slate-700" : "bg-white border-gray-100 shadow-sm",
-    summaryBg: dark ? "bg-slate-900 shadow-lg shadow-black/20" : "bg-white shadow-sm",
-    summaryText: dark ? "text-slate-300" : "text-gray-700",
-    text: dark ? "text-slate-200" : "text-gray-800",
-    textMuted: dark ? "text-slate-400" : "text-gray-500",
-    entityName: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
-    confidenceBg: dark ? "bg-slate-700" : "bg-gray-200",
-    muteBtnBg: dark
-      ? "text-slate-500 hover:text-red-400 hover:bg-red-500/10"
-      : "text-gray-400 hover:text-red-600 hover:bg-red-50",
-    sectionLabel: dark ? "text-slate-300" : "text-gray-700",
-    evidenceBg: dark ? "bg-slate-800/50 border-slate-700" : "bg-gray-50 border-gray-200",
-    linkText: dark ? "text-blue-400 hover:text-blue-300" : "text-blue-600 hover:text-blue-700",
-    sparkBarActive: dark ? "bg-emerald-500" : "bg-emerald-500",
-    sparkBarEmpty: dark ? "bg-slate-700" : "bg-gray-200",
-  };
+  const t = buildSignalsTheme(dark);
 
   return {
     entities,

@@ -119,10 +119,77 @@ const TITLE_PREFIXES = [
   "chief", "state", "deputy", "former",
 ];
 
+// Common discourse words that disqualify a 2-word candidate as a person name
+// (catches "Why Pakistan", "India On", etc.)
+const FILLER_WORDS = new Set([
+  "the", "on", "in", "at", "of", "for", "and", "or", "but", "why",
+  "how", "who", "what", "when", "where", "its", "his", "her", "our",
+  "their", "this", "that", "one", "two", "most", "some", "all", "any",
+  "new", "old", "big", "very", "just", "also", "than", "each",
+]);
+
+/**
+ * Strip leading title words (President, Minister, etc.) from candidates.
+ * If the stripped form has 2+ words each 2+ chars, keep the stripped form;
+ * otherwise retain the original candidate.
+ */
+function stripTitlePrefixes(candidates: Set<string>): Set<string> {
+  const deduped = new Set<string>();
+  for (const name of candidates) {
+    let stripped = name;
+    const nameLower = name.toLowerCase();
+    for (const prefix of TITLE_PREFIXES) {
+      if (nameLower.startsWith(prefix + " ")) {
+        stripped = name.slice(prefix.length + 1);
+        break;
+      }
+    }
+    const strippedWords = stripped.split(/\s+/);
+    if (strippedWords.length >= 2 && strippedWords.every((w) => w.length >= 2)) {
+      deduped.add(stripped);
+    } else {
+      deduped.add(name);
+    }
+  }
+  return deduped;
+}
+
+/**
+ * Decide if a capitalized phrase is a plausible person name.
+ * Returns false for dictionary entities, stopwords, source names,
+ * media/role words, common discourse words, and substrings of known entities.
+ */
+function isPlausiblePersonName(
+  candidate: string,
+  knownEntities: Set<string>,
+  sourceNames: Set<string>,
+): boolean {
+  const candidateLower = candidate.toLowerCase();
+  if (knownEntities.has(candidate)) return false;
+  if (STOP_LOWER.has(candidateLower)) return false;
+
+  const words = candidate.split(/\s+/);
+  if (words.length < 2) return false;
+  if (words.some((w) => w.length < 2)) return false;
+
+  const lowerWords = words.map((w) => w.toLowerCase());
+  if (lowerWords.some((w) => NON_PERSON_WORDS.has(w))) return false;
+  if (sourceNames.has(candidateLower)) return false;
+  if (lowerWords.some((w) => FILLER_WORDS.has(w))) return false;
+
+  // Reject if candidate contains a known dictionary entity name as substring
+  // (catches "Iran War", "China On", "Trump Iran", etc.)
+  for (const entity of knownEntities) {
+    if (candidateLower.includes(entity.toLowerCase()) && candidate !== entity) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
  * Extract likely person names: sequences of 2-3 capitalized words.
  * Excludes anything already matched by dictionaries or in the stopword list.
- * Uses multiple heuristics to filter false positives.
  */
 function matchPersonNames(
   text: string,
@@ -133,76 +200,14 @@ function matchPersonNames(
   // Match 2-3 consecutive capitalized words (first letter uppercase, rest lowercase)
   const regex = /\b([A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,}){1,2})\b/g;
   let match;
-
   while ((match = regex.exec(text)) !== null) {
     const candidate = match[1];
-    const candidateLower = candidate.toLowerCase();
-
-    // Skip if it's a known dictionary entity or alias
-    if (knownEntities.has(candidate)) continue;
-
-    // Skip if it's in stopwords
-    if (STOP_LOWER.has(candidateLower)) continue;
-
-    // Skip single common words that got paired with something
-    const words = candidate.split(/\s+/);
-    if (words.length < 2) continue;
-
-    // Basic quality filter: each word should be 2+ chars
-    if (words.some((w) => w.length < 2)) continue;
-
-    // Skip if any word is a non-person indicator word
-    const lowerWords = words.map((w) => w.toLowerCase());
-    if (lowerWords.some((w) => NON_PERSON_WORDS.has(w))) continue;
-
-    // Skip if the candidate matches a source name (e.g. "Bangkok Post", "The Hill")
-    if (sourceNames.has(candidateLower)) continue;
-
-    // Skip if candidate contains a known dictionary entity name
-    // (catches "Iran War", "China On", "Trump Iran", etc.)
-    let containsKnownEntity = false;
-    for (const entity of knownEntities) {
-      if (candidateLower.includes(entity.toLowerCase()) && candidate !== entity) {
-        containsKnownEntity = true;
-        break;
-      }
-    }
-    if (containsKnownEntity) continue;
-
-    // Skip if candidate is only 2 words and one is a very common word
-    // (catches "Why Pakistan", "India On", etc.)
-    const FILLER_WORDS = new Set([
-      "the", "on", "in", "at", "of", "for", "and", "or", "but", "why",
-      "how", "who", "what", "when", "where", "its", "his", "her", "our",
-      "their", "this", "that", "one", "two", "most", "some", "all", "any",
-      "new", "old", "big", "very", "just", "also", "than", "each",
-    ]);
-    if (lowerWords.some((w) => FILLER_WORDS.has(w))) continue;
-
-    found.add(candidate);
-  }
-
-  // Deduplicate title-prefixed variants: "President Donald Trump" → keep "Donald Trump"
-  const deduped = new Set<string>();
-  for (const name of found) {
-    let stripped = name;
-    const nameLower = name.toLowerCase();
-    for (const prefix of TITLE_PREFIXES) {
-      if (nameLower.startsWith(prefix + " ")) {
-        stripped = name.slice(prefix.length + 1);
-        break;
-      }
-    }
-    // Only keep the stripped version if it's at least 2 words
-    const strippedWords = stripped.split(/\s+/);
-    if (strippedWords.length >= 2 && strippedWords.every((w) => w.length >= 2)) {
-      deduped.add(stripped);
-    } else {
-      deduped.add(name);
+    if (isPlausiblePersonName(candidate, knownEntities, sourceNames)) {
+      found.add(candidate);
     }
   }
-
-  return deduped;
+  // Deduplicate title-prefixed variants: "President Donald Trump" → "Donald Trump"
+  return stripTitlePrefixes(found);
 }
 
 // Lightweight sentiment scoring for news headlines
