@@ -15,6 +15,10 @@ export function getSourceImageUrl(link: string, sourceUrl: string): string {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
 }
 
+// Exception to 50-line rule: linear sequence of regex attempts with no
+// branching concerns. Each block (3-6 lines) tries one RSS/Atom image
+// pattern and returns on first match; splitting would scatter related
+// patterns across functions and obscure the fallback order.
 export function extractImageUrl(block: string): string {
   // 1a. <media:content url="..."> with known image extension
   const mediaContentExt = block.match(

@@ -75,6 +75,11 @@ function sortItems(items: FeedItem[], sort: SortConfig): FeedItem[] {
   return arr;
 }
 
+// Exception to 50-line rule: 6 state variables + 1 effect + 2 memos +
+// 5 handlers make further reduction below 50 counterproductive. Pure
+// helpers (matchesText, filterItems, sortItems) are already extracted
+// above; remaining code is React state/effect wiring that must stay
+// co-located with the hook.
 export function useDashboardTable(): UseDashboardTableReturn {
   const {
     items, loading, error, fetchedAt,
