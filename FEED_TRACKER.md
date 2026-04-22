@@ -49,6 +49,44 @@ Tracks all possible RSS/news feeds — what we use, what we could add, and their
 | Reuters - World News | News | google | active | Switched to Google News RSS |
 | CNN - World | News | google | active | Switched to Google News RSS |
 
+## Newly Added — 2026-04-22 Tier 1 Batch (ids 183–215)
+
+| Source | Category | Method | Status | Notes |
+|--------|----------|--------|--------|-------|
+| ABC News - World | News | google | active | US broadcast |
+| CBS News - World | News | google | active | US broadcast |
+| NBC News - World | News | google | active | US broadcast |
+| MSNBC | News | google | active | US cable |
+| Politico Europe | News | google | active | EU politics |
+| The Atlantic | News | google | active | Long-form US |
+| Vox | News | google | active | Explainer journalism |
+| BBC Mundo | News | google | active | Spanish BBC (Latin America) |
+| Die Zeit | News | google | active | German weekly |
+| Bild | News | google | active | German tabloid |
+| Corriere della Sera | News | google | active | Italian press |
+| La Repubblica | News | google | active | Italian press |
+| NOS Nieuws | News | google | active | Dutch public broadcasting |
+| SVT Nyheter | News | google | active | Swedish public broadcasting |
+| TVN24 | News | google | active | Polish news |
+| Kathimerini English | News | google | active | Greek press |
+| BBC Turkish | News | google | active | BBC Turkish service |
+| Oman Observer | News | google | active | Gulf press |
+| Island Times | News | google | active | Pacific islands |
+| ZDNet | Tech | google | active | Enterprise tech |
+| Engadget | Tech | google | active | Consumer tech |
+| Fast Company | Tech | google | active | Tech/business |
+| Ransomware.live | Cyber | google | active | Active ransomware tracking |
+| AWS Status | Tech | direct | active | Cloud outages |
+| Azure Status | Tech | direct | active | Cloud outages |
+| The Block | Crypto | google | active | Crypto news |
+| Decrypt | Crypto | google | active | Crypto news |
+| Blockworks | Crypto | google | active | Crypto/markets |
+| Investing.com | Finance | google | active | Financial markets |
+| MarketWatch | Finance | google | active | Financial markets |
+| Mining.com | Commodities | google | active | Mining industry |
+| Rigzone | Commodities | google | active | Oil & gas |
+| UK MOD | Defense | direct | active | Atom feed (gov.uk) |
+
 ## Newly Added — Google News RSS (Test Batch)
 
 | Source | Category | Method | Status | Notes |
@@ -76,81 +114,7 @@ Tracks all possible RSS/news feeds — what we use, what we could add, and their
 
 ## Available — Not Yet Added
 
-### US Domestic News
-| Source | Category | Method | Status | Notes |
-|--------|----------|--------|--------|-------|
-| ABC News | News | google | available | |
-| CBS News | News | google | available | |
-| NBC News | News | google | available | |
-| MSNBC | News | google | available | |
-| Politico Europe | News | google | available | |
-| The Atlantic | News | google | available | |
-| ProPublica | News | google | available | |
-| Vox | News | google | available | |
-
-### European Press
-| Source | Category | Method | Status | Notes |
-|--------|----------|--------|--------|-------|
-| BBC Mundo | News | google | available | Spanish BBC |
-| Der Spiegel English | News | google | available | German magazine |
-| Die Zeit | News | google | available | German press |
-| Bild | News | google | available | German tabloid |
-| Corriere della Sera | News | google | available | Italian press |
-| La Repubblica | News | google | available | Italian press |
-| NOS Nieuws | News | google | available | Dutch public broadcasting |
-| SVT Nyheter | News | google | available | Swedish public broadcasting |
-| TVN24 | News | google | available | Polish news |
-| Kathimerini English | News | google | available | Greek press |
-| Hurriyet Daily News | News | google | available | Turkish press |
-| BBC Turkish | News | google | available | |
-| Novaya Gazeta Europe | News | google | available | Russian independent |
-
-### Asia/Middle East
-| Source | Category | Method | Status | Notes |
-|--------|----------|--------|--------|-------|
-| VnExpress International | News | google | available | Vietnam |
-| Rudaw | News | google | available | Kurdish news |
-| Asharq Al-Awsat | News | google | available | Pan-Arab press |
-| Oman Observer | News | google | available | Gulf press |
-| Island Times | News | google | available | Pacific news |
-
-### Tech/Security
-| Source | Category | Method | Status | Notes |
-|--------|----------|--------|--------|-------|
-| ZDNet | Tech | google | available | |
-| Engadget | Tech | google | available | |
-| Fast Company | Tech | google | available | |
-| Dark Reading | Cyber | google | available | |
-| Schneier on Security | Cyber | google | available | |
-| Ransomware.live | Cyber | direct | available | |
-| AWS Status | Tech | direct | available | Cloud outages |
-| Azure Status | Tech | direct | available | Cloud outages |
-
-### Finance/Crypto
-| Source | Category | Method | Status | Notes |
-|--------|----------|--------|--------|-------|
-| CoinTelegraph | Crypto | google | available | |
-| The Block | Crypto | google | available | |
-| Decrypt | Crypto | google | available | |
-| Blockworks | Crypto | google | available | |
-| Seeking Alpha | Finance | google | available | |
-| Investing.com | Finance | google | available | |
-| MarketWatch | Finance | google | available | |
-
-### Commodities
-| Source | Category | Method | Status | Notes |
-|--------|----------|--------|--------|-------|
-| Kitco News | Commodities | google | available | Gold/precious metals |
-| OilPrice.com | Commodities | google | available | Energy |
-| Mining.com | Commodities | google | available | Mining |
-| Rigzone | Commodities | google | available | Oil & gas |
-
-### Defense/OSINT
-| Source | Category | Method | Status | Notes |
-|--------|----------|--------|--------|-------|
-| Oryx OSINT | Defense | google | available | Equipment loss tracking |
-| gCaptain | Maritime | google | available | Maritime security |
-| UK MOD | Defense | direct | available | Atom feed |
+_All entries in this section have been promoted to active as of 2026-04-22. Remaining "available" candidates (if any) should be listed below as they are discovered. Pre-existing tracker entries that were already in `sources-data.json` but still listed as "available" (ProPublica, Der Spiegel English, Hurriyet Daily News, Novaya Gazeta Europe, VnExpress International, Rudaw, Asharq Al-Awsat, Dark Reading, Schneier on Security, CoinTelegraph, Seeking Alpha, Kitco News, OilPrice.com, Oryx OSINT, gCaptain) were tracker-only stale rows and have been removed._
 
 ## Removed From RSS Pool (not fetchable from cloud)
 
