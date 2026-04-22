@@ -1828,5 +1828,335 @@
     "url": "https://news.google.com/rss/search?q=site:novayagazeta.eu&hl=en-US&gl=US&ceid=US:en",
     "notes": "Russian independent media (exiled) - via Google News RSS",
     "status": "live"
+  },
+  {
+    "id": 183,
+    "name": "ABC News - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:abcnews.go.com+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US broadcast network - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 184,
+    "name": "CBS News - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:cbsnews.com+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US broadcast network - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 185,
+    "name": "NBC News - World",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:nbcnews.com+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US broadcast network - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 186,
+    "name": "MSNBC",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:msnbc.com+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US cable news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 187,
+    "name": "Politico Europe",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:politico.eu&hl=en-US&gl=US&ceid=US:en",
+    "notes": "EU politics - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 188,
+    "name": "The Atlantic",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:theatlantic.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Long-form US magazine - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 189,
+    "name": "Vox",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:vox.com+world&hl=en-US&gl=US&ceid=US:en",
+    "notes": "US explainer journalism - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 190,
+    "name": "BBC Mundo",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:bbc.com+mundo&hl=es-419&gl=US&ceid=US:es-419",
+    "notes": "BBC Spanish (Latin America) - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 191,
+    "name": "Die Zeit",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:zeit.de&hl=de&gl=DE&ceid=DE:de",
+    "notes": "German weekly press - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 192,
+    "name": "Bild",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:bild.de&hl=de&gl=DE&ceid=DE:de",
+    "notes": "German tabloid - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 193,
+    "name": "Corriere della Sera",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:corriere.it&hl=it&gl=IT&ceid=IT:it",
+    "notes": "Italian press - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 194,
+    "name": "La Repubblica",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:repubblica.it&hl=it&gl=IT&ceid=IT:it",
+    "notes": "Italian press - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 195,
+    "name": "NOS Nieuws",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:nos.nl&hl=nl&gl=NL&ceid=NL:nl",
+    "notes": "Dutch public broadcasting - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 196,
+    "name": "SVT Nyheter",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:svt.se&hl=sv&gl=SE&ceid=SE:sv",
+    "notes": "Swedish public broadcasting - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 197,
+    "name": "TVN24",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:tvn24.pl&hl=pl&gl=PL&ceid=PL:pl",
+    "notes": "Polish news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 198,
+    "name": "Kathimerini English",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:ekathimerini.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Greek press (English edition) - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 199,
+    "name": "BBC Turkish",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:bbc.com+turkce&hl=tr&gl=TR&ceid=TR:tr",
+    "notes": "BBC Turkish service - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 200,
+    "name": "Oman Observer",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:omanobserver.om&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Gulf press - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 201,
+    "name": "Island Times",
+    "category": "News",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:islandtimes.org&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Pacific islands news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 202,
+    "name": "ZDNet",
+    "category": "Tech",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:zdnet.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Enterprise tech news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 203,
+    "name": "Engadget",
+    "category": "Tech",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:engadget.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Consumer tech news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 204,
+    "name": "Fast Company",
+    "category": "Tech",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:fastcompany.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Tech and business - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 205,
+    "name": "Ransomware.live",
+    "category": "Cyber",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:ransomware.live&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Active ransomware tracking - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 206,
+    "name": "AWS Status",
+    "category": "Tech",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://status.aws.amazon.com/rss/all.rss",
+    "notes": "AWS cloud outage feed (direct RSS)",
+    "status": "live"
+  },
+  {
+    "id": 207,
+    "name": "Azure Status",
+    "category": "Tech",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://azurestatuscdn.azureedge.net/en-us/status/feed/",
+    "notes": "Azure cloud outage feed (direct RSS)",
+    "status": "live"
+  },
+  {
+    "id": 208,
+    "name": "The Block",
+    "category": "Crypto",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:theblock.co&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Crypto news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 209,
+    "name": "Decrypt",
+    "category": "Crypto",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:decrypt.co&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Crypto news - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 210,
+    "name": "Blockworks",
+    "category": "Crypto",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:blockworks.co&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Crypto/markets - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 211,
+    "name": "Investing.com",
+    "category": "Finance",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:investing.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Financial markets - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 212,
+    "name": "MarketWatch",
+    "category": "Finance",
+    "type": "RSS",
+    "tier": "Tier 2 - Major Outlet",
+    "url": "https://news.google.com/rss/search?q=site:marketwatch.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Financial markets - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 213,
+    "name": "Mining.com",
+    "category": "Commodities",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:mining.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Mining industry - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 214,
+    "name": "Rigzone",
+    "category": "Commodities",
+    "type": "RSS",
+    "tier": "Tier 3 - Specialized",
+    "url": "https://news.google.com/rss/search?q=site:rigzone.com&hl=en-US&gl=US&ceid=US:en",
+    "notes": "Oil and gas industry - via Google News RSS",
+    "status": "live"
+  },
+  {
+    "id": 215,
+    "name": "UK MOD",
+    "category": "Defense",
+    "type": "Atom",
+    "tier": "Government",
+    "url": "https://www.gov.uk/government/organisations/ministry-of-defence.atom",
+    "notes": "UK Ministry of Defence - direct Atom feed",
+    "status": "live"
   }
 ]

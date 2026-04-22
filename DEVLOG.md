@@ -1,5 +1,12 @@
 # World Dashboard Development Log
 
+## 2026-04-22 — Tier 1 feed expansion (+33 RSS sources, ids 183–215)
+- `src/lib/sources-data.json`: appended 33 entries promoting tracker "available" candidates to live — US broadcast (ABC/CBS/NBC/MSNBC/Politico EU/Atlantic/Vox), European press (BBC Mundo, Die Zeit, Bild, Corriere, Repubblica, NOS, SVT, TVN24, Kathimerini, BBC Turkish), Asia/ME (Oman Observer, Island Times), Tech/Security (ZDNet, Engadget, Fast Company, Ransomware.live, AWS Status, Azure Status), Finance/Crypto (The Block, Decrypt, Blockworks, Investing.com, MarketWatch), Commodities (Mining.com, Rigzone), UK MOD (Atom). RSS/Atom count 75 → 108.
+- All Google News-proxied entries follow the existing `https://news.google.com/rss/search?q=site:DOMAIN&hl=...&gl=...&ceid=...:...` pattern. AWS/Azure/UK MOD use direct feeds. Ransomware.live was marked "direct" in the tracker but direct-URL form was unverified, so it uses Google News (safer and pattern-consistent).
+- `FEED_TRACKER.md`: added "2026-04-22 Tier 1 Batch" Active section; collapsed the six "Available — Not Yet Added" subsections (tracker was stale — ~15 of its "available" rows were already in sources-data.json from prior batches). Those stale rows were removed rather than re-promoted.
+- No code changes. 124 tests pass. `Dashboard Sources.csv` deliberately left unchanged — it was already ~35 entries behind the JSON and is treated as an ornamental ambition doc; FEED_TRACKER.md is the working status record.
+- Gotcha: there is no CSV→JSON regeneration script. `sources-data.json` is authoritative; `Dashboard Sources.csv` is not consumed at runtime.
+
 ## 2026-04-11 — Resolve AUDIT-3 violations (V3-1 through V3-4 + borderline)
 - `src/lib/novelty-scorer.ts`: decomposed `enrichEntities` (128 lines → 19-line orchestrator) into 5 pure scoring helpers (`scoreCategorySpread`, `scoreSourceDiversity`, `scoreEdgeNovelty`, `scoreBaselineSurprise`, `scoreQuietMover`) plus `buildCurrentEdges` and `enrichSingleEntity`. Module-private `CategorySpreadResult` and `ScoredReason` interfaces added for typed returns. Imported `EntityBaseline` type from `./signal-storage`. Reason ordering, state persistence, and arithmetic preserved verbatim.
 - `src/lib/entity-extractor.ts`: extracted `stripTitlePrefixes(candidates)` (20 lines) from `matchPersonNames`; further extracted candidate validation into `isPlausiblePersonName(candidate, knownEntities, sourceNames)` (27 lines); hoisted inline `FILLER_WORDS` Set to module scope. `matchPersonNames` shrank from ~80 lines to 18 lines.
