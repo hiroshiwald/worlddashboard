@@ -56,6 +56,29 @@ function validateApiResponse(data: unknown): ValidatedResponse {
   };
 }
 
+interface ValidatedDbResponse {
+  items: FeedItem[];
+  lastIngestAt: string | null;
+  count: number;
+}
+
+function validateDbResponse(data: unknown): ValidatedDbResponse | null {
+  const obj = (data && typeof data === "object" ? data : {}) as Record<
+    string,
+    unknown
+  >;
+  if (!Array.isArray(obj.items)) return null;
+  if (typeof obj.lastIngestAt !== "string" && obj.lastIngestAt !== null) {
+    return null;
+  }
+
+  return {
+    items: obj.items as FeedItem[],
+    lastIngestAt: typeof obj.lastIngestAt === "string" ? obj.lastIngestAt : null,
+    count: typeof obj.count === "number" ? obj.count : obj.items.length,
+  };
+}
+
 interface UseFeedReturn {
   items: FeedItem[];
   loading: boolean;
@@ -65,6 +88,8 @@ interface UseFeedReturn {
   feedsSucceeded: number;
   totalItems: number;
   feedDiagnostics: FeedDiagnostic[];
+  mode: "db" | "live";
+  lastIngestAt: string | null;
   refresh: () => void;
 }
 
@@ -77,27 +102,67 @@ export function useFeed(): UseFeedReturn {
   const [feedsSucceeded, setFeedsSucceeded] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
   const [feedDiagnostics, setFeedDiagnostics] = useState<FeedDiagnostic[]>([]);
+  const [mode, setMode] = useState<"db" | "live">("live");
+  const [lastIngestAt, setLastIngestAt] = useState<string | null>(null);
+
+  // Tries the DB-backed read path first. Returns false (and warns) on a
+  // 503 (no data yet), any other non-2xx, a malformed body, or a network
+  // error — the caller then falls back to the live fetch path.
+  const fetchFromDb = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/articles", { cache: "no-store" });
+      if (!res.ok) {
+        console.warn(`[useSources] /api/articles returned ${res.status}, falling back to live fetch`);
+        return false;
+      }
+      const data = await res.json();
+      const validated = validateDbResponse(data);
+      if (!validated) {
+        console.warn("[useSources] /api/articles response has unexpected shape, falling back to live fetch");
+        return false;
+      }
+      setItems(validated.items);
+      setFetchedAt(new Date().toISOString());
+      setFeedsAttempted(0);
+      setFeedsSucceeded(0);
+      setTotalItems(validated.count);
+      setFeedDiagnostics([]);
+      setMode("db");
+      setLastIngestAt(validated.lastIngestAt);
+      return true;
+    } catch (err) {
+      console.warn("[useSources] /api/articles fetch failed, falling back to live fetch", err);
+      return false;
+    }
+  }, []);
+
+  const fetchFromLive = useCallback(async () => {
+    const res = await fetch("/api/sources", { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const validated = validateApiResponse(data);
+    setItems(validated.items);
+    setFetchedAt(validated.fetchedAt);
+    setFeedsAttempted(validated.feedsAttempted);
+    setFeedsSucceeded(validated.feedsSucceeded);
+    setTotalItems(validated.count);
+    setFeedDiagnostics(validated.feedDiagnostics);
+    setMode("live");
+    setLastIngestAt(null);
+  }, []);
 
   const fetchFeed = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/sources", { cache: "no-store" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const validated = validateApiResponse(data);
-      setItems(validated.items);
-      setFetchedAt(validated.fetchedAt);
-      setFeedsAttempted(validated.feedsAttempted);
-      setFeedsSucceeded(validated.feedsSucceeded);
-      setTotalItems(validated.count);
-      setFeedDiagnostics(validated.feedDiagnostics);
+      const usedDb = await fetchFromDb();
+      if (!usedDb) await fetchFromLive();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch feed");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchFromDb, fetchFromLive]);
 
   useEffect(() => {
     // Fire-and-forget: useEffect cannot return a promise. Errors handled inside fetchFeed.
@@ -113,6 +178,8 @@ export function useFeed(): UseFeedReturn {
     feedsSucceeded,
     totalItems,
     feedDiagnostics,
+    mode,
+    lastIngestAt,
     refresh: fetchFeed,
   };
 }

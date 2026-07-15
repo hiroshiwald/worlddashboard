@@ -10,6 +10,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "compromise": "^14.15.0",
     "leaflet": "^1.9.4",
     "next": "^14.2.21",

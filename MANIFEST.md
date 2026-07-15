@@ -3,6 +3,13 @@
 | Name | Purpose | Key Exports |
 |------|---------|-------------|
 | `src/app/api/sources/route.ts` | API endpoint that orchestrates feed fetching and returns aggregated items | `GET` handler |
+| `src/app/api/ingest/route.ts` | Fetches all feeds, persists to Postgres, sweeps retention. Auth via `x-ingest-key` or `Authorization: Bearer` (`CRON_SECRET`) | `POST`, `GET` handlers |
+| `src/app/api/articles/route.ts` | DB-backed read path — cluster heads only, `days`/`category` filters, 503 when unconfigured/empty | `GET` handler |
+| `src/lib/server/db.ts` | Thin Postgres query helper over `@neondatabase/serverless` | `getSql`, `Sql`, `SqlRow` |
+| `src/lib/server/article-identity.ts` | Pure article identity hashing for de-duplication | `contentHash` |
+| `src/lib/server/ingest-writer.ts` | Batched article persistence, cross-source dup-group linking, retention sweep | `persistArticles`, `sweepRetention` |
+| `migrations/001_core.sql` | Schema v1: articles, entities, article_entities, entity_mentions_hourly, entity_edges, entity_candidates, signals, settings | — |
+| `scripts/migrate.mjs` | Idempotent migration runner (`schema_migrations` ledger) | — |
 | `src/app/page.tsx` | Home page — renders the main dashboard | `Home` component |
 | `src/app/layout.tsx` | Root HTML layout with metadata and font loading | `RootLayout` component |
 | `src/app/globals.css` | Tailwind directives and dark-scrollbar styles | — |
@@ -12,7 +19,7 @@
 | `src/components/dashboard/FeedCardList.tsx` | Mobile responsive card layout for feed items | `FeedCardList` |
 | `src/components/dashboard/TabContent.tsx` | Lazy-loaded tab switcher for Intel, Signals, Network, Map, Discovery | `TabContent` |
 | `src/components/dashboard/index.ts` | Barrel export for dashboard sub-components | — |
-| `src/components/HeaderBar.tsx` | Top navigation with search, category filter, theme toggle, tab switcher | `HeaderBar` |
+| `src/components/HeaderBar.tsx` | Top navigation with search, category filter, theme toggle, tab switcher, ingest-mode badge | `HeaderBar` |
 | `src/components/IntelTab.tsx` | Thin composition shell: imports hook + sub-components, composes layout | `IntelTab` |
 | `src/components/intel/IntelSummary.tsx` | Summary bar with entity/situation counts and low-data warning | `IntelSummary` |
 | `src/components/intel/KnownSituationsSection.tsx` | Expandable row strip for known situations with article drill-down | `KnownSituationsSection` |
@@ -42,10 +49,10 @@
 | `src/hooks/useSignalsTab.ts` | Custom hook: all SignalsTab state, memos, effects, handlers, theme | `useSignalsTab`, `SignalsTabTheme` |
 | `src/hooks/useDiscoveryTab.ts` | Custom hook: all DiscoveryTab state, memos, callbacks, theme | `useDiscoveryTab`, `EdgeMode`, `EdgeData`, `DiscoveryTabTheme` |
 | `src/hooks/useIntelTab.ts` | Custom hook: all IntelTab state, memos, callbacks, theme | `useIntelTab`, `IntelTabTheme` |
-| `src/hooks/useSources.ts` | React hook for fetching feed data from `/api/sources` | `useFeed` |
+| `src/hooks/useSources.ts` | React hook for fetching feed data: tries DB-backed `/api/articles` first, falls back to live `/api/sources` | `useFeed` |
 | `src/lib/types.ts` | All shared TypeScript interfaces | `FeedItem`, `SourceMeta`, `ExtractedEntity`, `EnrichedEntity`, `Signal`, `Situation`, `UrgencyLevel`, `SortConfig`, etc. |
 | `src/lib/feed-fetcher.ts` | RSS/Atom fetching with 3-phase fallback (direct → relay → altUrl), parsing, and caller-owned cache | `fetchAllFeeds`, `parseFeedXml`, `parseRssItems`, `parseAtomEntries`, `CacheEntry` |
-| `src/lib/entity-extractor.ts` | Dictionary-based NER from feed text with sentiment via compromise.js | `extractEntities` |
+| `src/lib/entity-extractor.ts` | Dictionary-based NER from feed text with a hand-rolled lexicon sentiment scorer | `extractEntities` |
 | `src/lib/entity-dictionaries.ts` | Country, org, region dictionaries and person stopwords | `COUNTRY_DICT`, `ORG_DICT`, `REGION_DICT`, `PERSON_STOPWORDS` |
 | `src/lib/signal-detector.ts` | Six-type anomaly detection (surge, sentiment, cross-category, novel co-occurrence, escalation, emergence) | `detectSignals` |
 | `src/lib/novelty-scorer.ts` | Five-dimension novelty scoring (0–100) and known-situation detection | `enrichEntities`, `isKnownSituation` |
@@ -68,6 +75,8 @@
 | `src/lib/__tests__/feed-parser.test.ts` | Tests for RSS 2.0 and Atom parsing | — |
 | `src/lib/__tests__/entity-extractor.test.ts` | Tests for entity extraction, co-occurrence, sentiment | — |
 | `src/lib/__tests__/signal-detector.test.ts` | Tests for anomaly signal detection algorithms | — |
+| `src/lib/server/__tests__/article-identity.test.ts` | Tests for contentHash stability, normalization, distinctness | — |
+| `src/lib/server/__tests__/ingest-writer.test.ts` | Tests for persistArticles (dup-group linking, batching) and sweepRetention (mocked sql client) | — |
 
 ## Invariants
 
@@ -79,7 +88,7 @@
 - **Signal confidence cap**: Entities appearing in >15% of all items receive a 0.5× dominance penalty to avoid noise.
 - **Novelty score range**: Composite score is 0–100 across five dimensions; no single dimension can exceed its cap (spread: 30, diversity: 15, edges: 25, surprise: 20, emergence: 10).
 - **Situation clustering threshold**: Entity pairs must share ≥2 articles to form a cluster; clusters merge only at >50% article overlap.
-- **No backend database**: The application is fully stateless on the server. All persistence (muted signals, edge history, entity snapshots, baselines, theme) lives in browser localStorage.
+- **Single Neon Postgres, written only by `/api/ingest`**: server-side persistence (articles, and — as later tasks wire them up — entities, mentions, edges, candidates, signals) lives in one Neon Postgres database. `/api/ingest` (hourly GitHub Actions cron + daily Vercel cron fallback) is the only writer; `/api/articles` and all other routes are read-only. Client-side ephemera (muted signals, edge history, entity snapshots, baselines, theme) still lives in browser localStorage.
 - **Muted signal expiry**: 24-hour duration, enforced by wall-clock comparison on load.
 - **Edge history retention**: 30-day window; entries older than 30 days are pruned on save.
 - **Entity snapshot window**: 2-hour retention for emergence detection.
@@ -90,14 +99,20 @@
 ## Boundaries
 
 **Browser → Server**
-- `useFeed` hook fetches `GET /api/sources` with `cache: 'no-store'`
-- Response includes `items[]`, feed diagnostics, and metadata
+- `useFeed` hook fetches `GET /api/articles` (DB-backed) first; on a 503, network error, or malformed response it falls back to `GET /api/sources` (live), both with `cache: 'no-store'`
+- Response includes `items[]`; the live path also includes feed diagnostics and metadata, the DB path includes `lastIngestAt`
 
 **Server → External Feeds**
-- `fetchAllFeeds` hits ~147 RSS/Atom sources in parallel
+- `fetchAllFeeds` hits ~147 RSS/Atom sources in parallel — called from `/api/sources` (live reads) and `/api/ingest` (hourly/daily writes)
 - 3-phase fallback per source: direct fetch → `RELAY_URL` proxy → `altUrl`
 - Optional `RELAY_SECRET` header for relay authentication
 - All fetches use `cache: 'no-store'` to bypass Next.js Data Cache
+
+**Server → Postgres**
+- `/api/ingest` (hourly GitHub Actions cron + daily Vercel cron fallback) is the only writer: fetches all feeds, `persistArticles` (batched insert + dup-group linking), `sweepRetention`
+- `/api/articles` is the only DB reader: cluster heads (`dup_group_id IS NULL`) from the last N days, capped at 500
+- `scripts/migrate.mjs` (manual, owner-run) applies `migrations/*.sql` against `DATABASE_URL`
+- All access goes through `getSql()` (`src/lib/server/db.ts`) — no module-level client, no shared connection state
 
 **Server → CDN**
 - Vercel Edge caches API responses (`s-maxage=60, stale-while-revalidate=300`)
@@ -116,7 +131,7 @@
 - `useDashboardTable` → `useFeed` + `theme`
 - `TabContent` → all tab components (dynamic imports)
 - `FeedTable` / `FeedCardList` → `FeedItemImage` + `urgency` + `date-utils`
-- All analysis tabs → `entity-extractor` → `entity-dictionaries` + `urgency` + `compromise`
+- All analysis tabs → `entity-extractor` → `entity-dictionaries` + `urgency`
 - `SignalsTab` → `useSignalsTab` + signals sub-components
 - `useSignalsTab` → `entity-extractor` + `signal-detector` + `novelty-scorer` + `situation-builder` + `signal-storage`
 - `DiscoveryTab` → `useDiscoveryTab` + discovery sub-components

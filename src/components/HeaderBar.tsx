@@ -24,6 +24,43 @@ interface HeaderBarProps {
   refresh: () => void;
   setEntityFilter: (e: string | null) => void;
   t: ThemeClasses;
+  mode?: "db" | "live";
+  lastIngestAt?: string | null;
+}
+
+const STALE_INGEST_MS = 3 * 60 * 60 * 1000;
+
+function isStaleIngest(lastIngestAt: string): boolean {
+  return Date.now() - new Date(lastIngestAt).getTime() > STALE_INGEST_MS;
+}
+
+// Single freshness badge: "LIVE MODE" when serving the live feed fetch,
+// otherwise ingest age (warning color once older than 3 hours).
+function IngestBadge({
+  mode,
+  lastIngestAt,
+  fetchedAt,
+  dark,
+}: {
+  mode?: "db" | "live";
+  lastIngestAt?: string | null;
+  fetchedAt: string | null;
+  dark: boolean;
+}) {
+  if (mode === "live") {
+    return (
+      <span className={`hidden lg:inline text-xs font-semibold ${dark ? "text-emerald-400" : "text-emerald-600"}`}>
+        LIVE MODE
+      </span>
+    );
+  }
+  const timestamp = mode === "db" ? lastIngestAt : fetchedAt;
+  if (!timestamp) return null;
+  const stale = mode === "db" && isStaleIngest(timestamp);
+  const colorClass = stale
+    ? dark ? "text-amber-400" : "text-amber-600"
+    : dark ? "text-slate-500" : "text-gray-400";
+  return <span className={`hidden lg:inline text-xs ${colorClass}`}>{timeAgo(timestamp)}</span>;
 }
 
 const tabs: { key: TabKey; label: string }[] = [
@@ -93,6 +130,8 @@ export default function HeaderBar({
   refresh,
   setEntityFilter,
   t,
+  mode,
+  lastIngestAt,
 }: HeaderBarProps) {
   return (
     <div className={`shrink-0 z-30 ${t.headerBg}`}>
@@ -154,11 +193,7 @@ export default function HeaderBar({
             ))}
           </select>
 
-          {fetchedAt && (
-            <span className={`hidden lg:inline text-xs ${dark ? "text-slate-500" : "text-gray-400"}`}>
-              {timeAgo(fetchedAt)}
-            </span>
-          )}
+          <IngestBadge mode={mode} lastIngestAt={lastIngestAt} fetchedAt={fetchedAt} dark={dark} />
 
           <button
             onClick={refresh}
