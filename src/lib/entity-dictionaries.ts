@@ -11,7 +11,7 @@ export const COUNTRY_DICT: DictEntry[] = [
   { name: "China", aliases: ["Chinese", "Beijing", "PRC"], type: "country" },
   { name: "Russia", aliases: ["Russian", "Moscow", "Kremlin"], type: "country" },
   { name: "Ukraine", aliases: ["Ukrainian", "Kyiv", "Kiev"], type: "country" },
-  { name: "United Kingdom", aliases: ["UK", "U.K.", "Britain", "British", "London"], type: "country" },
+  { name: "United Kingdom", aliases: ["UK", "U.K.", "Britain", "Great Britain", "British", "London"], type: "country" },
   { name: "France", aliases: ["French", "Paris"], type: "country" },
   { name: "Germany", aliases: ["German", "Berlin"], type: "country" },
   { name: "Japan", aliases: ["Japanese", "Tokyo"], type: "country" },

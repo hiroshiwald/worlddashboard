@@ -78,6 +78,39 @@ describe("extractCandidates", () => {
     const candidates = extractCandidates("Just In: Sky News reports new developments today.", "");
     expect(candidates.find((c) => c.norm === "just in")).toBeUndefined();
   });
+
+  it("'U.K.' resolves to United Kingdom via the dictionary layer", () => {
+    // Bare "UK" is blocked by entity-extractor's 2-char minimum match length
+    // (a pre-existing floor outside this task's file scope, unaffected by
+    // the alias additions here) — "U.K." clears it at 4 characters.
+    const candidates = extractCandidates("U.K. ministers announced new sanctions today.", "");
+    const uk = candidates.find((c) => c.norm === "united kingdom");
+    expect(uk).toEqual({
+      display: "United Kingdom",
+      norm: "united kingdom",
+      typeHint: "country",
+      layer: "dictionary",
+    });
+  });
+
+  it("the new 'Great Britain' alias resolves to United Kingdom via the dictionary layer", () => {
+    const candidates = extractCandidates("Great Britain announced new sanctions today.", "");
+    const uk = candidates.find((c) => c.norm === "united kingdom");
+    expect(uk).toEqual({
+      display: "United Kingdom",
+      norm: "united kingdom",
+      typeHint: "country",
+      layer: "dictionary",
+    });
+  });
+
+  it("'AI' produces no candidate (topic-word acronym stoplist)", () => {
+    // Sentence chosen so compromise's NLP layer doesn't independently tag
+    // "AI" as an organization — the acronym stoplist only blocks the
+    // acronym-regex layer, not other layers matching the same text.
+    const candidates = extractCandidates("The report warned that AI adoption is accelerating.", "");
+    expect(candidates.find((c) => c.norm === "ai")).toBeUndefined();
+  });
 });
 
 describe("addCandidate layer priority", () => {
