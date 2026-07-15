@@ -9,7 +9,7 @@ import {
 } from "./entity-dictionaries";
 
 // Build a case-insensitive lookup: lowercased term -> { canonical name, type }
-interface LookupEntry {
+export interface LookupEntry {
   name: string;
   type: "country" | "organization" | "region";
 }
@@ -60,11 +60,12 @@ function emptyUrgency(): Record<UrgencyLevel, number> {
 }
 
 /**
- * Extract dictionary-matched entities from text.
- * Returns a Set of canonical entity names found.
+ * Extract dictionary-matched entities from text, keeping full entry info
+ * (name + type). Shared by matchDictionary below and by extract-v2.ts's
+ * dictionary layer, so the matching loop lives in exactly one place.
  */
-function matchDictionary(text: string): Set<string> {
-  const found = new Set<string>();
+function matchDictionaryEntriesInternal(text: string): LookupEntry[] {
+  const found = new Map<string, LookupEntry>();
   const lower = text.toLowerCase();
 
   for (const term of SORTED_TERMS) {
@@ -81,11 +82,31 @@ function matchDictionary(text: string): Set<string> {
 
     if (isWordBound) {
       const entry = LOOKUP_MAP.get(term)!;
-      found.add(entry.name);
+      found.set(entry.name, entry);
     }
   }
 
-  return found;
+  return Array.from(found.values());
+}
+
+/**
+ * Extract dictionary-matched entities from text.
+ * Returns a Set of canonical entity names found.
+ */
+function matchDictionary(text: string): Set<string> {
+  return new Set(matchDictionaryEntriesInternal(text).map((e) => e.name));
+}
+
+/** Dictionary matches with type info, for server-side entity resolution
+ * (extract-v2.ts) — reuses the same matching loop as matchDictionary. */
+export function matchDictionaryEntries(text: string): LookupEntry[] {
+  return matchDictionaryEntriesInternal(text);
+}
+
+/** True if `term` (case-insensitive) is a known dictionary name or alias.
+ * Lets extract-v2.ts's acronym layer skip terms the dictionary already owns. */
+export function isDictionaryTerm(term: string): boolean {
+  return LOOKUP_MAP.has(term.toLowerCase());
 }
 
 // Words that when present in a candidate phrase, disqualify it as a person name
