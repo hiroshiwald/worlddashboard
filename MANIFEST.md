@@ -81,6 +81,7 @@
 ## Invariants
 
 - **7-day item window**: Feed items older than 7 days are discarded at fetch time. No stale data enters the pipeline.
+- **Dateless item published_at**: feed items with no parseable date get `publishedEstimated: true` on the `FeedItem` plus a `now()`-stamped `published` for client display; `persistArticles` stores `published_at = NULL` for these rows in Postgres instead of the stamp.
 - **15 items per source**: Each feed is capped to prevent any single source from dominating.
 - **Deterministic urgency**: Urgency level is a pure function of source category — no mutable state, no runtime overrides.
 - **Canonical entity names**: Dictionary-based extraction resolves aliases to canonical forms (e.g., "USA" → "United States"). Case-insensitive, word-boundary matching, longest-match-first.
@@ -89,6 +90,7 @@
 - **Novelty score range**: Composite score is 0–100 across five dimensions; no single dimension can exceed its cap (spread: 30, diversity: 15, edges: 25, surprise: 20, emergence: 10).
 - **Situation clustering threshold**: Entity pairs must share ≥2 articles to form a cluster; clusters merge only at >50% article overlap.
 - **Single Neon Postgres, written only by `/api/ingest`**: server-side persistence (articles, and — as later tasks wire them up — entities, mentions, edges, candidates, signals) lives in one Neon Postgres database. `/api/ingest` (hourly GitHub Actions cron + daily Vercel cron fallback) is the only writer; `/api/articles` and all other routes are read-only. Client-side ephemera (muted signals, edge history, entity snapshots, baselines, theme) still lives in browser localStorage.
+- **Dup-group retention safety**: `articles.dup_group_id` FK is `ON DELETE SET NULL` — `sweepRetention`'s 30-day delete on a dup-group head is never blocked by newer member rows (up to 48h younger) still referencing it.
 - **Muted signal expiry**: 24-hour duration, enforced by wall-clock comparison on load.
 - **Edge history retention**: 30-day window; entries older than 30 days are pruned on save.
 - **Entity snapshot window**: 2-hour retention for emergence detection.

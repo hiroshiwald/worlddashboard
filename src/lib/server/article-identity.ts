@@ -7,7 +7,8 @@ function normalizeTitleForHash(title: string): string {
 function extractHost(link: string): string {
   try {
     return new URL(link).host;
-  } catch {
+  } catch (e) {
+    console.warn("extractHost: malformed URL", link, e);
     return link;
   }
 }

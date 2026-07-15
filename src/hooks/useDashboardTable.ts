@@ -16,6 +16,8 @@ interface UseDashboardTableReturn {
   feedsAttempted: number;
   feedsSucceeded: number;
   totalItems: number;
+  mode: "db" | "live";
+  lastIngestAt: string | null;
   refresh: () => void;
   sort: SortConfig;
   categoryFilter: string;
@@ -83,7 +85,7 @@ function sortItems(items: FeedItem[], sort: SortConfig): FeedItem[] {
 export function useDashboardTable(): UseDashboardTableReturn {
   const {
     items, loading, error, fetchedAt,
-    feedsAttempted, feedsSucceeded, totalItems, refresh,
+    feedsAttempted, feedsSucceeded, totalItems, mode, lastIngestAt, refresh,
   } = useFeed();
 
   const [sort, setSort] = useState<SortConfig>({ key: "published", direction: "desc" });
@@ -147,7 +149,7 @@ export function useDashboardTable(): UseDashboardTableReturn {
 
   return {
     items, loading, error, fetchedAt,
-    feedsAttempted, feedsSucceeded, totalItems, refresh,
+    feedsAttempted, feedsSucceeded, totalItems, mode, lastIngestAt, refresh,
     sort, categoryFilter, searchQuery, entityFilter, dark, activeTab,
     setSearchQuery, setCategoryFilter, setEntityFilter, setActiveTab,
     categories, filteredItems, sortedItems, t,

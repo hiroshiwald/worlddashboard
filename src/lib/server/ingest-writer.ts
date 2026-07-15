@@ -1,7 +1,7 @@
 import type { FeedItem } from "../types";
 import { titleSignature } from "../story-cluster";
 import { contentHash } from "./article-identity";
-import type { Sql, SqlRow } from "./db";
+import type { Sql } from "./db";
 
 const INSERT_BATCH_SIZE = 200;
 
@@ -10,18 +10,12 @@ interface ArticleRow {
   titleSignature: string;
   title: string;
   link: string;
-  publishedAt: string;
+  publishedAt: string | null;
   sourceName: string;
   sourceCategory: string;
   sourceTier: string;
   summary: string;
   imageUrl: string;
-}
-
-interface InsertedArticle {
-  id: string;
-  titleSignature: string;
-  firstSeenAt: string;
 }
 
 function toArticleRow(item: FeedItem): ArticleRow {
@@ -30,11 +24,7 @@ function toArticleRow(item: FeedItem): ArticleRow {
     titleSignature: titleSignature(item.title),
     title: item.title,
     link: item.link,
-    // TODO: feed-fetcher stamps dateless items with new Date().toISOString()
-    // at parse time (both RSS and Atom parsers), so a real published date
-    // and a fallback stamp are indistinguishable here. Store as given;
-    // proper dateless detection lands with extraction v2.
-    publishedAt: item.published,
+    publishedAt: item.publishedEstimated ? null : item.published,
     sourceName: item.sourceName,
     sourceCategory: item.sourceCategory,
     sourceTier: item.sourceTier,
@@ -43,24 +33,7 @@ function toArticleRow(item: FeedItem): ArticleRow {
   };
 }
 
-function toIsoString(value: unknown): string {
-  if (value instanceof Date) return value.toISOString();
-  if (typeof value === "string") return new Date(value).toISOString();
-  throw new Error(`ingest-writer: expected a date-like value, got ${JSON.stringify(value)}`);
-}
-
-function parseInsertedRow(row: SqlRow): InsertedArticle {
-  const { id, title_signature: signature, first_seen_at: firstSeenAt } = row;
-  if (typeof id !== "string" && typeof id !== "number") {
-    throw new Error(`persistArticles: malformed inserted row, missing id: ${JSON.stringify(row)}`);
-  }
-  if (typeof signature !== "string") {
-    throw new Error(`persistArticles: malformed inserted row, missing title_signature: ${JSON.stringify(row)}`);
-  }
-  return { id: String(id), titleSignature: signature, firstSeenAt: toIsoString(firstSeenAt) };
-}
-
-async function insertBatch(sql: Sql, items: FeedItem[]): Promise<InsertedArticle[]> {
+async function insertBatch(sql: Sql, items: FeedItem[]): Promise<number> {
   const rows = items.map(toArticleRow);
   const result = await sql`
     INSERT INTO articles (
@@ -80,27 +53,43 @@ async function insertBatch(sql: Sql, items: FeedItem[]): Promise<InsertedArticle
       ${rows.map((r) => r.imageUrl)}::text[]
     )
     ON CONFLICT (content_hash) DO NOTHING
-    RETURNING id, title_signature, first_seen_at
+    RETURNING id
   `;
-  return result.map(parseInsertedRow);
+  return result.length;
 }
 
-/** Links a newly inserted article to the earliest article sharing its
- * title_signature within a 48h window, if one exists and isn't itself. */
-async function assignDupGroup(sql: Sql, article: InsertedArticle): Promise<void> {
-  const rows = await sql`
-    SELECT id FROM articles
-    WHERE title_signature = ${article.titleSignature}
-      AND first_seen_at <= ${article.firstSeenAt}::timestamptz
-      AND first_seen_at >= ${article.firstSeenAt}::timestamptz - INTERVAL '48 hours'
-    ORDER BY first_seen_at ASC, id ASC
-    LIMIT 1
+/** Links every ungrouped article from the last 48h to the earliest actual
+ * head sharing its title_signature within the 48h window before it (ties
+ * broken by lowest id); heads keep dup_group_id NULL. Only attaches to a
+ * row that is itself a head (dup_group_id IS NULL) — otherwise recurring
+ * same-signature headlines would chain member-to-member indefinitely, and
+ * once a head ages out of the window, its most recent same-signature
+ * article becomes the new head instead of staying hidden. One set-based
+ * UPDATE, run after all insert batches; the CTE reads a pre-update
+ * snapshot, so same-run grouping of a fresh batch still works, and it
+ * self-heals rows an earlier partial ingest left ungrouped. */
+async function assignDupGroups(sql: Sql): Promise<void> {
+  await sql`
+    WITH heads AS (
+      SELECT DISTINCT ON (a.id)
+        a.id AS article_id,
+        h.id AS head_id
+      FROM articles a
+      JOIN articles h
+        ON h.title_signature = a.title_signature
+       AND h.first_seen_at <= a.first_seen_at
+       AND h.first_seen_at >= a.first_seen_at - INTERVAL '48 hours'
+       AND h.dup_group_id IS NULL
+      WHERE a.first_seen_at >= now() - INTERVAL '48 hours'
+        AND a.dup_group_id IS NULL
+      ORDER BY a.id, h.first_seen_at ASC, h.id ASC
+    )
+    UPDATE articles
+    SET dup_group_id = heads.head_id
+    FROM heads
+    WHERE articles.id = heads.article_id
+      AND heads.head_id <> heads.article_id
   `;
-  const head = rows[0];
-  if (!head) return;
-  const headId = String(head.id);
-  if (headId === article.id) return;
-  await sql`UPDATE articles SET dup_group_id = ${headId}::bigint WHERE id = ${article.id}::bigint`;
 }
 
 export async function persistArticles(
@@ -109,22 +98,15 @@ export async function persistArticles(
 ): Promise<{ inserted: number; duplicates: number }> {
   if (items.length === 0) return { inserted: 0, duplicates: 0 };
 
-  const insertedRows: InsertedArticle[] = [];
+  let inserted = 0;
   for (let offset = 0; offset < items.length; offset += INSERT_BATCH_SIZE) {
     const batch = items.slice(offset, offset + INSERT_BATCH_SIZE);
-    insertedRows.push(...(await insertBatch(sql, batch)));
+    inserted += await insertBatch(sql, batch);
   }
 
-  // Sequential, oldest-first: an earlier article in this same batch must
-  // already be linked before a later one checks for a head to attach to.
-  const oldestFirst = [...insertedRows].sort(
-    (a, b) => new Date(a.firstSeenAt).getTime() - new Date(b.firstSeenAt).getTime(),
-  );
-  for (const article of oldestFirst) {
-    await assignDupGroup(sql, article);
-  }
+  await assignDupGroups(sql);
 
-  return { inserted: insertedRows.length, duplicates: items.length - insertedRows.length };
+  return { inserted, duplicates: items.length - inserted };
 }
 
 export async function sweepRetention(sql: Sql): Promise<void> {

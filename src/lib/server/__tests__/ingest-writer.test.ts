@@ -40,12 +40,8 @@ describe("persistArticles", () => {
     const items = [makeItem({}), makeItem({}), makeItem({})];
     const { sql } = makeMockSql((call) => {
       if (call.query.includes("INSERT INTO articles")) {
-        return [
-          { id: "10", title_signature: "sig-a", first_seen_at: "2026-07-10T00:00:00.000Z" },
-          { id: "11", title_signature: "sig-b", first_seen_at: "2026-07-10T01:00:00.000Z" },
-        ];
+        return [{ id: "10" }, { id: "11" }];
       }
-      if (call.query.includes("SELECT id FROM articles")) return [];
       return [];
     });
 
@@ -54,52 +50,43 @@ describe("persistArticles", () => {
     expect(result.duplicates).toBe(1);
   });
 
-  it("assigns dup_group_id when an earlier head exists within the 48h window", async () => {
-    const items = [makeItem({}), makeItem({})];
+  it("issues exactly one set-based UPDATE for dup-group assignment, not per-row queries", async () => {
+    const items = [makeItem({}), makeItem({}), makeItem({})];
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("INSERT INTO articles")) {
-        return [
-          { id: "10", title_signature: "sig-a", first_seen_at: "2026-07-10T00:00:00.000Z" },
-          { id: "11", title_signature: "sig-b", first_seen_at: "2026-07-10T01:00:00.000Z" },
-        ];
-      }
-      if (call.query.includes("SELECT id FROM articles")) {
-        const signature = call.values[0];
-        // sig-a already has an earlier head (id 5); sig-b's earliest match is itself.
-        if (signature === "sig-a") return [{ id: "5" }];
-        return [{ id: "11" }];
+        return [{ id: "10" }, { id: "11" }];
       }
       return [];
     });
 
     await persistArticles(sql, items);
 
-    const updates = calls.filter((c) => c.query.includes("UPDATE articles SET dup_group_id"));
-    expect(updates).toHaveLength(1);
-    expect(updates[0].values).toEqual(["5", "10"]);
+    // One INSERT batch + one dup-group UPDATE — no per-article round trips.
+    expect(calls).toHaveLength(2);
+    const updateCalls = calls.filter((c) => c.query.includes("UPDATE articles"));
+    expect(updateCalls).toHaveLength(1);
+    expect(updateCalls[0].values).toEqual([]);
   });
 
-  it("does not assign dup_group_id when no earlier head is found", async () => {
-    const items = [makeItem({})];
-    const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("INSERT INTO articles")) {
-        return [{ id: "20", title_signature: "sig-c", first_seen_at: "2026-07-10T00:00:00.000Z" }];
-      }
-      if (call.query.includes("SELECT id FROM articles")) return [];
-      return [];
-    });
+  it("dup-group UPDATE selects the earliest same-signature head within 48h, tie-broken by id, and excludes heads", async () => {
+    const { sql, calls } = makeMockSql(() => []);
+    await persistArticles(sql, [makeItem({})]);
 
-    await persistArticles(sql, items);
-
-    const updates = calls.filter((c) => c.query.includes("UPDATE articles SET dup_group_id"));
-    expect(updates).toHaveLength(0);
+    const updateCall = calls.find((c) => c.query.includes("UPDATE articles"));
+    expect(updateCall).toBeDefined();
+    const query = updateCall!.query;
+    expect(query).toContain("h.title_signature = a.title_signature");
+    expect(query).toContain("h.first_seen_at <= a.first_seen_at");
+    expect(query).toContain("INTERVAL '48 hours'");
+    expect(query).toContain("h.dup_group_id IS NULL");
+    expect(query).toContain("a.dup_group_id IS NULL");
+    expect(query).toContain("DISTINCT ON (a.id)");
+    expect(query).toContain("ORDER BY a.id, h.first_seen_at ASC, h.id ASC");
+    expect(query).toContain("heads.head_id <> heads.article_id");
   });
 
-  it("stores published_at exactly as given on the item, real or stamped", async () => {
-    const items = [
-      makeItem({ published: "2020-01-01T00:00:00.000Z" }),
-      makeItem({ published: "2026-07-15T12:34:56.000Z" }),
-    ];
+  it("stores published_at as NULL for a dateless item flagged publishedEstimated", async () => {
+    const items = [makeItem({ published: "2026-07-15T00:00:00.000Z", publishedEstimated: true })];
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("INSERT INTO articles")) return [];
       return [];
@@ -111,7 +98,22 @@ describe("persistArticles", () => {
     expect(insertCall).toBeDefined();
     // 5th interpolation is the published_at array, per column order in the query.
     const publishedAtArray = insertCall!.values[4];
-    expect(publishedAtArray).toEqual(items.map((i) => i.published));
+    expect(publishedAtArray).toEqual([null]);
+  });
+
+  it("stores published_at as given for a dated item without the flag", async () => {
+    const items = [makeItem({ published: "2026-07-15T12:34:56.000Z" })];
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("INSERT INTO articles")) return [];
+      return [];
+    });
+
+    await persistArticles(sql, items);
+
+    const insertCall = calls.find((c) => c.query.includes("INSERT INTO articles"));
+    expect(insertCall).toBeDefined();
+    const publishedAtArray = insertCall!.values[4];
+    expect(publishedAtArray).toEqual(["2026-07-15T12:34:56.000Z"]);
   });
 
   it("returns zero inserted/duplicates for an empty item list without querying", async () => {

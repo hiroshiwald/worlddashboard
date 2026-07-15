@@ -3,6 +3,7 @@ export interface FeedItem {
   title: string;
   link: string;
   published: string;
+  publishedEstimated?: true;
   summary: string;
   sourceName: string;
   sourceCategory: string;

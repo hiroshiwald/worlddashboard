@@ -6,7 +6,8 @@ import { EntityFilterBanner, FeedTable, FeedCardList, TabContent } from "./dashb
 
 export default function DashboardTable() {
   const {
-    items, loading, error, fetchedAt, feedsAttempted, feedsSucceeded, totalItems, refresh,
+    items, loading, error, fetchedAt, feedsAttempted, feedsSucceeded, totalItems,
+    mode, lastIngestAt, refresh,
     categoryFilter, searchQuery, entityFilter, dark, activeTab,
     setSearchQuery, setCategoryFilter, setEntityFilter, setActiveTab,
     categories, filteredItems, sortedItems, t,
@@ -24,6 +25,7 @@ export default function DashboardTable() {
         totalItems={totalItems} filteredItemCount={filteredItems.length}
         fetchedAt={fetchedAt} loading={loading} refresh={refresh}
         setEntityFilter={setEntityFilter} t={t}
+        mode={mode} lastIngestAt={lastIngestAt}
       />
 
       <div className={`flex-1 overflow-auto min-h-0 ${dark ? "dark-scrollbar" : ""}`}>
