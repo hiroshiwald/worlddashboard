@@ -1,0 +1,15 @@
+name: Hourly ingest
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger ingest endpoint
+        run: |
+          curl -fsS -X POST -H "x-ingest-key: ${{ secrets.INGEST_SECRET }}" \
+            https://worlddashboard.vercel.app/api/ingest
