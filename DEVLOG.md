@@ -1,5 +1,152 @@
 # World Dashboard Development Log
 
+## 2026-07-15 — Server-side signal engine + Brief landing tab
+
+Signals become persistent database rows computed from real stored history at
+the end of every hourly ingest, with a lifecycle the user controls
+(new/seen/dismissed/promoted, plus reopen); the landing page becomes a
+bounded daily brief.
+
+- `src/lib/server/settings.ts` (new): `DEFAULTS` (`surprise_k: 3,
+  dismiss_cooldown_hours: 72, brief_max_blocks: 10`) and `getSettings(sql)`
+  overlaying `settings` table rows onto them — type-validated per key,
+  `console.warn` + default fallback on mismatch.
+- `src/lib/server/detectors.ts` (new): five pure scoring functions
+  (`scoreSurge`, `scoreFirstSeenNovelty`, `scoreNovelEdge`,
+  `scoreCrossCategory`, `scoreSentimentDeterioration`) plus
+  `runDetectors(sql, settings)`. Rate surprise: `z = (observed24h -
+  baselineDaily) / sqrt(baselineDaily + 1)`, baseline over the trailing 14
+  days excluding the last 24h, skipped below 3 days of baseline history.
+  First-seen novelty and novel-edge both apply a 72h bootstrap guard against
+  the global `MIN(first_seen_at)` (entities / entity_edges respectively) so
+  the initial dictionary-import cohort doesn't flood the queue. Sentiment
+  deterioration is skipped entirely if the whole 24h window's sentiment_sum
+  is zero across every entity (older rows may not have it populated). Every
+  panel query is batched (few statements, shared across detectors where the
+  underlying data overlaps — e.g. one `articles24h` query feeds both surge
+  evidence and cross-category), scoped to `status='tracked'` entities and
+  cluster-head (`dup_group_id IS NULL`) articles only. The old client
+  detector's **escalation** type is deliberately not ported — cross_category
+  and surge already cover the same "compound situation" signal it was
+  approximating, and it didn't map cleanly onto stored history the way the
+  other five did.
+- `src/lib/server/signal-store.ts` (new): `persistSignals` suppresses a
+  candidate whose dedupe_key was dismissed within
+  `settings.dismiss_cooldown_hours`, otherwise upserts against the active
+  partial unique index (`ON CONFLICT (dedupe_key) WHERE state IN
+  ('new','seen','promoted')`) — state is never touched by re-detection.
+  Returns `{created, refreshed, suppressed}`. `transitionSignal` enforces
+  the lifecycle (any active state → seen/dismissed/promoted; dismissed → new
+  via `reopen`), returns false on an unknown id or illegal transition.
+  `loadSignals` is the one query shared by `/api/signals` and `/api/brief`:
+  severity-first ordering, entity names resolved via a LATERAL join (no
+  per-signal fetch), plus a second batched query resolving
+  `evidence.articleIds` to title/link/source for the UI's evidence
+  expanders — a field added beyond the detector spec's literal "articleIds"
+  contract, needed once the Brief/Signals UI had to render actual links.
+- `src/app/api/ingest/route.ts`: `detect-signals` wired as the final stage
+  (`getSettings` → `runDetectors` → `persistSignals`), following the
+  existing per-stage try/catch-and-attribute pattern — a detector failure
+  is reported by stage name without discarding `entities`/`inserted`/etc.
+  from the stages that already succeeded.
+- `src/app/api/signals/route.ts` (new): `GET ?state=csv` (default
+  `new,seen,promoted`), `POST {id, action}` → `transitionSignal` (404 if the
+  id doesn't exist, 409 on an illegal transition).
+- `src/lib/server/brief.ts` + `src/app/api/brief/route.ts` (new):
+  `computeStoryScore(clusterSize, ageHours) = ln(1+clusterSize) *
+  e^(-ageHours/24)`, kept as a standalone pure function (hand-checked in
+  its test) even though the query that feeds it isn't ordered in SQL — the
+  ranking, sort, and cap-at-15 all happen in JS. `newEntities` reuses the
+  same 72h bootstrap guard as the first-seen detector, capped at 5.
+  `s-maxage=300, stale-while-revalidate=600`; 503 when `DATABASE_URL` is
+  unset (both routes).
+- `src/components/BriefTab.tsx` + `src/components/brief/*` (new): first tab,
+  new default `activeTab` (was `"feeds"`) in `useDashboardTable.ts` — signal
+  cards grouped by severity, a new-entities chip row, a ranked top-stories
+  list. Distinct empty states for DB-not-configured, no-signals-yet, and
+  fetch error.
+- `src/components/SignalsTab.tsx` + `src/hooks/useSignalsTab.ts`
+  (rewritten): the tab is now a signal **manager** — fetches every signal
+  state and filters client-side via a state bar, with `reopen` available
+  only for dismissed signals. `WatchlistSection` (top client entities with
+  sparklines) is unchanged; it never depended on the deleted detector.
+  `ManagedSignalCard` (in `src/components/signals/`) is shared between
+  BriefTab and SignalsTab rather than duplicated — same card, different
+  allowed-actions list.
+- **Deleted**: `src/lib/signal-detector.ts` + its test (client-side anomaly
+  detection, superseded by the server-side engine); the now-dead
+  `SignalCard.tsx`/`SignalCardGrid.tsx`/`SignalsSummaryStrip.tsx` (only fed
+  the old client `Signal` data model, no other importers).
+- **Muting → dismiss migration**: `src/lib/signal-storage.ts` had only its
+  three muting exports removed (`loadMutedEntities`, `saveMutedEntities`,
+  `MUTE_DURATION`) plus the `wd-muted-entities` key — client-side muting is
+  superseded by server-side dismiss, which now persists across devices and
+  survives a page reload instead of expiring after 24h. Edge-history,
+  baselines, and entity-snapshot code in that file are untouched by
+  explicit task scope; `loadPreviousEntityNames`/`saveEntitySnapshot`/
+  `SNAPSHOT_INTERVAL` are consequently now unused (they only ever fed the
+  deleted client detector's novel-emergence check) — left in place rather
+  than deleted, since the task explicitly scoped this file to "muting
+  exports only" and didn't authorize touching the rest. Flagging as a
+  known follow-up rather than silently cleaning it up outside scope.
+  `useSignalsTab.ts` does a one-time `localStorage.removeItem('wd-muted-entities')`.
+- `src/lib/entity-dictionaries.ts`: added "Great Britain" to the United
+  Kingdom entry (UK, U.K., Britain were already present).
+  `src/lib/server/extract-v2.ts`: acronym stoplist gained AI, ML, EV, IPO,
+  CPI, GPS, VPN, PDF, URL, APP (GDP/FAQ/CEO-class role words were already
+  present); reordered into a single alphabetically sorted set per the
+  existing convention.
+- **Known limitation** (consistent with every other mutation route in this
+  single-user hobby app — no login exists anywhere to gate it behind):
+  `POST /api/signals` is unauthenticated, same as `POST /api/candidates`.
+- **Deviation 1**: bare `"UK"` never resolves via the dictionary layer —
+  `entity-extractor.ts`'s `matchDictionaryEntriesInternal` has a pre-existing
+  `term.length < 3` floor (out of this task's file scope) that silently
+  drops every 2-character dictionary alias (also affects `"US"`). The
+  extract-v2 test for UK resolution uses `"U.K."` (4 chars) instead, plus a
+  dedicated test for the new `"Great Britain"` alias; noted here rather than
+  fixed since `entity-extractor.ts` wasn't an authorized file for this task.
+- **Deviation 2**: the detector spec's evidence contract is "numeric
+  decomposition + articleIds" only (bare numbers). The Brief/Signals UI's
+  evidence expanders need actual article titles/links to render, so
+  `loadSignals` gained a second batched query resolving those ids to
+  `{id, title, link, sourceName}` refs, attached as a separate `articles`
+  field alongside (not replacing) the original `evidence` object — keeps
+  the detector's literal contract intact while giving the UI what it needs.
+- Verified in a real browser: local Postgres 16 (already running from the
+  prior session's setup) seeded with entities/signals/articles, migrations
+  applied directly via `psql` (the production Neon HTTP driver can't reach
+  a plain Postgres server, so `scripts/migrate.mjs` doesn't work against it
+  — same limitation noted in earlier entries). Since that same driver
+  limitation means the Next.js dev server can't actually read the seeded
+  data either, verification used Playwright route interception
+  (`page.route`) to mock `/api/brief` and `/api/signals` with realistic
+  payloads shaped exactly like the real API responses, then drove the real
+  rendering code end-to-end: Brief tab (default, severity-grouped signal
+  cards, new-entities chips, top stories, both themes), Signals tab
+  (state-filter bar with live counts, `Reopen` appearing only on the
+  dismissed card, evidence expander toggling). Screenshots taken, no
+  console errors; throwaway dev database dropped and dev server stopped
+  afterward — no repo or config changes left behind.
+- Tests: 77 new (6 settings, 22 detectors, 15 signal-store, 6 brief, 10
+  `/api/signals` route, 2 `/api/brief` route, 12 real-Postgres integration
+  tests for the full engine — surge, first-seen novelty (plus its own
+  dedicated bootstrap-guard-suppression case), novel edge, cross-category,
+  persistence/refresh/cooldown/transitions/evidence-article resolution, and
+  a `getBrief` source-count dedup edge case — 3 extract-v2 U.K./Great
+  Britain/AI cases, 1 ingest-route detect-signals-failure case) minus 8
+  removed with `signal-detector.test.ts` — net +69. 251 → 320 passing (241
+  unit + 10 integration baseline → 298 unit + 22 integration; ran for real
+  against a local Postgres 16, not just skipped). Initially only the surge
+  path had real-Postgres coverage; adding first-seen/novel-edge/
+  cross-category integration tests caught a real test-authoring bug (an
+  entity can't simultaneously be within a 48h "recent" window and >72h from
+  a same-window global-min — geometrically impossible since 48h < 72h) but
+  the detector SQL itself — including the `UNNEST`-based novel-edge
+  evidence join and the `cardinality`/`array_agg` source-dedup expression in
+  `brief.ts` — was correct on first real execution. `tsc --noEmit` and
+  `npm run build` both clean.
+
 ## 2026-07-15 — CI workflow, real-Postgres integration tests, docs catch-up
 
 Tests/CI/docs only — no production source, migration, or config touched.
