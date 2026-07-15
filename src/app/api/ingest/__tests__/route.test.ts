@@ -5,6 +5,9 @@ const fetchAllFeeds = vi.fn();
 const persistArticles = vi.fn();
 const sweepRetention = vi.fn();
 const processNewArticles = vi.fn();
+const getSettings = vi.fn();
+const runDetectors = vi.fn();
+const persistSignals = vi.fn();
 
 vi.mock("@/lib/feed-fetcher", () => ({
   fetchAllFeeds: (...args: unknown[]) => fetchAllFeeds(...args),
@@ -18,6 +21,15 @@ vi.mock("@/lib/server/ingest-writer", () => ({
 }));
 vi.mock("@/lib/server/entity-ingest", () => ({
   processNewArticles: (...args: unknown[]) => processNewArticles(...args),
+}));
+vi.mock("@/lib/server/settings", () => ({
+  getSettings: (...args: unknown[]) => getSettings(...args),
+}));
+vi.mock("@/lib/server/detectors", () => ({
+  runDetectors: (...args: unknown[]) => runDetectors(...args),
+}));
+vi.mock("@/lib/server/signal-store", () => ({
+  persistSignals: (...args: unknown[]) => persistSignals(...args),
 }));
 
 const { POST } = await import("../route");
@@ -36,6 +48,9 @@ describe("POST /api/ingest stage attribution", () => {
     persistArticles.mockReset();
     sweepRetention.mockReset();
     processNewArticles.mockReset();
+    getSettings.mockReset();
+    runDetectors.mockReset();
+    persistSignals.mockReset();
   });
 
   it("returns all counts and 200 when every stage succeeds", async () => {
@@ -43,6 +58,9 @@ describe("POST /api/ingest stage attribution", () => {
     persistArticles.mockResolvedValue({ inserted: 2, duplicates: 1 });
     sweepRetention.mockResolvedValue(undefined);
     processNewArticles.mockResolvedValue({ articlesProcessed: 1, mentionsWritten: 1, newEntities: 0, candidatesTouched: 0 });
+    getSettings.mockResolvedValue({ surprise_k: 3, dismiss_cooldown_hours: 72, brief_max_blocks: 10 });
+    runDetectors.mockResolvedValue([]);
+    persistSignals.mockResolvedValue({ created: 0, refreshed: 0, suppressed: 0 });
 
     const res = await POST(authedRequest());
     const body = await res.json();
@@ -50,6 +68,24 @@ describe("POST /api/ingest stage attribution", () => {
     expect(res.status).toBe(200);
     expect(body).toMatchObject({ feedsAttempted: 5, feedsSucceeded: 5, inserted: 2, duplicates: 1 });
     expect(body.entities).toEqual({ articlesProcessed: 1, mentionsWritten: 1, newEntities: 0, candidatesTouched: 0 });
+    expect(body.signals).toEqual({ created: 0, refreshed: 0, suppressed: 0 });
+  });
+
+  it("attributes a detect-signals failure while still reporting entities and earlier counts", async () => {
+    fetchAllFeeds.mockResolvedValue({ items: [], feedsAttempted: 5, feedsSucceeded: 5 });
+    persistArticles.mockResolvedValue({ inserted: 2, duplicates: 1 });
+    sweepRetention.mockResolvedValue(undefined);
+    processNewArticles.mockResolvedValue({ articlesProcessed: 1, mentionsWritten: 1, newEntities: 0, candidatesTouched: 0 });
+    getSettings.mockResolvedValue({ surprise_k: 3, dismiss_cooldown_hours: 72, brief_max_blocks: 10 });
+    runDetectors.mockRejectedValue(new Error("detector boom"));
+
+    const res = await POST(authedRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(body.stage).toBe("detect-signals");
+    expect(body.entities).toEqual({ articlesProcessed: 1, mentionsWritten: 1, newEntities: 0, candidatesTouched: 0 });
+    expect(persistSignals).not.toHaveBeenCalled();
   });
 
   it("attributes a fetch-feeds failure with no counts computed yet", async () => {
