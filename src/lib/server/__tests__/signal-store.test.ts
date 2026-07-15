@@ -168,8 +168,8 @@ describe("loadSignals", () => {
     const { sql, calls } = makeMockSql(() => [
       {
         id: "1", dedupe_key: "cross_category:1", type: "cross_category", severity: "advisory", state: "new",
-        title: "Cross-category: Testland", entity_ids: [1], entity_names: ["Testland"],
-        confidence: 0.6, evidence: { categoryCount: 3 },
+        title: "Category spread: Testland", entity_ids: [1], entity_names: ["Testland"],
+        confidence: 0.6, evidence: { categoryCount24h: 3 },
         first_detected_at: "2026-07-15T00:00:00Z", last_evidence_at: "2026-07-15T01:00:00Z", state_changed_at: null,
       },
     ]);

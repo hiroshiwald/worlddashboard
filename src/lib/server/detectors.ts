@@ -23,9 +23,12 @@ const MIN_FIRST_SEEN_SOURCES = 2;
 const CRITICAL_FIRST_SEEN_SOURCES = 8;
 const MIN_NOVEL_EDGE_ARTICLES = 2;
 const CRITICAL_NOVEL_EDGE_ARTICLES = 6;
-const MIN_CROSS_CATEGORY_COUNT = 3;
+const MIN_CATEGORY_COUNT_24H = 4;
+const MIN_CATEGORY_EXCESS = 2;
 const MIN_SENTIMENT_MENTIONS = 5;
-const SENTIMENT_THRESHOLD = -0.3;
+const MIN_SENTIMENT_BASELINE_MENTIONS = 10;
+const SENTIMENT_DELTA_THRESHOLD = -0.3;
+const SENTIMENT_CRITICAL_DELTA = -0.5;
 
 function toDate(value: unknown): Date {
   return value instanceof Date ? value : new Date(value as string);
@@ -70,21 +73,45 @@ export function scoreNovelEdge(articleCount: number): { severity: SignalSeverity
   return { severity, confidence };
 }
 
-export function scoreCrossCategory(categoryCount: number): { severity: SignalSeverity; confidence: number } | null {
-  if (categoryCount < MIN_CROSS_CATEGORY_COUNT) return null;
-  const severity: SignalSeverity = categoryCount >= 5 ? "critical" : categoryCount >= 4 ? "warning" : "advisory";
-  const confidence = Math.min(1, categoryCount / 5);
-  return { severity, confidence };
+/** Fires on a spread from the entity's OWN baseline, not an absolute category
+ * count — a prominent entity that always spans many categories must not
+ * perpetually trip this. Skips (returns null) for entities with <3 active
+ * baseline days (cold start / not enough history to know what's normal). */
+export function scoreCategorySpread(
+  categoryCount24h: number,
+  baselineAvgCategories: number,
+  baselineActiveDays: number,
+): { excess: number; severity: SignalSeverity; confidence: number } | null {
+  if (baselineActiveDays < MIN_BASELINE_DAYS) return null;
+  if (categoryCount24h < MIN_CATEGORY_COUNT_24H) return null;
+  const excess = categoryCount24h - baselineAvgCategories;
+  if (excess < MIN_CATEGORY_EXCESS) return null;
+  const severity: SignalSeverity = excess >= 4 ? "critical" : excess >= 3 ? "warning" : "advisory";
+  const confidence = Math.min(1, excess / 4);
+  return { excess, severity, confidence };
 }
 
-export function scoreSentimentDeterioration(
-  mentions: number,
-  avgSentiment: number,
-): { severity: SignalSeverity; confidence: number } | null {
-  if (mentions < MIN_SENTIMENT_MENTIONS || avgSentiment > SENTIMENT_THRESHOLD) return null;
-  const severity: SignalSeverity = avgSentiment <= -0.6 && mentions >= 10 ? "critical" : "warning";
-  const confidence = Math.min(1, (Math.abs(avgSentiment) * mentions) / 6);
-  return { severity, confidence };
+/** Fires on a DROP from the entity's own baseline sentiment, not an absolute
+ * negative level — an entity whose coverage is always negative (e.g. an
+ * active war zone) must not perpetually trip this; only a genuine
+ * deterioration from its own norm does. Skips (returns null) for entities
+ * with <3 baseline days or <10 baseline mentions (not enough history to
+ * know what's normal). */
+export function scoreSentimentDelta(
+  mentions24h: number,
+  avg24h: number,
+  baselineAvg: number,
+  baselineDays: number,
+  baselineMentions: number,
+): { delta: number; severity: SignalSeverity; confidence: number } | null {
+  if (baselineDays < MIN_BASELINE_DAYS) return null;
+  if (baselineMentions < MIN_SENTIMENT_BASELINE_MENTIONS) return null;
+  if (mentions24h < MIN_SENTIMENT_MENTIONS) return null;
+  const delta = avg24h - baselineAvg;
+  if (delta > SENTIMENT_DELTA_THRESHOLD) return null;
+  const severity: SignalSeverity = delta <= SENTIMENT_CRITICAL_DELTA && mentions24h >= 10 ? "critical" : "warning";
+  const confidence = Math.min(1, Math.abs(delta) * 2);
+  return { delta, severity, confidence };
 }
 
 /** True when `candidateFirstSeenAt` falls within BOOTSTRAP_GUARD_HOURS of the
@@ -130,6 +157,7 @@ interface HourlyAggRow {
   observed24h: number;
   sentimentSum24h: number;
   baselineSum: number;
+  baselineSentimentSum: number;
   baselineDays: number;
 }
 
@@ -141,6 +169,9 @@ async function loadHourlyAgg(sql: Sql): Promise<HourlyAggRow[]> {
       COALESCE(SUM(emh.mentions) FILTER (
         WHERE emh.bucket < now() - INTERVAL '24 hours' AND emh.bucket >= now() - INTERVAL '15 days'
       ), 0) AS baseline_sum,
+      COALESCE(SUM(emh.sentiment_sum) FILTER (
+        WHERE emh.bucket < now() - INTERVAL '24 hours' AND emh.bucket >= now() - INTERVAL '15 days'
+      ), 0) AS baseline_sentiment_sum,
       COUNT(DISTINCT date_trunc('day', emh.bucket)) FILTER (
         WHERE emh.bucket < now() - INTERVAL '24 hours' AND emh.bucket >= now() - INTERVAL '15 days'
       ) AS baseline_days
@@ -154,6 +185,7 @@ async function loadHourlyAgg(sql: Sql): Promise<HourlyAggRow[]> {
     observed24h: Number(row.observed_24h),
     sentimentSum24h: Number(row.sentiment_sum_24h),
     baselineSum: Number(row.baseline_sum),
+    baselineSentimentSum: Number(row.baseline_sentiment_sum),
     baselineDays: Number(row.baseline_days),
   }));
 }
@@ -188,6 +220,40 @@ function groupArticlesByEntity(rows: ArticleRow[]): Map<number, ArticleRow[]> {
     else map.set(row.entityId, [row]);
   }
   return map;
+}
+
+interface CategoryBaselineRow {
+  entityId: number;
+  baselineActiveDays: number;
+  baselineAvgCategories: number;
+}
+
+/** Per entity, the average number of distinct source categories seen on an
+ * ACTIVE day (a day with >=1 mention) over the trailing 14 days excluding
+ * the last 24h — the "usually spans ~N categories" an entity's 24h count is
+ * compared against. */
+async function loadCategoryBaseline(sql: Sql): Promise<CategoryBaselineRow[]> {
+  const rows = await sql`
+    SELECT entity_id, COUNT(*) AS active_days, AVG(day_categories) AS avg_categories
+    FROM (
+      SELECT ae.entity_id AS entity_id,
+        date_trunc('day', COALESCE(a.published_at, a.first_seen_at)) AS day,
+        COUNT(DISTINCT a.source_category) AS day_categories
+      FROM article_entities ae
+      JOIN articles a ON a.id = ae.article_id
+      JOIN entities e ON e.id = ae.entity_id
+      WHERE e.status = 'tracked' AND a.dup_group_id IS NULL
+        AND COALESCE(a.published_at, a.first_seen_at) < now() - INTERVAL '24 hours'
+        AND COALESCE(a.published_at, a.first_seen_at) >= now() - INTERVAL '15 days'
+      GROUP BY ae.entity_id, day
+    ) daily
+    GROUP BY entity_id
+  `;
+  return rows.map((row) => ({
+    entityId: Number(row.entity_id),
+    baselineActiveDays: Number(row.active_days),
+    baselineAvgCategories: Number(row.avg_categories),
+  }));
 }
 
 // ---- surge + sentiment detectors (share the hourly-agg panel) ----
@@ -228,33 +294,42 @@ function buildSentimentSignal(
   articleIds: number[],
 ): CandidateSignal | null {
   if (agg.observed24h === 0) return null;
-  const avgSentiment = agg.sentimentSum24h / agg.observed24h;
-  const scored = scoreSentimentDeterioration(agg.observed24h, avgSentiment);
+  const avg24h = agg.sentimentSum24h / agg.observed24h;
+  const baselineAvg = agg.baselineSum > 0 ? agg.baselineSentimentSum / agg.baselineSum : 0;
+  const scored = scoreSentimentDelta(agg.observed24h, avg24h, baselineAvg, agg.baselineDays, agg.baselineSum);
   if (!scored) return null;
   return {
     dedupeKey: `sentiment:${entityId}`,
     type: "sentiment",
     severity: scored.severity,
     confidence: scored.confidence,
-    title: `Negative coverage: ${name}`,
+    title: `Tone shift: ${name}`,
     entityIds: [entityId],
-    evidence: { mentions: agg.observed24h, avgSentiment, articleIds: capArticleIds(articleIds) },
+    evidence: {
+      avg24h,
+      baselineAvg,
+      delta: scored.delta,
+      mentions24h: agg.observed24h,
+      articleIds: capArticleIds(articleIds),
+    },
   };
 }
 
 function buildSurgeAndSentiment(
   aggRows: HourlyAggRow[],
-  articleRows: ArticleRow[],
+  articlesByEntity: Map<number, ArticleRow[]>,
   settings: Settings,
   entityNames: Map<number, string>,
   effectiveBaselineDays: number,
   daysSinceEpoch: number,
 ): { surge: CandidateSignal[]; sentiment: CandidateSignal[] } {
-  const articlesByEntity = groupArticlesByEntity(articleRows);
-
-  // Sentiment isn't populated in older rows — if the whole 24h window's
-  // sentiment_sum is zero across every entity, skip the detector entirely
-  // rather than firing false "neutral" deteriorations.
+  // If every tracked entity's 24h sentiment_sum is exactly zero, that's not
+  // a panel of genuinely neutral coverage — it's the shape of a sentiment
+  // pipeline outage. Under the deviation-based scorer, an outage like that
+  // would read as a sharp negative delta for every entity with a positive
+  // baseline (delta = 0 - baselineAvg), firing a signal storm driven by a
+  // data gap rather than any real tone shift, so the whole sentiment pass is
+  // skipped for this run instead.
   const anySentimentSignal = aggRows.some((row) => row.sentimentSum24h !== 0);
 
   const surge: CandidateSignal[] = [];
@@ -277,22 +352,35 @@ function buildSurgeAndSentiment(
 
 // ---- cross-category detector (shares the articles24h panel) ----
 
-function detectCrossCategory(articleRows: ArticleRow[], entityNames: Map<number, string>): CandidateSignal[] {
+function detectCrossCategory(
+  articlesByEntity: Map<number, ArticleRow[]>,
+  baselineRows: CategoryBaselineRow[],
+  entityNames: Map<number, string>,
+): CandidateSignal[] {
+  const baselineByEntity = new Map(baselineRows.map((row) => [row.entityId, row]));
   const signals: CandidateSignal[] = [];
-  for (const [entityId, rows] of groupArticlesByEntity(articleRows)) {
+  for (const [entityId, rows] of articlesByEntity) {
     const name = entityNames.get(entityId);
     if (!name) continue;
-    const categories = new Set(rows.map((r) => r.sourceCategory));
-    const scored = scoreCrossCategory(categories.size);
+    const baseline = baselineByEntity.get(entityId);
+    if (!baseline) continue;
+
+    const categoryCount24h = new Set(rows.map((r) => r.sourceCategory)).size;
+    const scored = scoreCategorySpread(categoryCount24h, baseline.baselineAvgCategories, baseline.baselineActiveDays);
     if (!scored) continue;
     signals.push({
       dedupeKey: `cross_category:${entityId}`,
       type: "cross_category",
       severity: scored.severity,
       confidence: scored.confidence,
-      title: `Cross-category: ${name} (${categories.size} categories)`,
+      title: `Category spread: ${name} (${categoryCount24h} categories, usually ~${baseline.baselineAvgCategories.toFixed(1)})`,
       entityIds: [entityId],
-      evidence: { categoryCount: categories.size, articleIds: capArticleIds(rows.map((r) => r.articleId)) },
+      evidence: {
+        categoryCount24h,
+        baselineAvgCategories: baseline.baselineAvgCategories,
+        excess: scored.excess,
+        articleIds: capArticleIds(rows.map((r) => r.articleId)),
+      },
     });
   }
   return signals;
@@ -484,46 +572,48 @@ async function loadTrackedEntityNames(sql: Sql): Promise<Map<number, string>> {
   return new Map(rows.map((row) => [Number(row.id), String(row.canonical_name)]));
 }
 
-// Surge, first-seen novelty, and novel-edge detection all depend on the
-// system having a real operating history — during the first warmup_days
-// after launch, a feed pre-load smears publish-dated articles across the
-// prior week, faking exactly that history. cross_category and sentiment
-// are pure 24h-window detectors with no history dependence, so they keep
-// running through warm-up.
+// Every detector depends on the system having a real operating history: not
+// just surge/first-seen/novel-edge, but also cross_category and sentiment,
+// whose baselines need 14 days of an entity's own prior behavior to compare
+// against. During the first warmup_days after launch, a feed pre-load smears
+// publish-dated articles across the prior week, faking exactly that history —
+// so ALL detectors stay silent until warm-up clears, not a subset.
 export async function runDetectors(sql: Sql, settings: Settings): Promise<CandidateSignal[]> {
-  const [epoch, entityNames, aggRows, articleRows] = await Promise.all([
-    getSystemEpoch(sql),
+  const epoch = await getSystemEpoch(sql);
+  const now = new Date();
+  const warmup = computeWarmupState(epoch, settings.warmup_days, now);
+  if (warmup.active) {
+    console.warn(`runDetectors: warm-up active (${warmup.daysRemaining.toFixed(1)}d remaining) — skipping all detectors`);
+    return [];
+  }
+  // computeWarmupState only returns active:false when epoch is non-null (it
+  // returns active:true unconditionally for a null epoch) — so warmup.active
+  // being false here guarantees epoch is set. Asserted explicitly rather than
+  // silently defaulting, so a future change to that contract fails loudly
+  // here instead of quietly feeding a fabricated daysSinceEpoch=0 downstream.
+  if (!epoch) throw new Error("runDetectors: epoch is null but warm-up is inactive — invariant violation");
+
+  const [entityNames, aggRows, articleRows, categoryBaseline, firstSeen, novelEdge] = await Promise.all([
     loadTrackedEntityNames(sql),
     loadHourlyAgg(sql),
     loadArticles24h(sql),
+    loadCategoryBaseline(sql),
+    detectFirstSeenNovelty(sql),
+    detectNovelEdges(sql),
   ]);
 
-  const now = new Date();
-  const warmup = computeWarmupState(epoch, settings.warmup_days, now);
-
-  let firstSeen: CandidateSignal[] = [];
-  let novelEdge: CandidateSignal[] = [];
-  if (warmup.active) {
-    console.warn(
-      `runDetectors: warm-up active (${warmup.daysRemaining.toFixed(1)}d remaining) — ` +
-        "skipping surge, first_seen, novel_edge",
-    );
-  } else {
-    [firstSeen, novelEdge] = await Promise.all([detectFirstSeenNovelty(sql), detectNovelEdges(sql)]);
-  }
-
-  const daysSinceEpoch = epoch ? computeDaysSinceEpoch(now, epoch) : 0;
+  const articlesByEntity = groupArticlesByEntity(articleRows);
+  const daysSinceEpoch = computeDaysSinceEpoch(now, epoch);
   const effectiveBaselineDays = computeEffectiveBaselineDays(daysSinceEpoch);
   const { surge, sentiment } = buildSurgeAndSentiment(
     aggRows,
-    articleRows,
+    articlesByEntity,
     settings,
     entityNames,
     effectiveBaselineDays,
     daysSinceEpoch,
   );
-  const activeSurge: CandidateSignal[] = warmup.active ? [] : surge;
-  const crossCategory = detectCrossCategory(articleRows, entityNames);
+  const crossCategory = detectCrossCategory(articlesByEntity, categoryBaseline, entityNames);
 
-  return [...activeSurge, ...firstSeen, ...novelEdge, ...crossCategory, ...sentiment];
+  return [...surge, ...firstSeen, ...novelEdge, ...crossCategory, ...sentiment];
 }

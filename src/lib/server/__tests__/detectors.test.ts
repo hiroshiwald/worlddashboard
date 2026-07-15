@@ -3,8 +3,8 @@ import {
   scoreSurge,
   scoreFirstSeenNovelty,
   scoreNovelEdge,
-  scoreCrossCategory,
-  scoreSentimentDeterioration,
+  scoreCategorySpread,
+  scoreSentimentDelta,
   isBootstrapCohort,
   computeWarmupState,
   computeEffectiveBaselineDays,
@@ -128,36 +128,73 @@ describe("computeEffectiveBaselineDays", () => {
   });
 });
 
-describe("scoreCrossCategory", () => {
-  it("does not fire below 3 categories", () => {
-    expect(scoreCrossCategory(2)).toBeNull();
+describe("scoreCategorySpread", () => {
+  it("skips entities with fewer than 3 active baseline days (cold start)", () => {
+    expect(scoreCategorySpread(5, 2, 2)).toBeNull();
   });
 
-  it("advisory at 3, warning at 4, critical at >=5", () => {
-    expect(scoreCrossCategory(3)!.severity).toBe("advisory");
-    expect(scoreCrossCategory(4)!.severity).toBe("warning");
-    expect(scoreCrossCategory(5)!.severity).toBe("critical");
-    expect(scoreCrossCategory(6)!.severity).toBe("critical");
+  it("does not fire below 4 categories in the 24h window, regardless of excess", () => {
+    expect(scoreCategorySpread(3, 0, 5)).toBeNull();
+  });
+
+  it("does not fire when excess (24h count - baseline avg) is below 2", () => {
+    expect(scoreCategorySpread(4, 3, 5)).toBeNull(); // excess = 1
+  });
+
+  it("does not fire for a prominent entity whose 24h count matches its own steady baseline", () => {
+    // The Iran/cross-category failure mode: high absolute count, zero excess.
+    expect(scoreCategorySpread(6, 6, 14)).toBeNull();
+  });
+
+  it("advisory at excess=2, warning at excess=3, critical at excess>=4", () => {
+    expect(scoreCategorySpread(4, 2, 5)).toEqual({ excess: 2, severity: "advisory", confidence: 0.5 });
+    expect(scoreCategorySpread(5, 2, 5)).toEqual({ excess: 3, severity: "warning", confidence: 0.75 });
+    expect(scoreCategorySpread(6, 2, 5)).toEqual({ excess: 4, severity: "critical", confidence: 1 });
+  });
+
+  it("confidence caps at 1 for excess beyond 4", () => {
+    expect(scoreCategorySpread(8, 2, 5)!.confidence).toBe(1); // excess = 6
   });
 });
 
-describe("scoreSentimentDeterioration", () => {
-  it("does not fire below 5 mentions", () => {
-    expect(scoreSentimentDeterioration(4, -0.9)).toBeNull();
+describe("scoreSentimentDelta", () => {
+  it("does not fire below 5 mentions in the 24h window", () => {
+    expect(scoreSentimentDelta(4, -0.9, 0, 5, 20)).toBeNull();
   });
 
-  it("does not fire above the -0.3 threshold", () => {
-    expect(scoreSentimentDeterioration(10, -0.2)).toBeNull();
+  it("skips entities with fewer than 3 baseline days", () => {
+    expect(scoreSentimentDelta(10, -0.5, 0, 2, 20)).toBeNull();
   });
 
-  it("fires warning between -0.3 and -0.6, or below -0.6 with <10 mentions", () => {
-    expect(scoreSentimentDeterioration(5, -0.4)!.severity).toBe("warning");
-    expect(scoreSentimentDeterioration(9, -0.7)!.severity).toBe("warning");
+  it("skips entities with fewer than 10 baseline mentions", () => {
+    expect(scoreSentimentDelta(10, -0.5, 0, 5, 9)).toBeNull();
   });
 
-  it("fires critical at <=-0.6 with >=10 mentions", () => {
-    expect(scoreSentimentDeterioration(10, -0.6)!.severity).toBe("critical");
-    expect(scoreSentimentDeterioration(12, -0.8)!.severity).toBe("critical");
+  it("an always-negative entity with a stable tone does not fire (delta ~= 0)", () => {
+    // The Black Sea/sentiment failure mode: very negative absolute level, no real shift.
+    expect(scoreSentimentDelta(10, -0.6, -0.6, 5, 20)).toBeNull();
+  });
+
+  it("a neutral entity dropping 0.4 from its own baseline fires warning", () => {
+    const result = scoreSentimentDelta(10, -0.4, 0, 5, 20);
+    expect(result).toEqual({ delta: -0.4, severity: "warning", confidence: 0.8 });
+  });
+
+  it("fires at the -0.3 delta threshold boundary (inclusive)", () => {
+    expect(scoreSentimentDelta(10, -0.3, 0, 5, 20)).not.toBeNull();
+  });
+
+  it("does not fire above (less negative than) the -0.3 delta threshold", () => {
+    expect(scoreSentimentDelta(10, -0.29, 0, 5, 20)).toBeNull();
+  });
+
+  it("fires critical when delta <= -0.5 and mentions24h >= 10", () => {
+    const result = scoreSentimentDelta(10, -0.7, -0.1, 5, 20);
+    expect(result).toEqual({ delta: -0.6, severity: "critical", confidence: 1 });
+  });
+
+  it("stays warning at delta <= -0.5 if mentions24h < 10", () => {
+    expect(scoreSentimentDelta(5, -0.7, -0.1, 5, 20)!.severity).toBe("warning");
   });
 });
 
@@ -225,6 +262,17 @@ describe("runDetectors query shape", () => {
     const sql = makeMockSql((query) => {
       if (query.includes("MIN(first_seen_at)") && query.includes("FROM articles")) return [pastEpochRow()];
       return [];
+    });
+    const signals = await runDetectors(sql, DEFAULTS);
+    expect(signals).toEqual([]);
+  });
+
+  it("all detectors stay silent during warm-up, and no history-dependent query runs at all", async () => {
+    const sql = makeMockSql((query) => {
+      if (query.includes("MIN(first_seen_at)") && query.includes("FROM articles")) {
+        return [{ min_first_seen: new Date(Date.now() - 1 * 24 * 3600 * 1000).toISOString() }];
+      }
+      throw new Error(`unexpected query during warm-up: ${query}`);
     });
     const signals = await runDetectors(sql, DEFAULTS);
     expect(signals).toEqual([]);

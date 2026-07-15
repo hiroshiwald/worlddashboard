@@ -173,10 +173,3 @@ export function enrichEntities(
     enrichSingleEntity(entity, itemMap, stores.edgeHistory, stores.baselines),
   );
 }
-
-/**
- * Entities with noveltyScore < 20 AND mentions >= 15 are "known situations".
- */
-export function isKnownSituation(entity: EnrichedEntity): boolean {
-  return entity.noveltyScore < 20 && entity.mentions >= 15;
-}

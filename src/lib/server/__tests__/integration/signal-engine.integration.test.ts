@@ -304,11 +304,38 @@ describe.skipIf(!TEST_DATABASE_URL)("signal engine integration (real Postgres)",
     expect((edgeSignal!.evidence.articleIds as number[]).sort()).toEqual([article1, article2].sort());
   });
 
-  it("cross-category convergence fires once an entity spans >=3 distinct source categories in 24h", async () => {
-    const entityId = await seedEntity("Multitopia", new Date(Date.now() - 500 * 3600 * 1000).toISOString());
-    const categories = ["world", "politics", "business"];
+  it("an ambient entity with a steady 6-category spread across 15 days produces NO cross_category signal", async () => {
+    // A prominent entity (e.g. a major country) that always spans many
+    // categories must not perpetually trip this — only a spread that
+    // deviates from its own baseline should.
+    const entityId = await seedEntity("Steadystan", new Date(Date.now() - 500 * 3600 * 1000).toISOString());
+    const categories = ["world", "politics", "business", "tech", "sports", "science"];
+    for (let day = 1; day <= 5; day++) {
+      for (const category of categories) {
+        const articleId = await seedClusterHeadArticle(`Source ${category} d${day}`, category, day * 24 + 1);
+        await linkArticleEntity(articleId, entityId);
+      }
+    }
+    // Today looks exactly like every other day.
     for (const category of categories) {
-      const articleId = await seedClusterHeadArticle(`Source ${category}`, category, 2);
+      const articleId = await seedClusterHeadArticle(`Source ${category} today`, category, 2);
+      await linkArticleEntity(articleId, entityId);
+    }
+
+    const settings = await getSettings(sql!);
+    const candidates = await runDetectors(sql!, settings);
+    expect(candidates.find((c) => c.dedupeKey === `cross_category:${entityId}`)).toBeUndefined();
+  });
+
+  it("an entity going from a steady 1-category baseline to 5 categories in the last 24h fires with the correct excess", async () => {
+    const entityId = await seedEntity("Spikeland", new Date(Date.now() - 500 * 3600 * 1000).toISOString());
+    for (let day = 1; day <= 3; day++) {
+      const articleId = await seedClusterHeadArticle(`Source base d${day}`, "world", day * 24 + 1);
+      await linkArticleEntity(articleId, entityId);
+    }
+    const spikeCategories = ["world", "politics", "business", "tech", "sports"];
+    for (const category of spikeCategories) {
+      const articleId = await seedClusterHeadArticle(`Source ${category} spike`, category, 2);
       await linkArticleEntity(articleId, entityId);
     }
 
@@ -316,8 +343,54 @@ describe.skipIf(!TEST_DATABASE_URL)("signal engine integration (real Postgres)",
     const candidates = await runDetectors(sql!, settings);
     const signal = candidates.find((c) => c.dedupeKey === `cross_category:${entityId}`);
     expect(signal).toBeDefined();
-    expect(signal!.severity).toBe("advisory");
-    expect(signal!.evidence.categoryCount).toBe(3);
+    expect(signal!.severity).toBe("critical");
+    expect(signal!.evidence.categoryCount24h).toBe(5);
+    expect(signal!.evidence.baselineAvgCategories).toBe(1);
+    expect(signal!.evidence.excess).toBe(4);
+  });
+
+  it("tone-shift: a stable neutral-baseline entity fires critical when 24h sentiment drops sharply", async () => {
+    const entityId = await seedEntity("Tonesville", "2026-06-01T00:00:00Z");
+    for (let day = 5; day <= 9; day++) {
+      await sql!`
+        INSERT INTO entity_mentions_hourly (entity_id, bucket, mentions, source_count, sentiment_sum)
+        VALUES (${entityId}, ${new Date(Date.now() - day * 24 * 3600 * 1000).toISOString()}, 3, 1, 0)
+      `;
+    }
+    await sql!`
+      INSERT INTO entity_mentions_hourly (entity_id, bucket, mentions, source_count, sentiment_sum)
+      VALUES (${entityId}, ${new Date(Date.now() - 2 * 3600 * 1000).toISOString()}, 10, 3, -5)
+    `;
+
+    const settings = await getSettings(sql!);
+    const candidates = await runDetectors(sql!, settings);
+    const signal = candidates.find((c) => c.dedupeKey === `sentiment:${entityId}`);
+    expect(signal).toBeDefined();
+    expect(signal!.severity).toBe("critical");
+    expect(signal!.evidence.delta).toBeCloseTo(-0.5, 5);
+    expect(signal!.evidence.mentions24h).toBe(10);
+  });
+
+  it("skips the whole sentiment pass when every tracked entity's 24h sentiment_sum is zero (pipeline-outage guard)", async () => {
+    // A genuinely positive baseline plus an all-zero 24h window would read
+    // as a sharp negative delta under the deviation formula — but all-zero
+    // across the whole panel is the shape of a sentiment pipeline outage,
+    // not a real tone shift, so it must not fire.
+    const entityId = await seedEntity("Neutralport", "2026-06-01T00:00:00Z");
+    for (let day = 5; day <= 9; day++) {
+      await sql!`
+        INSERT INTO entity_mentions_hourly (entity_id, bucket, mentions, source_count, sentiment_sum)
+        VALUES (${entityId}, ${new Date(Date.now() - day * 24 * 3600 * 1000).toISOString()}, 3, 1, 1.5)
+      `;
+    }
+    await sql!`
+      INSERT INTO entity_mentions_hourly (entity_id, bucket, mentions, source_count, sentiment_sum)
+      VALUES (${entityId}, ${new Date(Date.now() - 2 * 3600 * 1000).toISOString()}, 10, 3, 0)
+    `;
+
+    const settings = await getSettings(sql!);
+    const candidates = await runDetectors(sql!, settings);
+    expect(candidates.find((c) => c.dedupeKey === `sentiment:${entityId}`)).toBeUndefined();
   });
 
   it("getBrief's top-stories source count doesn't double-count a member sharing the head's own source", async () => {

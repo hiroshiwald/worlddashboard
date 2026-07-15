@@ -45,12 +45,14 @@ describe.skipIf(!TEST_DATABASE_URL)("warm-up gate integration (real Postgres)", 
     await pool?.end();
   });
 
-  it("stays silent on surge/first_seen/novel_edge for a day-1 launch fed a week of backdated publish dates, while cross_category still fires", async () => {
+  it("stays silent on every detector type for a day-1 launch fed a week of backdated publish dates", async () => {
     // A feed pre-load: 6 articles co-mentioning Germany+NATO, published_at
     // spread 2-7 days in the past, but all ARRIVING now (persistArticles
     // stamps first_seen_at = now()). This fabricates exactly the baseline
     // spread (>=3 distinct bucket days) and edge/source volume that would
-    // have fired the old, miscalibrated engine.
+    // have fired the old, miscalibrated engine — including cross_category,
+    // which now shares the same warm-up gate as every other detector since
+    // its baseline needs real history too.
     const historical = NATO_WORDS.map((word, i) =>
       makeItem({
         title: `Germany and NATO discuss defense pact ${word}`,
@@ -60,7 +62,7 @@ describe.skipIf(!TEST_DATABASE_URL)("warm-up gate integration (real Postgres)", 
       }),
     );
     // Today's spike: 8 more Germany-only articles across 3 distinct source
-    // categories, also exercising cross_category (which must NOT be gated).
+    // categories — would exercise cross_category if it weren't warm-up-gated.
     const recent = RECENT_WORDS.map((word, i) =>
       makeItem({
         title: `Germany announces policy shift ${word}`,
@@ -83,14 +85,10 @@ describe.skipIf(!TEST_DATABASE_URL)("warm-up gate integration (real Postgres)", 
     // alone (not the warm-up gate) could explain the silence below.
     expect(Date.now() - new Date(germany.first_seen_at as string).getTime()).toBeLessThan(60_000);
 
-    const germanyId = Number(germany.id);
     const settings = await getSettings(sql!);
     const candidates = await runDetectors(sql!, settings);
 
-    expect(candidates.filter((c) => c.type === "surge")).toHaveLength(0);
-    expect(candidates.filter((c) => c.type === "first_seen")).toHaveLength(0);
-    expect(candidates.filter((c) => c.type === "novel_edge")).toHaveLength(0);
-    expect(candidates.some((c) => c.type === "cross_category" && c.entityIds.includes(germanyId))).toBe(true);
+    expect(candidates).toEqual([]);
   });
 
   it("post-warm-up: an old system epoch lets first_seen fire at warning (not critical) for 3 sources, and surge uses the correct effective-days denominator", async () => {

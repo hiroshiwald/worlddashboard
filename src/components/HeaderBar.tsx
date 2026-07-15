@@ -3,7 +3,7 @@
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
 
-type TabKey = "brief" | "feeds" | "intel" | "network" | "map" | "signals" | "discovery" | "review";
+type TabKey = "brief" | "feeds" | "network" | "map" | "signals" | "review";
 
 interface HeaderBarProps {
   dark: boolean;
@@ -22,7 +22,6 @@ interface HeaderBarProps {
   fetchedAt: string | null;
   loading: boolean;
   refresh: () => void;
-  setEntityFilter: (e: string | null) => void;
   t: ThemeClasses;
   mode?: "db" | "live";
   lastIngestAt?: string | null;
@@ -67,11 +66,9 @@ function IngestBadge({
 const tabs: { key: TabKey; label: string }[] = [
   { key: "brief", label: "Brief" },
   { key: "feeds", label: "Feeds" },
-  { key: "intel", label: "Intel" },
   { key: "network", label: "Network" },
   { key: "map", label: "Map" },
   { key: "signals", label: "Signals" },
-  { key: "discovery", label: "Discovery" },
   { key: "review", label: "Review" },
 ];
 
@@ -131,7 +128,6 @@ export default function HeaderBar({
   fetchedAt,
   loading,
   refresh,
-  setEntityFilter,
   t,
   mode,
   lastIngestAt,
@@ -233,10 +229,7 @@ export default function HeaderBar({
           {tabs.map((tab) => (
             <button
               key={tab.key}
-              onClick={() => {
-                setActiveTab(tab.key);
-                if (tab.key === "intel") setEntityFilter(null);
-              }}
+              onClick={() => setActiveTab(tab.key)}
               className={`px-3 md:px-4 py-2.5 text-sm font-medium transition-colors ${
                 activeTab === tab.key ? t.tabActive : t.tabInactive
               }`}
@@ -259,7 +252,7 @@ export default function HeaderBar({
           ))}
         </select>
 
-        {(activeTab === "brief" || activeTab === "feeds" || activeTab === "map" || activeTab === "signals" || activeTab === "discovery") && (
+        {(activeTab === "brief" || activeTab === "feeds" || activeTab === "map" || activeTab === "signals") && (
           <div className="hidden sm:flex items-center gap-4 text-xs">
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
