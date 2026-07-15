@@ -3,8 +3,8 @@
 import { useMemo, useState, useCallback } from "react";
 import { FeedItem, EnrichedEntity, EntityType } from "@/lib/types";
 import { extractEntities } from "@/lib/entity-extractor";
-import { enrichEntities } from "@/lib/novelty-scorer";
 import { loadEdgeHistory, edgeKey } from "@/lib/signal-storage";
+import { useEnrichedEntities } from "./useEnrichedEntities";
 
 export type EdgeMode = "all" | "novel" | "none";
 
@@ -57,7 +57,7 @@ function buildDiscoveryTheme(dark: boolean): DiscoveryTabTheme {
 // the memo dependency chain. Only the pure theme block is extracted.
 export function useDiscoveryTab({ items, dark }: UseDiscoveryTabParams) {
   const entities = useMemo(() => extractEntities(items), [items]);
-  const enriched = useMemo(() => enrichEntities(entities, items), [entities, items]);
+  const enriched = useEnrichedEntities(entities, items);
 
   const [edgeMode, setEdgeMode] = useState<EdgeMode>("novel");
   const [typeFilter, setTypeFilter] = useState<Set<EntityType>>(

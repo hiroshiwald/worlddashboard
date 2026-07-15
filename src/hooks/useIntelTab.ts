@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react";
 import { FeedItem, EnrichedEntity, Situation } from "@/lib/types";
 import { extractEntities } from "@/lib/entity-extractor";
-import { enrichEntities, isKnownSituation } from "@/lib/novelty-scorer";
+import { isKnownSituation } from "@/lib/novelty-scorer";
 import { buildSituations } from "@/lib/situation-builder";
 import { CardTheme } from "@/components/intel/utils";
+import { useEnrichedEntities } from "./useEnrichedEntities";
 
 export interface IntelTabTheme extends CardTheme {
   summaryBg: string;
@@ -51,7 +52,7 @@ function buildIntelTheme(dark: boolean): IntelTabTheme {
 // classification pipeline. Only the pure theme block is extracted.
 export function useIntelTab({ items, dark, onEntityClick }: UseIntelTabParams) {
   const entities = useMemo(() => extractEntities(items), [items]);
-  const enriched = useMemo(() => enrichEntities(entities, items), [entities, items]);
+  const enriched = useEnrichedEntities(entities, items);
   const situations = useMemo(() => buildSituations(enriched, items), [enriched, items]);
 
   const [expandedSituations, setExpandedSituations] = useState<Set<string>>(new Set());
