@@ -567,3 +567,85 @@ describe("LLM extraction path (entity-ingest wiring)", () => {
     expect(calls.some((c) => c.query.includes("FROM settings"))).toBe(false);
   });
 });
+
+describe("LLM wave concurrency and wall-clock deadline (entity-ingest wiring)", () => {
+  function makeHeads(count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      id: String(i + 1),
+      title: `Headline number ${i + 1}`,
+      summary: "",
+      published_at: "2026-07-15T09:00:00Z",
+      first_seen_at: "2026-07-15T09:00:00Z",
+      source_name: "Source A",
+    }));
+  }
+
+  function makeSql(heads: ReturnType<typeof makeHeads>) {
+    return makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return heads;
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+  }
+
+  beforeEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    vi.mocked(extractEntitiesBatch).mockReset();
+  });
+
+  it("dispatches up to 3 batches per wave concurrently, not strictly sequentially", async () => {
+    // 60 articles -> batches of [25, 25, 10] -> a single wave of 3 batches.
+    const { sql } = makeSql(makeHeads(60));
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.mocked(extractEntitiesBatch).mockImplementation(async (_sql, _budget, articles) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return new Map(articles.map((a) => [a.index, []]));
+    });
+
+    await processNewArticles(sql);
+
+    expect(extractEntitiesBatch).toHaveBeenCalledTimes(3);
+    expect(maxInFlight).toBe(3);
+  });
+
+  it("runs the first wave, skips the second once the deadline has passed, and still marks every article processed", async () => {
+    // 76 articles -> batches of [25, 25, 25, 1] -> waves of [3 batches] then [1 batch].
+    const heads = makeHeads(76);
+    const { sql, calls } = makeSql(heads);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T12:00:00Z"));
+    const deadline = Date.now() + 20_000;
+    vi.mocked(extractEntitiesBatch).mockImplementation(async (_sql, _budget, articles) => {
+      // Simulate a wave slow enough to blow the wall-clock budget.
+      vi.advanceTimersByTime(25_000);
+      return new Map(articles.map((a) => [a.index, []]));
+    });
+
+    const stats = await processNewArticles(sql, deadline);
+    vi.useRealTimers();
+
+    expect(extractEntitiesBatch).toHaveBeenCalledTimes(3); // only wave 1's 3 batches
+    expect(stats.llm.articles).toBe(75); // wave 1: 3 batches x 25 articles
+    expect(stats.articlesProcessed).toBe(76); // wave 2's 1 article still processed via heuristics
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("1 article(s) fell back"));
+
+    const markCall = calls[calls.length - 1];
+    expect(markCall.query).toContain("entities_processed_at = now()");
+    expect(markCall.values[0]).toHaveLength(76);
+
+    warnSpy.mockRestore();
+  });
+});

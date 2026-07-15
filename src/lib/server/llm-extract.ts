@@ -8,7 +8,9 @@ const ANTHROPIC_VERSION = "2023-06-01";
 const MAX_BATCH_SIZE = 25;
 const MAX_SUMMARY_CHARS = 300;
 const MAX_TOKENS = 2000;
-const REQUEST_TIMEOUT_MS = 25_000;
+// A batch slower than this isn't worth waiting for under the 60s Vercel
+// function ceiling — its articles just fall back to heuristics this run.
+export const REQUEST_TIMEOUT_MS = 12_000;
 
 // Haiku 4.5 pricing as of writing, USD per million tokens — verify against
 // https://www.anthropic.com/pricing before changing either constant.
@@ -249,7 +251,13 @@ export async function extractEntitiesBatch(
 
   const now = new Date();
   const month = currentUtcMonth(now);
-  const before = await loadMonthUsage(sql, month);
+  let before: { inputTokens: number; outputTokens: number; calls: number };
+  try {
+    before = await loadMonthUsage(sql, month);
+  } catch (err) {
+    console.warn("llm-extract: failed to read monthly usage, skipping LLM extraction for this batch", err);
+    return null;
+  }
   const spentUsd = estimateCostUsd(before.inputTokens, before.outputTokens);
   if (spentUsd >= budgetUsd) {
     console.warn(`llm-extract: monthly budget reached ($${spentUsd.toFixed(2)} >= $${budgetUsd}), skipping LLM extraction`);
@@ -260,7 +268,16 @@ export async function extractEntitiesBatch(
   if (!response) return null;
 
   const usage = extractUsage(response);
-  await recordUsage(sql, month, usage.inputTokens, usage.outputTokens);
+  try {
+    await recordUsage(sql, month, usage.inputTokens, usage.outputTokens);
+  } catch (err) {
+    // The extraction itself succeeded (and was already paid for) — a ledger
+    // write hiccup must not discard already-good article results, and must
+    // never propagate: under concurrent wave dispatch (entity-ingest.ts), an
+    // uncaught rejection here would fail Promise.all and discard this call's
+    // already-completed siblings too.
+    console.warn("llm-extract: failed to record usage after a successful call", err);
+  }
 
   const parsed = parseModelOutput(extractResponseText(response));
   if (!parsed) {

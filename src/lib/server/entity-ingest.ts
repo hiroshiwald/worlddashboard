@@ -10,6 +10,14 @@ const MAX_SAMPLE_TITLES = 3;
 const MAX_CONTEXTS = 3;
 const MAX_CO_ENTITIES = 5;
 const LLM_BATCH_SIZE = 25;
+// Batches dispatched to the LLM per wave — bounds concurrent Anthropic
+// calls under the 60s Vercel function ceiling without going fully serial.
+const LLM_WAVE_SIZE = 3;
+// Wall-clock budget for the whole LLM extraction phase of one ingest run.
+// Once exceeded, no further Anthropic calls are made this run — remaining
+// articles fall back to the (fast) heuristic stack instead of risking the
+// function running past its 60s ceiling on a catch-up backlog.
+const LLM_TIME_BUDGET_MS = 20_000;
 
 export interface EntityIngestStats {
   articlesProcessed: number;
@@ -218,6 +226,14 @@ function addNewEntityMention(
   else newEntities.set(canonicalName, { canonicalName, type, mentions: [mention] });
 }
 
+// Shared failure log for a single per-article extraction/classification
+// step — every per-article try/catch below (classification, heuristic
+// extraction, LLM merge) routes through this one call site so the message
+// and log level stay in sync.
+function logArticleFailure(articleId: number, err: unknown): void {
+  console.error(`processNewArticles: failed to process article ${articleId}, skipping (will retry next run)`, err);
+}
+
 // Classification runs inside its own try/catch: one pathological article
 // must not abort the whole batch. A failing article is logged and left out
 // of processedArticleIds, so it's simply not marked processed and retries
@@ -242,7 +258,7 @@ function processArticle(
     }
     return true;
   } catch (err) {
-    console.error(`processNewArticles: failed to process article ${article.id}, skipping (will retry next run)`, err);
+    logArticleFailure(article.id, err);
     return false;
   }
 }
@@ -285,16 +301,18 @@ function mergeLlmWithDictionary(llmCandidates: Candidate[], title: string, summa
   return Array.from(map.values());
 }
 
+function heuristicCandidatesForArticle(article: HeadArticle): Candidate[] | null {
+  try {
+    return extractCandidates(article.title, article.summary);
+  } catch (err) {
+    logArticleFailure(article.id, err);
+    return null;
+  }
+}
+
 function extractAllHeuristic(heads: HeadArticle[]): Map<number, Candidate[] | null> {
   const result = new Map<number, Candidate[] | null>();
-  for (const article of heads) {
-    try {
-      result.set(article.id, extractCandidates(article.title, article.summary));
-    } catch (err) {
-      console.error(`processNewArticles: failed to process article ${article.id}, skipping (will retry next run)`, err);
-      result.set(article.id, null);
-    }
-  }
+  for (const article of heads) result.set(article.id, heuristicCandidatesForArticle(article));
   return result;
 }
 
@@ -305,43 +323,111 @@ interface CandidateExtractionResult {
 
 // For an article whose batch returned an LLM result: LLM candidates UNION
 // the dictionary layer only (the dictionary stays the canonical anchor;
-// compromise/acronym/person-regex/product-pattern are skipped). For
-// articles in a failed/unparseable batch: the full heuristic stack.
-async function extractAllWithLlm(heads: HeadArticle[], sql: Sql, budgetUsd: number): Promise<CandidateExtractionResult> {
-  const candidatesByArticle = new Map<number, Candidate[] | null>();
-  let llmArticleCount = 0;
+// compromise/acronym/person-regex/product-pattern are skipped). For an
+// article with no LLM result (failed/unparseable batch, or the wall-clock
+// deadline ran out before its batch was dispatched): the full heuristic
+// stack.
+function resolveArticleCandidates(
+  article: HeadArticle,
+  llmCandidates: Candidate[] | undefined,
+): { candidates: Candidate[] | null; usedLlm: boolean } {
+  if (!llmCandidates) return { candidates: heuristicCandidatesForArticle(article), usedLlm: false };
+  try {
+    return { candidates: mergeLlmWithDictionary(llmCandidates, article.title, article.summary), usedLlm: true };
+  } catch (err) {
+    logArticleFailure(article.id, err);
+    return { candidates: null, usedLlm: false };
+  }
+}
 
-  for (const chunk of chunkArticles(heads, LLM_BATCH_SIZE)) {
-    const batchInput = chunk.map((article, i) => ({ index: i, title: article.title, summary: article.summary }));
-    const llmResult = await extractEntitiesBatch(sql, budgetUsd, batchInput);
-
-    for (let i = 0; i < chunk.length; i++) {
-      const article = chunk[i];
-      const llmCandidates = llmResult?.get(i);
-      try {
-        if (llmCandidates) {
-          candidatesByArticle.set(article.id, mergeLlmWithDictionary(llmCandidates, article.title, article.summary));
-          llmArticleCount += 1;
-        } else {
-          candidatesByArticle.set(article.id, extractCandidates(article.title, article.summary));
-        }
-      } catch (err) {
-        console.error(`processNewArticles: failed to process article ${article.id}, skipping (will retry next run)`, err);
-        candidatesByArticle.set(article.id, null);
-      }
+// Heuristic-extracts every article in every batch from fromIndex onward —
+// used once the wall-clock deadline has passed, so none of these batches
+// ever call the LLM. Returns the count of articles it fell back for.
+function fallbackRemainingBatches(
+  batches: HeadArticle[][],
+  fromIndex: number,
+  candidatesByArticle: Map<number, Candidate[] | null>,
+): number {
+  let count = 0;
+  for (const batch of batches.slice(fromIndex)) {
+    for (const article of batch) {
+      candidatesByArticle.set(article.id, heuristicCandidatesForArticle(article));
+      count += 1;
     }
+  }
+  return count;
+}
+
+// Resolves one wave's settled batch results into candidatesByArticle.
+// Returns how many articles in this wave actually used the LLM.
+function applyWaveResults(
+  wave: HeadArticle[][],
+  waveResults: (Map<number, Candidate[]> | null)[],
+  candidatesByArticle: Map<number, Candidate[] | null>,
+): number {
+  let llmUsed = 0;
+  for (let batchIndex = 0; batchIndex < wave.length; batchIndex++) {
+    const batch = wave[batchIndex];
+    const llmResult = waveResults[batchIndex];
+    for (let i = 0; i < batch.length; i++) {
+      const article = batch[i];
+      const { candidates, usedLlm } = resolveArticleCandidates(article, llmResult?.get(i));
+      candidatesByArticle.set(article.id, candidates);
+      if (usedLlm) llmUsed += 1;
+    }
+  }
+  return llmUsed;
+}
+
+// Runs LLM batches in waves of up to LLM_WAVE_SIZE concurrent Anthropic
+// calls, checking the wall-clock deadline before each wave. Once the
+// deadline has passed, no further API calls are made this run — every
+// remaining article falls back to heuristics, so a catch-up backlog
+// degrades gracefully instead of running /api/ingest past its 60s ceiling.
+// deadline defaults to now + LLM_TIME_BUDGET_MS, computed once per call;
+// the parameter exists so tests can pin it without real timers.
+async function extractAllWithLlm(
+  heads: HeadArticle[],
+  sql: Sql,
+  budgetUsd: number,
+  deadline: number = Date.now() + LLM_TIME_BUDGET_MS,
+): Promise<CandidateExtractionResult> {
+  const candidatesByArticle = new Map<number, Candidate[] | null>();
+  const batches = chunkArticles(heads, LLM_BATCH_SIZE);
+  let llmArticleCount = 0;
+  let fallbackCount = 0;
+
+  for (let i = 0; i < batches.length; i += LLM_WAVE_SIZE) {
+    if (Date.now() >= deadline) {
+      fallbackCount += fallbackRemainingBatches(batches, i, candidatesByArticle);
+      break;
+    }
+
+    const wave = batches.slice(i, i + LLM_WAVE_SIZE);
+    const waveResults = await Promise.all(
+      wave.map((batch) =>
+        extractEntitiesBatch(sql, budgetUsd, batch.map((article, j) => ({ index: j, title: article.title, summary: article.summary }))),
+      ),
+    );
+    llmArticleCount += applyWaveResults(wave, waveResults, candidatesByArticle);
+  }
+
+  if (fallbackCount > 0) {
+    console.warn(`processNewArticles: LLM wall-clock deadline exceeded, ${fallbackCount} article(s) fell back to heuristic extraction`);
   }
   return { candidatesByArticle, llmArticleCount };
 }
 
 // isLlmConfigured() gates whether this run touches llm_usage/settings at
 // all — a deploy with no ANTHROPIC_API_KEY issues zero LLM-related queries.
-async function extractAllCandidates(heads: HeadArticle[], sql: Sql): Promise<CandidateExtractionResult> {
+// llmDeadline threads through to extractAllWithLlm's wall-clock cutoff;
+// left undefined in production so it defaults to now + LLM_TIME_BUDGET_MS.
+async function extractAllCandidates(heads: HeadArticle[], sql: Sql, llmDeadline?: number): Promise<CandidateExtractionResult> {
   if (!isLlmConfigured()) {
     return { candidatesByArticle: extractAllHeuristic(heads), llmArticleCount: 0 };
   }
   const settings = await getSettings(sql);
-  return extractAllWithLlm(heads, sql, settings.llm_monthly_budget_usd);
+  return extractAllWithLlm(heads, sql, settings.llm_monthly_budget_usd, llmDeadline);
 }
 
 // The LLM month-cost read is purely informational for the ingest response —
@@ -776,7 +862,7 @@ async function persistCandidates(sql: Sql, sightings: CandidateSighting[]): Prom
 
 // ---- orchestrator ----
 
-export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
+export async function processNewArticles(sql: Sql, llmDeadline?: number): Promise<EntityIngestStats> {
   const heads = await selectUnprocessedHeads(sql);
   if (heads.length === 0) {
     return {
@@ -789,7 +875,7 @@ export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
   }
 
   const registry = await loadEntityRegistry(sql);
-  const { candidatesByArticle, llmArticleCount } = await extractAllCandidates(heads, sql);
+  const { candidatesByArticle, llmArticleCount } = await extractAllCandidates(heads, sql, llmDeadline);
   const classified = classifyAll(heads, candidatesByArticle, registry);
 
   const insertedEntities = await upsertNewEntities(sql, classified.newEntities);
