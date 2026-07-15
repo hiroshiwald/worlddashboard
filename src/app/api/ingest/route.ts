@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import sourcesData from "@/lib/sources-data.json";
 import { fetchAllFeeds, CacheEntry } from "@/lib/feed-fetcher";
 import { SourceMeta } from "@/lib/types";
-import { getSql } from "@/lib/server/db";
+import { getSql, Sql } from "@/lib/server/db";
 import { persistArticles, sweepRetention } from "@/lib/server/ingest-writer";
 import { processNewArticles } from "@/lib/server/entity-ingest";
 import { getSettings } from "@/lib/server/settings";
-import { runDetectors } from "@/lib/server/detectors";
+import { runDetectors, computeWarmupState, WarmupState } from "@/lib/server/detectors";
 import { persistSignals } from "@/lib/server/signal-store";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +50,21 @@ async function runStage<T>(stage: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
+// Duplicated from detectors.ts's private getSystemEpoch (deliberately not
+// exported, to keep this route decoupled from detector internals) — the
+// same system epoch anchors both.
+async function getSystemEpoch(sql: Sql): Promise<Date | null> {
+  const rows = await sql`SELECT MIN(first_seen_at) AS min_first_seen FROM articles`;
+  const value = rows[0]?.min_first_seen;
+  if (value == null) return null;
+  return value instanceof Date ? value : new Date(value as string);
+}
+
+async function getIngestWarmupState(sql: Sql): Promise<WarmupState> {
+  const [settings, epoch] = await Promise.all([getSettings(sql), getSystemEpoch(sql)]);
+  return computeWarmupState(epoch, settings.warmup_days, new Date());
+}
+
 // Every stage is wrapped so a mid-pipeline throw is attributable: the
 // response names which stage failed and includes whatever counts prior
 // stages already produced, instead of a generic 500 that can't distinguish
@@ -71,12 +86,15 @@ async function runIngest() {
     counts.duplicates = duplicates;
 
     await runStage("sweep-retention", () => sweepRetention(sql));
-    counts.entities = await runStage("process-entities", () => processNewArticles(sql));
+    const entityStats = await runStage("process-entities", () => processNewArticles(sql));
+    counts.entities = entityStats;
+    counts.llm = entityStats.llm;
     counts.signals = await runStage("detect-signals", async () => {
       const settings = await getSettings(sql);
       const candidates = await runDetectors(sql, settings);
       return persistSignals(sql, candidates, settings);
     });
+    counts.warmup = await runStage("compute-warmup", () => getIngestWarmupState(sql));
 
     return NextResponse.json({ ...counts, tookMs: Date.now() - start });
   } catch (err) {

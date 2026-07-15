@@ -1,12 +1,16 @@
 import type { Sql, SqlRow } from "./db";
 import type { Settings } from "./settings";
 import { loadSignals, SignalJson } from "./signal-store";
+import { computeWarmupState, computeEffectiveBaselineDays, WarmupState } from "./detectors";
 
 const TOP_STORIES_LIMIT = 15;
 const TOP_STORIES_WINDOW_HOURS = 48;
 const NEW_ENTITIES_LIMIT = 5;
 const NEW_ENTITIES_WINDOW_HOURS = 48;
 const BOOTSTRAP_GUARD_HOURS = 72;
+const MOVERS_LIMIT = 5;
+const MIN_MOVER_OBSERVED_24H = 3;
+const MOVER_BASELINE_FLOOR = 0.5;
 
 export interface TopStoryJson {
   id: number;
@@ -26,11 +30,20 @@ export interface NewEntityJson {
   sourceCount: number;
 }
 
+export interface MoverJson {
+  name: string;
+  observed24h: number;
+  baselineDaily: number;
+  lift: number;
+}
+
 export interface Brief {
   generatedAt: string;
   signals: SignalJson[];
   newEntities: NewEntityJson[];
   topStories: TopStoryJson[];
+  movers: MoverJson[];
+  warmup: WarmupState;
 }
 
 /** Recency-decayed cluster size, hand-checkable in isolation: bigger
@@ -129,11 +142,84 @@ async function loadNewEntities(sql: Sql): Promise<NewEntityJson[]> {
   }));
 }
 
+// The platform's operating epoch (earliest article ARRIVAL ever recorded) —
+// duplicated from detectors.ts's private getSystemEpoch rather than
+// exported from there, keeping this module decoupled from detector
+// internals. Anchors the same warm-up gate detectors.ts uses.
+async function getSystemEpoch(sql: Sql): Promise<Date | null> {
+  const rows = await sql`SELECT MIN(first_seen_at) AS min_first_seen FROM articles`;
+  const value = rows[0]?.min_first_seen;
+  if (value == null) return null;
+  return value instanceof Date ? value : new Date(value as string);
+}
+
+function computeDaysSinceEpoch(now: Date, epoch: Date): number {
+  return Math.floor((now.getTime() - epoch.getTime()) / (24 * 3600 * 1000));
+}
+
+interface MoverAggRow {
+  entityId: number;
+  canonicalName: string;
+  observed24h: number;
+  baselineSum: number;
+}
+
+async function loadMoverAgg(sql: Sql): Promise<MoverAggRow[]> {
+  const rows = await sql`
+    SELECT e.id AS entity_id, e.canonical_name,
+      COALESCE(SUM(emh.mentions) FILTER (WHERE emh.bucket >= now() - INTERVAL '24 hours'), 0) AS observed_24h,
+      COALESCE(SUM(emh.mentions) FILTER (
+        WHERE emh.bucket < now() - INTERVAL '24 hours' AND emh.bucket >= now() - INTERVAL '15 days'
+      ), 0) AS baseline_sum
+    FROM entities e
+    JOIN entity_mentions_hourly emh ON emh.entity_id = e.id
+    WHERE e.status = 'tracked' AND emh.bucket >= now() - INTERVAL '15 days'
+    GROUP BY e.id
+  `;
+  return rows.map((row) => ({
+    entityId: Number(row.entity_id),
+    canonicalName: String(row.canonical_name),
+    observed24h: Number(row.observed_24h),
+    baselineSum: Number(row.baseline_sum),
+  }));
+}
+
+/** lift = observed24h / max(baselineDaily, 0.5) — the floor keeps a
+ * near-silent baseline (e.g. 0.1/day) from producing an absurd lift for a
+ * handful of mentions. Hand-checkable in isolation. */
+export function computeLift(observed24h: number, baselineDaily: number): number {
+  return observed24h / Math.max(baselineDaily, MOVER_BASELINE_FLOOR);
+}
+
+function buildMovers(aggRows: MoverAggRow[], effectiveBaselineDays: number): MoverJson[] {
+  const movers = aggRows
+    .filter((r) => r.observed24h >= MIN_MOVER_OBSERVED_24H)
+    .map((r) => {
+      const baselineDaily = r.baselineSum / effectiveBaselineDays;
+      return { name: r.canonicalName, observed24h: r.observed24h, baselineDaily, lift: computeLift(r.observed24h, baselineDaily) };
+    });
+  movers.sort((a, b) => b.lift - a.lift);
+  return movers.slice(0, MOVERS_LIMIT);
+}
+
+async function loadMovers(sql: Sql, epoch: Date, now: Date): Promise<MoverJson[]> {
+  const effectiveBaselineDays = computeEffectiveBaselineDays(computeDaysSinceEpoch(now, epoch));
+  const aggRows = await loadMoverAgg(sql);
+  return buildMovers(aggRows, effectiveBaselineDays);
+}
+
 export async function getBrief(sql: Sql, settings: Settings): Promise<Brief> {
-  const [signals, newEntities, topStories] = await Promise.all([
+  const now = new Date();
+  const [signals, newEntities, topStories, epoch] = await Promise.all([
     loadSignals(sql, ["new", "seen", "promoted"], settings.brief_max_blocks),
     loadNewEntities(sql),
     loadTopStories(sql),
+    getSystemEpoch(sql),
   ]);
-  return { generatedAt: new Date().toISOString(), signals, newEntities, topStories };
+
+  const warmup = computeWarmupState(epoch, settings.warmup_days, now);
+  // computeWarmupState only returns active:false when epoch is non-null.
+  const movers = warmup.active ? [] : await loadMovers(sql, epoch as Date, now);
+
+  return { generatedAt: now.toISOString(), signals, newEntities, topStories, movers, warmup };
 }

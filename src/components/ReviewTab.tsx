@@ -13,6 +13,8 @@ interface Candidate {
   sourceCount: number;
   dayCount: number;
   sampleTitles: string[];
+  contexts: string[];
+  coEntities: string[];
 }
 
 const TYPE_OPTIONS = ["country", "organization", "region", "person", "other"];
@@ -79,9 +81,15 @@ function CandidateCard({ candidate, dark, busy, onAccept, onMerge, onDismiss }: 
         <h3 className={`text-sm font-semibold ${dark ? "text-slate-100" : "text-gray-900"}`}>{candidate.displayName}</h3>
         <span className={`text-[11px] uppercase tracking-wide ${dark ? "text-slate-500" : "text-gray-400"}`}>{candidate.typeHint}</span>
       </div>
+      {candidate.contexts.length > 0 && (
+        <p className={`text-xs italic mb-1 ${dark ? "text-slate-400" : "text-gray-500"}`}>{candidate.contexts.join(" · ")}</p>
+      )}
       <p className={`text-xs mb-2 ${dark ? "text-slate-400" : "text-gray-500"}`}>
         {candidate.mentionCount} mentions &middot; {candidate.sourceCount} sources &middot; {candidate.dayCount} days
       </p>
+      {candidate.coEntities.length > 0 && (
+        <p className={`text-xs mb-2 ${dark ? "text-slate-500" : "text-gray-400"}`}>appears with: {candidate.coEntities.join(", ")}</p>
+      )}
       <SourceChips names={candidate.sourceNames} dark={dark} />
       <ul className={`text-xs mt-2 mb-3 space-y-0.5 ${dark ? "text-slate-500" : "text-gray-500"}`}>
         {candidate.sampleTitles.map((title) => (

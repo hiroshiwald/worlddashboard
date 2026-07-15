@@ -16,17 +16,27 @@ export interface LookupEntry {
 
 const LOOKUP_MAP = new Map<string, LookupEntry>();
 
+// Lowercased keys whose dictionary surface form (name or alias) is itself an
+// acronym — all-uppercase, 2-5 chars (e.g. "WHO", "UK", "ICE"). Those keys
+// require a case-sensitive, all-caps match against the source text (see
+// matchDictionaryEntriesInternal) so the org "WHO" doesn't match the
+// pronoun "who", or "ICE" the noun "ice".
+const ACRONYM_KEYS = new Set<string>();
+
+function isAcronymForm(raw: string): boolean {
+  return raw.length >= 2 && raw.length <= 5 && raw === raw.toUpperCase() && raw !== raw.toLowerCase();
+}
+
 function addToLookup(entries: DictEntry[]) {
   for (const entry of entries) {
-    LOOKUP_MAP.set(entry.name.toLowerCase(), {
+    const lookup: LookupEntry = {
       name: entry.name,
       type: entry.type as "country" | "organization" | "region",
-    });
-    for (const alias of entry.aliases) {
-      LOOKUP_MAP.set(alias.toLowerCase(), {
-        name: entry.name,
-        type: entry.type as "country" | "organization" | "region",
-      });
+    };
+    for (const form of [entry.name, ...entry.aliases]) {
+      const key = form.toLowerCase();
+      LOOKUP_MAP.set(key, lookup);
+      if (isAcronymForm(form)) ACRONYM_KEYS.add(key);
     }
   }
 }
@@ -37,6 +47,7 @@ addToLookup(REGION_DICT);
 
 // Immutable after module load — frozen to enforce read-only access.
 Object.freeze(LOOKUP_MAP);
+Object.freeze(ACRONYM_KEYS);
 
 // Sort lookup keys by length descending so longer matches take priority
 const SORTED_TERMS = Array.from(LOOKUP_MAP.keys()).sort(
@@ -59,31 +70,50 @@ function emptyUrgency(): Record<UrgencyLevel, number> {
   };
 }
 
+// True if the ORIGINAL (non-lowercased) text at [idx, idx+length) is itself
+// all-uppercase — the case-sensitivity gate for acronym-form terms.
+function isSourceAllCaps(text: string, idx: number, length: number): boolean {
+  const slice = text.slice(idx, idx + length);
+  return slice === slice.toUpperCase() && slice !== slice.toLowerCase();
+}
+
+// A term can occur more than once in the same text in different casings
+// (e.g. a lowercase pronoun "who" earlier, the acronym "WHO" later) — scan
+// every occurrence rather than just the first, so one non-matching instance
+// doesn't hide a later valid one.
+function hasWordBoundedMatch(text: string, lower: string, term: string, requireAllCaps: boolean): boolean {
+  let idx = lower.indexOf(term);
+  while (idx !== -1) {
+    const before = idx > 0 ? lower[idx - 1] : " ";
+    const after = idx + term.length < lower.length ? lower[idx + term.length] : " ";
+    const isWordBound = !/[a-z]/.test(before) && !/[a-z]/.test(after);
+    if (isWordBound && (!requireAllCaps || isSourceAllCaps(text, idx, term.length))) return true;
+    idx = lower.indexOf(term, idx + 1);
+  }
+  return false;
+}
+
 /**
  * Extract dictionary-matched entities from text, keeping full entry info
  * (name + type). Shared by matchDictionary below and by extract-v2.ts's
  * dictionary layer, so the matching loop lives in exactly one place.
+ *
+ * Acronym-form terms (ACRONYM_KEYS — all-uppercase in the dictionary, 2-5
+ * chars) match case-sensitively: an occurrence only counts if it is
+ * all-caps in the source. This also lifts the 3-char floor below for them,
+ * since a 2-char acronym like "UK" is unambiguous when it must appear caps.
  */
 function matchDictionaryEntriesInternal(text: string): LookupEntry[] {
   const found = new Map<string, LookupEntry>();
   const lower = text.toLowerCase();
 
   for (const term of SORTED_TERMS) {
-    if (term.length < 3) continue;
-    const idx = lower.indexOf(term);
-    if (idx === -1) continue;
+    const isAcronym = ACRONYM_KEYS.has(term);
+    if (term.length < 3 && !isAcronym) continue;
+    if (!hasWordBoundedMatch(text, lower, term, isAcronym)) continue;
 
-    // Basic word-boundary check: character before and after should not be a letter
-    const before = idx > 0 ? lower[idx - 1] : " ";
-    const after =
-      idx + term.length < lower.length ? lower[idx + term.length] : " ";
-    const isWordBound =
-      !/[a-z]/.test(before) && !/[a-z]/.test(after);
-
-    if (isWordBound) {
-      const entry = LOOKUP_MAP.get(term)!;
-      found.set(entry.name, entry);
-    }
+    const entry = LOOKUP_MAP.get(term)!;
+    found.set(entry.name, entry);
   }
 
   return Array.from(found.values());

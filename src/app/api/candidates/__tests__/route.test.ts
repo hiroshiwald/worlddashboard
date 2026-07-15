@@ -70,6 +70,8 @@ describe("GET /api/candidates", () => {
         source_names: ["A", "B", "C"],
         day_count: 3,
         sample_titles: ["Title 1"],
+        contexts: ["former IRGC commander"],
+        co_entities: ["Iran"],
       },
     ]);
     currentSql = sql;
@@ -85,7 +87,24 @@ describe("GET /api/candidates", () => {
       sourceCount: 3,
       dayCount: 3,
       sampleTitles: ["Title 1"],
+      contexts: ["former IRGC commander"],
+      coEntities: ["Iran"],
     });
+  });
+
+  it("defaults contexts/coEntities to empty arrays when the columns are absent", async () => {
+    const { sql } = makeMockSql(() => [
+      {
+        name_norm: "kestrel basin", display_name: "Kestrel Basin", type_hint: "region",
+        first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: "2026-07-10T00:00:00Z",
+        mention_count: 1, source_names: ["A"], day_count: 1, sample_titles: [],
+      },
+    ]);
+    currentSql = sql;
+    const res = await GET();
+    const body = await res.json();
+    expect(body.candidates[0].contexts).toEqual([]);
+    expect(body.candidates[0].coEntities).toEqual([]);
   });
 });
 

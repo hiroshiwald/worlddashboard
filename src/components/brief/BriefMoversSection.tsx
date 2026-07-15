@@ -1,0 +1,42 @@
+"use client";
+
+import { BriefMover, BriefWarmup } from "@/hooks/useBriefTab";
+
+interface BriefMoversSectionProps {
+  movers: BriefMover[];
+  warmup: BriefWarmup;
+  dark: boolean;
+  onEntityClick: (name: string) => void;
+}
+
+export default function BriefMoversSection({ movers, warmup, dark, onEntityClick }: BriefMoversSectionProps) {
+  if (warmup.active) {
+    return (
+      <p className={`text-xs mb-6 ${dark ? "text-slate-500" : "text-gray-400"}`}>
+        Signal engine warming up — {Math.ceil(warmup.daysRemaining)} days of baseline remaining.
+      </p>
+    );
+  }
+
+  if (movers.length === 0) return null;
+
+  return (
+    <div className="mb-6">
+      <h3 className={`text-xs font-bold uppercase tracking-wide mb-2 ${dark ? "text-slate-400" : "text-gray-500"}`}>
+        Unusually active
+      </h3>
+      <div className="flex flex-wrap gap-2">
+        {movers.map((mover) => (
+          <button
+            key={mover.name}
+            onClick={() => onEntityClick(mover.name)}
+            className={`text-xs px-3 py-1.5 rounded-full border ${dark ? "bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"}`}
+          >
+            <span className="font-semibold">{mover.name}</span>
+            <span className={dark ? "text-slate-500" : "text-gray-400"}> ×{mover.lift.toFixed(1)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
