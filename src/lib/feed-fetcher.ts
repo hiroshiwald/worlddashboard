@@ -80,7 +80,7 @@ export function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
       sanitizeUrl(extractImageUrl(block)) || getSourceImageUrl(link || "", source.url);
 
     if (title) {
-      items.push({
+      const item: FeedItem = {
         id: `${source.name}-${title.slice(0, 40)}-${pubDate || Math.random()}`,
         title,
         link: link || source.url,
@@ -92,7 +92,9 @@ export function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
         sourceCategory: source.category,
         sourceTier: source.tier,
         imageUrl,
-      });
+      };
+      if (!isDateBounded) item.publishedEstimated = true;
+      items.push(item);
     }
   }
 
@@ -147,7 +149,7 @@ export function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
       sanitizeUrl(extractImageUrl(block)) || getSourceImageUrl(link || "", source.url);
 
     if (title) {
-      items.push({
+      const item: FeedItem = {
         id: `${source.name}-${title.slice(0, 40)}-${updated || Math.random()}`,
         title,
         link: link || source.url,
@@ -159,7 +161,9 @@ export function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
         sourceCategory: source.category,
         sourceTier: source.tier,
         imageUrl,
-      });
+      };
+      if (!isDateBounded) item.publishedEstimated = true;
+      items.push(item);
     }
   }
 

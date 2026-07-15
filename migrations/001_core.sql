@@ -16,7 +16,7 @@ CREATE TABLE articles (
   source_tier TEXT NOT NULL,
   summary TEXT,
   image_url TEXT,
-  dup_group_id BIGINT REFERENCES articles(id)
+  dup_group_id BIGINT REFERENCES articles(id) ON DELETE SET NULL
 );
 
 CREATE INDEX articles_first_seen_at_idx ON articles (first_seen_at);

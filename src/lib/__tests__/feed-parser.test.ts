@@ -132,6 +132,37 @@ describe("parseRssItems", () => {
     const items = parseRssItems(xml, testSource);
     expect(items[0].title).toBe("Breaking: Major Event");
   });
+
+  it("marks a dateless item with publishedEstimated when the feed has no dates at all", () => {
+    const xml = `
+      <rss><channel>
+        <item>
+          <title>City Council Meeting Notes</title>
+          <link>https://example.com/notes</link>
+          <description>Minutes from today's session</description>
+        </item>
+      </channel></rss>
+    `;
+    const items = parseRssItems(xml, testSource);
+    expect(items).toHaveLength(1);
+    expect(items[0].publishedEstimated).toBe(true);
+  });
+
+  it("does not mark a dated item with publishedEstimated", () => {
+    const xml = `
+      <rss><channel>
+        <item>
+          <title>Dated Article</title>
+          <link>https://example.com/dated</link>
+          <pubDate>Sat, 15 Jun 2024 10:00:00 GMT</pubDate>
+          <description>Has date</description>
+        </item>
+      </channel></rss>
+    `;
+    const items = parseRssItems(xml, testSource);
+    expect(items).toHaveLength(1);
+    expect(items[0].publishedEstimated).toBeUndefined();
+  });
 });
 
 describe("parseAtomEntries", () => {
