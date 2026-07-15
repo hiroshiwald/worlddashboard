@@ -342,3 +342,33 @@ describe("extractEntitiesBatch: budget gating", () => {
     expect(usageQuery!.values).toEqual(["2026-08"]);
   });
 });
+
+// A rejection here must never propagate: entity-ingest.ts's wave loop calls
+// extractEntitiesBatch inside Promise.all, so an uncaught throw from one
+// batch would discard its already-completed (and, for recordUsage, already
+// billed) wave siblings' results too.
+describe("extractEntitiesBatch: SQL failures never throw", () => {
+  it("returns null (not throwing) when the budget-check read rejects", async () => {
+    const sql = (async () => {
+      throw new Error("connection reset");
+    }) as Sql;
+
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result).toBeNull();
+    expect(console.warn).toHaveBeenCalled();
+  });
+
+  it("still returns the parsed results (not throwing) when recording usage after a successful call rejects", async () => {
+    mockFetchResolved(anthropicResponse(JSON.stringify([{ index: 0, entities: [{ name: "Valid Org", type: "organization" }] }])));
+    let call = 0;
+    const sql = (async () => {
+      call += 1;
+      if (call === 1) return []; // budget-check read: no usage yet
+      throw new Error("connection reset"); // INSERT INTO llm_usage
+    }) as Sql;
+
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result!.get(0)![0].display).toBe("Valid Org");
+    expect(console.warn).toHaveBeenCalled();
+  });
+});

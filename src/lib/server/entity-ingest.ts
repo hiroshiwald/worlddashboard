@@ -226,6 +226,14 @@ function addNewEntityMention(
   else newEntities.set(canonicalName, { canonicalName, type, mentions: [mention] });
 }
 
+// Shared failure log for a single per-article extraction/classification
+// step — every per-article try/catch below (classification, heuristic
+// extraction, LLM merge) routes through this one call site so the message
+// and log level stay in sync.
+function logArticleFailure(articleId: number, err: unknown): void {
+  console.error(`processNewArticles: failed to process article ${articleId}, skipping (will retry next run)`, err);
+}
+
 // Classification runs inside its own try/catch: one pathological article
 // must not abort the whole batch. A failing article is logged and left out
 // of processedArticleIds, so it's simply not marked processed and retries
@@ -250,7 +258,7 @@ function processArticle(
     }
     return true;
   } catch (err) {
-    console.error(`processNewArticles: failed to process article ${article.id}, skipping (will retry next run)`, err);
+    logArticleFailure(article.id, err);
     return false;
   }
 }
@@ -297,7 +305,7 @@ function heuristicCandidatesForArticle(article: HeadArticle): Candidate[] | null
   try {
     return extractCandidates(article.title, article.summary);
   } catch (err) {
-    console.error(`processNewArticles: failed to process article ${article.id}, skipping (will retry next run)`, err);
+    logArticleFailure(article.id, err);
     return null;
   }
 }
@@ -327,29 +335,48 @@ function resolveArticleCandidates(
   try {
     return { candidates: mergeLlmWithDictionary(llmCandidates, article.title, article.summary), usedLlm: true };
   } catch (err) {
-    console.error(`processNewArticles: failed to process article ${article.id}, skipping (will retry next run)`, err);
+    logArticleFailure(article.id, err);
     return { candidates: null, usedLlm: false };
   }
 }
 
-// Heuristic-extracts every article in every wave from fromIndex onward —
-// used once the wall-clock deadline has passed, so none of these waves ever
-// call the LLM. Returns the count of articles it fell back for.
-function fallbackRemainingWaves(
-  waves: HeadArticle[][][],
+// Heuristic-extracts every article in every batch from fromIndex onward —
+// used once the wall-clock deadline has passed, so none of these batches
+// ever call the LLM. Returns the count of articles it fell back for.
+function fallbackRemainingBatches(
+  batches: HeadArticle[][],
   fromIndex: number,
   candidatesByArticle: Map<number, Candidate[] | null>,
 ): number {
   let count = 0;
-  for (const wave of waves.slice(fromIndex)) {
-    for (const batch of wave) {
-      for (const article of batch) {
-        candidatesByArticle.set(article.id, heuristicCandidatesForArticle(article));
-        count += 1;
-      }
+  for (const batch of batches.slice(fromIndex)) {
+    for (const article of batch) {
+      candidatesByArticle.set(article.id, heuristicCandidatesForArticle(article));
+      count += 1;
     }
   }
   return count;
+}
+
+// Resolves one wave's settled batch results into candidatesByArticle.
+// Returns how many articles in this wave actually used the LLM.
+function applyWaveResults(
+  wave: HeadArticle[][],
+  waveResults: (Map<number, Candidate[]> | null)[],
+  candidatesByArticle: Map<number, Candidate[] | null>,
+): number {
+  let llmUsed = 0;
+  for (let batchIndex = 0; batchIndex < wave.length; batchIndex++) {
+    const batch = wave[batchIndex];
+    const llmResult = waveResults[batchIndex];
+    for (let i = 0; i < batch.length; i++) {
+      const article = batch[i];
+      const { candidates, usedLlm } = resolveArticleCandidates(article, llmResult?.get(i));
+      candidatesByArticle.set(article.id, candidates);
+      if (usedLlm) llmUsed += 1;
+    }
+  }
+  return llmUsed;
 }
 
 // Runs LLM batches in waves of up to LLM_WAVE_SIZE concurrent Anthropic
@@ -366,37 +393,27 @@ async function extractAllWithLlm(
   deadline: number = Date.now() + LLM_TIME_BUDGET_MS,
 ): Promise<CandidateExtractionResult> {
   const candidatesByArticle = new Map<number, Candidate[] | null>();
-  const waves = chunkArticles(chunkArticles(heads, LLM_BATCH_SIZE), LLM_WAVE_SIZE);
+  const batches = chunkArticles(heads, LLM_BATCH_SIZE);
   let llmArticleCount = 0;
   let fallbackCount = 0;
 
-  for (let waveIndex = 0; waveIndex < waves.length; waveIndex++) {
+  for (let i = 0; i < batches.length; i += LLM_WAVE_SIZE) {
     if (Date.now() >= deadline) {
-      fallbackCount += fallbackRemainingWaves(waves, waveIndex, candidatesByArticle);
+      fallbackCount += fallbackRemainingBatches(batches, i, candidatesByArticle);
       break;
     }
 
-    const wave = waves[waveIndex];
+    const wave = batches.slice(i, i + LLM_WAVE_SIZE);
     const waveResults = await Promise.all(
       wave.map((batch) =>
-        extractEntitiesBatch(sql, budgetUsd, batch.map((article, i) => ({ index: i, title: article.title, summary: article.summary }))),
+        extractEntitiesBatch(sql, budgetUsd, batch.map((article, j) => ({ index: j, title: article.title, summary: article.summary }))),
       ),
     );
-
-    for (let batchIndex = 0; batchIndex < wave.length; batchIndex++) {
-      const batch = wave[batchIndex];
-      const llmResult = waveResults[batchIndex];
-      for (let i = 0; i < batch.length; i++) {
-        const article = batch[i];
-        const { candidates, usedLlm } = resolveArticleCandidates(article, llmResult?.get(i));
-        candidatesByArticle.set(article.id, candidates);
-        if (usedLlm) llmArticleCount += 1;
-      }
-    }
+    llmArticleCount += applyWaveResults(wave, waveResults, candidatesByArticle);
   }
 
   if (fallbackCount > 0) {
-    console.warn(`processNewArticles: LLM wall-clock budget (${LLM_TIME_BUDGET_MS}ms) exceeded, ${fallbackCount} article(s) fell back to heuristic extraction`);
+    console.warn(`processNewArticles: LLM wall-clock deadline exceeded, ${fallbackCount} article(s) fell back to heuristic extraction`);
   }
   return { candidatesByArticle, llmArticleCount };
 }
