@@ -139,6 +139,27 @@ describe.skipIf(!TEST_DATABASE_URL)("signal engine integration (real Postgres)",
     expect(signals[0].severity).toBe("critical");
   });
 
+  it("loadSignals resolves evidence.articleIds to real article title/link/source", async () => {
+    const entityId = await seedEntity("Testland", "2026-06-01T00:00:00Z");
+    await seedSurgeHistory(entityId);
+    const publishedAt = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    const [{ id: articleId }] = (await sql!`
+      INSERT INTO articles (content_hash, title_signature, title, link, published_at, source_name, source_category, source_tier)
+      VALUES ('hash-evidence', 'sig-evidence', 'Testland Coverage', 'https://a.example.com/evidence', ${publishedAt}, 'Source A', 'world', '1')
+      RETURNING id
+    `) as [{ id: number }];
+    await sql!`INSERT INTO article_entities (article_id, entity_id) VALUES (${articleId}, ${entityId})`;
+
+    const settings = await getSettings(sql!);
+    await persistSignals(sql!, await runDetectors(sql!, settings), settings);
+
+    const [signal] = await loadSignals(sql!, ["new", "seen", "promoted"]);
+    expect(signal.evidence.articleIds).toEqual([Number(articleId)]);
+    expect(signal.articles).toEqual([
+      { id: Number(articleId), title: "Testland Coverage", link: "https://a.example.com/evidence", sourceName: "Source A" },
+    ]);
+  });
+
   it("getBrief returns ranked top stories with correct cluster size and source count", async () => {
     const publishedAt = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
     const [{ id: headId }] = (await sql!`

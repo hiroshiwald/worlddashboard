@@ -143,4 +143,40 @@ describe("loadSignals", () => {
       id: 1, dedupeKey: "surge:1", entityIds: [1], entityNames: ["Testland"], confidence: 0.9,
     });
   });
+
+  it("resolves evidence.articleIds to article refs via one batched query", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM signals s")) {
+        return [
+          {
+            id: "1", dedupe_key: "surge:1", type: "surge", severity: "critical", state: "new",
+            title: "Surge: Testland", entity_ids: [1], entity_names: ["Testland"],
+            confidence: 0.9, evidence: { observed24h: 10, articleIds: [5, 6] },
+            first_detected_at: "2026-07-15T00:00:00Z", last_evidence_at: "2026-07-15T01:00:00Z", state_changed_at: null,
+          },
+        ];
+      }
+      if (call.query.includes("FROM articles")) {
+        return [{ id: "5", title: "Article Five", link: "https://x.example.com/5", source_name: "Source X" }];
+      }
+      return [];
+    });
+    const [signal] = await loadSignals(sql, ["new"]);
+    expect(signal.articles).toEqual([{ id: 5, title: "Article Five", link: "https://x.example.com/5", sourceName: "Source X" }]);
+    expect(calls.some((c) => c.query.includes("FROM articles WHERE id = ANY"))).toBe(true);
+  });
+
+  it("skips the article query entirely when no signal has evidence.articleIds", async () => {
+    const { sql, calls } = makeMockSql(() => [
+      {
+        id: "1", dedupe_key: "cross_category:1", type: "cross_category", severity: "advisory", state: "new",
+        title: "Cross-category: Testland", entity_ids: [1], entity_names: ["Testland"],
+        confidence: 0.6, evidence: { categoryCount: 3 },
+        first_detected_at: "2026-07-15T00:00:00Z", last_evidence_at: "2026-07-15T01:00:00Z", state_changed_at: null,
+      },
+    ]);
+    const [signal] = await loadSignals(sql, ["new"]);
+    expect(signal.articles).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
 });

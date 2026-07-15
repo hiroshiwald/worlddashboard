@@ -11,6 +11,13 @@ export interface PersistResult {
   suppressed: number;
 }
 
+export interface EvidenceArticle {
+  id: number;
+  title: string;
+  link: string;
+  sourceName: string;
+}
+
 export interface SignalJson {
   id: number;
   dedupeKey: string;
@@ -22,6 +29,7 @@ export interface SignalJson {
   entityNames: string[];
   confidence: number;
   evidence: Record<string, unknown>;
+  articles: EvidenceArticle[];
   firstDetectedAt: string;
   lastEvidenceAt: string;
   stateChangedAt: string | null;
@@ -36,7 +44,12 @@ function toBigIntArray(value: unknown): number[] {
   return Array.isArray(value) ? value.map((v) => Number(v)) : [];
 }
 
-function parseSignalRow(row: SqlRow): SignalJson {
+function evidenceArticleIds(evidence: Record<string, unknown>): number[] {
+  const ids = evidence.articleIds;
+  return Array.isArray(ids) ? ids.map((id) => Number(id)) : [];
+}
+
+function parseSignalRow(row: SqlRow): Omit<SignalJson, "articles"> {
   return {
     id: Number(row.id),
     dedupeKey: String(row.dedupe_key),
@@ -52,6 +65,21 @@ function parseSignalRow(row: SqlRow): SignalJson {
     lastEvidenceAt: toIsoString(row.last_evidence_at),
     stateChangedAt: row.state_changed_at == null ? null : toIsoString(row.state_changed_at),
   };
+}
+
+/** Resolves evidence.articleIds to title/link/sourceName in one batched
+ * query shared across every signal in the result set (not a per-signal
+ * fetch) — an article referenced by an older signal's evidence may have
+ * aged out of retention, so a ref that resolves to nothing is dropped. */
+async function loadEvidenceArticles(sql: Sql, articleIds: number[]): Promise<Map<number, EvidenceArticle>> {
+  if (articleIds.length === 0) return new Map();
+  const rows = await sql`SELECT id, title, link, source_name FROM articles WHERE id = ANY(${articleIds}::bigint[])`;
+  return new Map(
+    rows.map((row) => [
+      Number(row.id),
+      { id: Number(row.id), title: String(row.title), link: String(row.link), sourceName: String(row.source_name) },
+    ]),
+  );
 }
 
 /** Signals in the given states, severity-first (critical, warning, advisory)
@@ -71,7 +99,17 @@ export async function loadSignals(sql: Sql, states: string[], limit?: number): P
     ORDER BY CASE s.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, s.last_evidence_at DESC
     LIMIT ${limit ?? null}
   `;
-  return rows.map(parseSignalRow);
+  const signals = rows.map(parseSignalRow);
+
+  const allArticleIds = Array.from(new Set(signals.flatMap((s) => evidenceArticleIds(s.evidence))));
+  const articlesById = await loadEvidenceArticles(sql, allArticleIds);
+
+  return signals.map((signal) => ({
+    ...signal,
+    articles: evidenceArticleIds(signal.evidence)
+      .map((id) => articlesById.get(id))
+      .filter((a): a is EvidenceArticle => a !== undefined),
+  }));
 }
 
 async function loadDismissedWithinCooldown(sql: Sql, dedupeKeys: string[], cooldownHours: number): Promise<Set<string>> {
