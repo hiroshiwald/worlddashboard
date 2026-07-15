@@ -126,11 +126,15 @@ describe("POST /api/candidates", () => {
     expect(res.status).toBe(404);
   });
 
-  it("accept inserts a tracked entity and deletes the candidate", async () => {
+  const candidateRow = {
+    name_norm: "kestrel basin", display_name: "Kestrel Basin", type_hint: "region",
+    first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: "2026-07-10T00:00:00Z",
+  };
+
+  it("accept inserts a tracked entity using last_seen_at (not first_seen_at) and deletes the candidate", async () => {
     const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("SELECT name_norm, display_name, type_hint")) {
-        return [{ name_norm: "kestrel basin", display_name: "Kestrel Basin", type_hint: "region", first_seen_at: "2026-07-01T00:00:00Z" }];
-      }
+      if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "1" }];
       return [];
     });
     currentSql = sql;
@@ -139,15 +143,28 @@ describe("POST /api/candidates", () => {
     expect(res.status).toBe(200);
     const insertCall = calls.find((c) => c.query.includes("INSERT INTO entities"));
     expect(insertCall!.query).toContain("'tracked'");
-    expect(insertCall!.values).toEqual(["Kestrel Basin", "region", "2026-07-01T00:00:00Z", "2026-07-01T00:00:00Z"]);
+    expect(insertCall!.query).toContain("ON CONFLICT (canonical_name) DO NOTHING");
+    expect(insertCall!.values).toEqual(["Kestrel Basin", "region", "2026-07-01T00:00:00Z", "2026-07-10T00:00:00Z"]);
     expect(calls.some((c) => c.query.includes("DELETE FROM entity_candidates"))).toBe(true);
   });
 
-  it("dismiss inserts a dismissed entity using the candidate's type_hint", async () => {
+  it("accept 409s when a concurrent request already promoted the same name", async () => {
     const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("SELECT name_norm, display_name, type_hint")) {
-        return [{ name_norm: "kestrel basin", display_name: "Kestrel Basin", type_hint: "region", first_seen_at: "2026-07-01T00:00:00Z" }];
-      }
+      if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
+      if (call.query.includes("INSERT INTO entities")) return [];
+      return [];
+    });
+    currentSql = sql;
+    const res = await POST(postRequest({ nameNorm: "kestrel basin", action: "accept", type: "region" }));
+
+    expect(res.status).toBe(409);
+    expect(calls.some((c) => c.query.includes("DELETE FROM entity_candidates"))).toBe(false);
+  });
+
+  it("dismiss inserts a dismissed entity using the candidate's type_hint and last_seen_at", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "1" }];
       return [];
     });
     currentSql = sql;
@@ -156,7 +173,18 @@ describe("POST /api/candidates", () => {
     expect(res.status).toBe(200);
     const insertCall = calls.find((c) => c.query.includes("INSERT INTO entities"));
     expect(insertCall!.query).toContain("'dismissed'");
-    expect(insertCall!.values).toEqual(["Kestrel Basin", "region", "2026-07-01T00:00:00Z", "2026-07-01T00:00:00Z"]);
+    expect(insertCall!.values).toEqual(["Kestrel Basin", "region", "2026-07-01T00:00:00Z", "2026-07-10T00:00:00Z"]);
+  });
+
+  it("dismiss 409s when a concurrent request already promoted the same name", async () => {
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
+      if (call.query.includes("INSERT INTO entities")) return [];
+      return [];
+    });
+    currentSql = sql;
+    const res = await POST(postRequest({ nameNorm: "kestrel basin", action: "dismiss" }));
+    expect(res.status).toBe(409);
   });
 
   it("merge appends norm and display to the target entity's aliases and deletes the candidate", async () => {

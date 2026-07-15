@@ -85,11 +85,12 @@ interface CandidateSnapshot {
   displayName: string;
   typeHint: string;
   firstSeenAt: unknown;
+  lastSeenAt: unknown;
 }
 
 async function loadCandidate(sql: Sql, nameNorm: string): Promise<CandidateSnapshot | null> {
   const rows = await sql`
-    SELECT name_norm, display_name, type_hint, first_seen_at
+    SELECT name_norm, display_name, type_hint, first_seen_at, last_seen_at
     FROM entity_candidates
     WHERE name_norm = ${nameNorm}
   `;
@@ -100,6 +101,7 @@ async function loadCandidate(sql: Sql, nameNorm: string): Promise<CandidateSnaps
     displayName: String(row.display_name),
     typeHint: String(row.type_hint),
     firstSeenAt: row.first_seen_at,
+    lastSeenAt: row.last_seen_at,
   };
 }
 
@@ -107,20 +109,31 @@ async function deleteCandidate(sql: Sql, nameNorm: string): Promise<void> {
   await sql`DELETE FROM entity_candidates WHERE name_norm = ${nameNorm}`;
 }
 
-async function acceptCandidate(sql: Sql, candidate: CandidateSnapshot, type: string): Promise<void> {
-  await sql`
+// ON CONFLICT DO NOTHING + RETURNING guards a double-submitted accept/dismiss
+// (double-click, client retry): the losing request sees zero returned rows
+// instead of throwing an uncaught unique-violation on canonical_name.
+async function acceptCandidate(sql: Sql, candidate: CandidateSnapshot, type: string): Promise<boolean> {
+  const result = await sql`
     INSERT INTO entities (canonical_name, type, status, first_seen_at, last_seen_at)
-    VALUES (${candidate.displayName}, ${type}, 'tracked', ${candidate.firstSeenAt}, ${candidate.firstSeenAt})
+    VALUES (${candidate.displayName}, ${type}, 'tracked', ${candidate.firstSeenAt}, ${candidate.lastSeenAt})
+    ON CONFLICT (canonical_name) DO NOTHING
+    RETURNING id
   `;
+  if (result.length === 0) return false;
   await deleteCandidate(sql, candidate.nameNorm);
+  return true;
 }
 
-async function dismissCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<void> {
-  await sql`
+async function dismissCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<boolean> {
+  const result = await sql`
     INSERT INTO entities (canonical_name, type, status, first_seen_at, last_seen_at)
-    VALUES (${candidate.displayName}, ${candidate.typeHint}, 'dismissed', ${candidate.firstSeenAt}, ${candidate.firstSeenAt})
+    VALUES (${candidate.displayName}, ${candidate.typeHint}, 'dismissed', ${candidate.firstSeenAt}, ${candidate.lastSeenAt})
+    ON CONFLICT (canonical_name) DO NOTHING
+    RETURNING id
   `;
+  if (result.length === 0) return false;
   await deleteCandidate(sql, candidate.nameNorm);
+  return true;
 }
 
 /** Returns false if mergeInto doesn't name an existing entity (caller 404s). */
@@ -142,9 +155,12 @@ function validateActionFields(action: CandidateAction): string | null {
   return null;
 }
 
+const CONFLICT_MESSAGE = "An entity with this name was already promoted by a concurrent request";
+
 async function dispatchAction(sql: Sql, candidate: CandidateSnapshot, action: CandidateAction): Promise<NextResponse> {
   if (action.action === "accept") {
-    await acceptCandidate(sql, candidate, action.type!);
+    const accepted = await acceptCandidate(sql, candidate, action.type!);
+    if (!accepted) return NextResponse.json({ error: CONFLICT_MESSAGE }, { status: 409 });
     return NextResponse.json({ ok: true });
   }
   if (action.action === "merge") {
@@ -154,7 +170,8 @@ async function dispatchAction(sql: Sql, candidate: CandidateSnapshot, action: Ca
     }
     return NextResponse.json({ ok: true });
   }
-  await dismissCandidate(sql, candidate);
+  const dismissed = await dismissCandidate(sql, candidate);
+  if (!dismissed) return NextResponse.json({ error: CONFLICT_MESSAGE }, { status: 409 });
   return NextResponse.json({ ok: true });
 }
 

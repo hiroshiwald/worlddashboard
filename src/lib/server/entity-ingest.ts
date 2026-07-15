@@ -85,7 +85,7 @@ function buildRegistryIndex(rows: SqlRow[]): Map<string, EntityRecord> {
 }
 
 async function loadEntityRegistry(sql: Sql): Promise<Map<string, EntityRecord>> {
-  const rows = await sql`SELECT id, canonical_name, type, aliases FROM entities`;
+  const rows = await sql`SELECT id, canonical_name, type, aliases FROM entities ORDER BY id ASC`;
   return buildRegistryIndex(rows);
 }
 
@@ -251,28 +251,34 @@ function resolveNewEntityMentions(
   return mentions;
 }
 
-// ---- article_entities ----
+// ---- mention dedup ----
 
-function dedupeArticleEntityPairs(mentions: ResolvedMention[]): { articleId: number; entityId: number }[] {
+// A single article can produce two resolved mentions of the same entity when
+// two different surface forms in its text both normalize to aliases of that
+// entity (e.g. "US" and "United States" both present, both registered on the
+// same entity). Applied once, upstream of article_entities/hourly/edges, so
+// none of those double-count a mention that's really one article's worth.
+export function dedupeMentions(mentions: ResolvedMention[]): ResolvedMention[] {
   const seen = new Set<string>();
-  const pairs: { articleId: number; entityId: number }[] = [];
+  const deduped: ResolvedMention[] = [];
   for (const m of mentions) {
     const key = `${m.articleId}:${m.entityId}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    pairs.push({ articleId: m.articleId, entityId: m.entityId });
+    deduped.push(m);
   }
-  return pairs;
+  return deduped;
 }
 
+// ---- article_entities ----
+
 async function insertArticleEntities(sql: Sql, mentions: ResolvedMention[]): Promise<void> {
-  const pairs = dedupeArticleEntityPairs(mentions);
-  if (pairs.length === 0) return;
+  if (mentions.length === 0) return;
   await sql`
     INSERT INTO article_entities (article_id, entity_id)
     SELECT * FROM UNNEST(
-      ${pairs.map((p) => p.articleId)}::bigint[],
-      ${pairs.map((p) => p.entityId)}::bigint[]
+      ${mentions.map((m) => m.articleId)}::bigint[],
+      ${mentions.map((m) => m.entityId)}::bigint[]
     )
     ON CONFLICT DO NOTHING
   `;
@@ -567,7 +573,7 @@ export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
 
   const insertedEntities = await upsertNewEntities(sql, classified.newEntities);
   const newEntityMentions = resolveNewEntityMentions(classified.newEntities, insertedEntities);
-  const allMentions = [...classified.resolved, ...newEntityMentions];
+  const allMentions = dedupeMentions([...classified.resolved, ...newEntityMentions]);
 
   await insertArticleEntities(sql, allMentions);
   await upsertHourlyMentions(sql, rollupHourlyMentions(allMentions));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 
 interface EntityProfile {
   id: number;
@@ -136,17 +136,24 @@ export default function EntityPanel({ entityId, dark, onClose, onSelectRelated }
   const [detail, setDetail] = useState<EntityDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
+  // Guards against an older entity's response landing after a newer one was
+  // requested (e.g. clicking a related entity before the current load finishes).
   const load = useCallback(async (id: number) => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     setDetail(null);
     try {
-      setDetail(await fetchEntityDetail(id));
+      const data = await fetchEntityDetail(id);
+      if (seq !== loadSeq.current) return;
+      setDetail(data);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       setError(e instanceof Error ? e.message : "Failed to load entity");
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, []);
 

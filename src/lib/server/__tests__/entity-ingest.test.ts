@@ -4,6 +4,7 @@ import {
   rollupHourlyMentions,
   rollupEntityEdges,
   rollupCandidate,
+  dedupeMentions,
 } from "../entity-ingest";
 import type { Sql, SqlRow } from "../db";
 
@@ -36,6 +37,21 @@ describe("selectUnprocessedHeads (via processNewArticles)", () => {
     expect(headsCall.query).toContain("FROM article_entities ae");
     expect(headsCall.query).toContain("ae.article_id = a.id");
     expect(headsCall.query).toContain("a.dup_group_id IS NULL");
+  });
+
+  it("orders the entity registry by id ascending for deterministic alias resolution", async () => {
+    const headRow = {
+      id: "1", title: "Test", summary: "", published_at: "2026-07-15T09:00:00Z",
+      first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A",
+    };
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [headRow];
+      return [];
+    });
+    await processNewArticles(sql);
+
+    const registryCall = calls.find((c) => c.query.includes("SELECT id, canonical_name, type, aliases"));
+    expect(registryCall!.query).toContain("ORDER BY id ASC");
   });
 
   it("returns zero stats and issues only the heads query when nothing is unprocessed", async () => {
@@ -73,6 +89,25 @@ describe("rollupHourlyMentions", () => {
       sourceCount: 1,
       sentimentSum: 0,
     });
+  });
+});
+
+describe("dedupeMentions", () => {
+  it("collapses two mentions of the same entity from the same article into one", () => {
+    const mentions = [
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0.5 },
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0.5 },
+    ];
+    expect(dedupeMentions(mentions)).toEqual([mentions[0]]);
+  });
+
+  it("keeps mentions of different entities, or the same entity from different articles", () => {
+    const mentions = [
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 1, entityId: 20, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 2, entityId: 10, effectiveAt: new Date("2026-07-15T10:00:00Z"), sourceName: "B", sentiment: 0 },
+    ];
+    expect(dedupeMentions(mentions)).toHaveLength(3);
   });
 });
 
@@ -215,6 +250,31 @@ describe("processNewArticles resolution order and idempotency", () => {
       const payload = JSON.parse(candidatesUpsertCall.values[0] as string);
       expect(payload.some((p: { name_norm: string }) => p.name_norm === "kestrel basin")).toBe(false);
     }
+  });
+
+  it("counts one mention, not two, when an article's text matches two aliases of the same entity", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) {
+        return [{ ...headRow, title: "Kestrel Basin, also known as Kestrel Valley, saw new activity today.", summary: "" }];
+      }
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) {
+        return [{ id: "50", canonical_name: "Kestrel Basin", type: "region", aliases: ["kestrel valley", "Kestrel Valley"] }];
+      }
+      if (call.query.includes("INSERT INTO entities")) return [];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+    expect(stats.mentionsWritten).toBe(1);
+
+    const articleEntitiesCall = findCall(calls, "INSERT INTO article_entities");
+    expect(articleEntitiesCall!.values[0]).toEqual([1]);
+    expect(articleEntitiesCall!.values[1]).toEqual([50]);
+
+    const hourlyCall = findCall(calls, "INSERT INTO entity_mentions_hourly");
+    const mentionsArray = hourlyCall!.values[2] as number[];
+    expect(mentionsArray).toEqual([1]);
   });
 
   it("creates a new entity for a first-time dictionary hit and links article_entities to its returned id", async () => {

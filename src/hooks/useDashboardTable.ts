@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { FeedItem, SortConfig } from "@/lib/types";
 import { useFeed } from "@/hooks/useSources";
 import { getThemeClasses, ThemeClasses } from "@/lib/theme";
@@ -44,11 +44,21 @@ interface UseDashboardTableReturn {
   setPanelEntityId: (id: number | null) => void;
 }
 
+// Never throws: a non-ok response, a malformed body, or a network error all
+// resolve to a 0 count (and warn) rather than leaving the badge unset.
 async function fetchCandidateCount(): Promise<number> {
-  const res = await fetch("/api/candidates", { cache: "no-store" });
-  if (!res.ok) return 0;
-  const data = await res.json();
-  return Array.isArray(data.candidates) ? data.candidates.length : 0;
+  try {
+    const res = await fetch("/api/candidates", { cache: "no-store" });
+    if (!res.ok) {
+      console.warn(`[useDashboardTable] /api/candidates returned ${res.status}, defaulting count to 0`);
+      return 0;
+    }
+    const data = await res.json();
+    return Array.isArray(data.candidates) ? data.candidates.length : 0;
+  } catch (err) {
+    console.warn("[useDashboardTable] /api/candidates fetch failed, defaulting count to 0", err);
+    return 0;
+  }
 }
 
 // Resolves a clicked name to a tracked entity id. Returns null (and warns)
@@ -129,6 +139,7 @@ export function useDashboardTable(): UseDashboardTableReturn {
   const [activeTab, setActiveTab] = useState<TabKey>("feeds");
   const [candidateCount, setCandidateCount] = useState(0);
   const [panelEntityId, setPanelEntityId] = useState<number | null>(null);
+  const entityClickSeq = useRef(0);
 
   useEffect(() => {
     const saved = localStorage.getItem("wd-theme");
@@ -136,8 +147,8 @@ export function useDashboardTable(): UseDashboardTableReturn {
   }, []);
 
   useEffect(() => {
-    // Fire-and-forget: fetchCandidateCount never throws (it swallows a
-    // non-ok response into a 0 count), so there's nothing to catch here.
+    // Fire-and-forget: fetchCandidateCount has its own try/catch and always
+    // resolves (never rejects), so there's nothing further to catch here.
     fetchCandidateCount().then(setCandidateCount);
   }, []);
 
@@ -177,8 +188,13 @@ export function useDashboardTable(): UseDashboardTableReturn {
 
   const t = getThemeClasses(dark);
 
+  // Guards against out-of-order resolution: if the user clicks a second
+  // entity before the first click's fetch resolves, only the LATEST click's
+  // result is allowed to update state.
   const handleEntityClick = async (name: string) => {
+    const seq = ++entityClickSeq.current;
     const entityId = await resolveEntityIdByName(name);
+    if (seq !== entityClickSeq.current) return;
     if (entityId !== null) {
       setPanelEntityId(entityId);
       return;

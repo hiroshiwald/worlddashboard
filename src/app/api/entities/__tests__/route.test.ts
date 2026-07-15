@@ -9,8 +9,12 @@ vi.mock("@/lib/server/db", () => ({
 }));
 
 function makeMockSql(rows: SqlRow[]) {
-  const sql = (async () => rows) as Sql;
-  return sql;
+  const calls: string[] = [];
+  const sql = (async (strings: TemplateStringsArray) => {
+    calls.push(strings.join(" ? "));
+    return rows;
+  }) as Sql;
+  return { sql, calls };
 }
 
 function getRequest(name: string | null): NextRequest {
@@ -42,15 +46,16 @@ describe("GET /api/entities", () => {
   });
 
   it("404s when no entity matches", async () => {
-    currentSql = makeMockSql([]);
+    currentSql = makeMockSql([]).sql;
     const res = await GET(getRequest("Nonexistent Place"));
     expect(res.status).toBe(404);
   });
 
   it("resolves by normalized canonical name (case + diacritics)", async () => {
-    currentSql = makeMockSql([
+    const mock = makeMockSql([
       { id: "3", canonical_name: "Müller", type: "person", status: "tracked", aliases: [] },
     ]);
+    currentSql = mock.sql;
     const res = await GET(getRequest("muller"));
     const body = await res.json();
     expect(res.status).toBe(200);
@@ -58,12 +63,20 @@ describe("GET /api/entities", () => {
   });
 
   it("resolves by normalized alias", async () => {
-    currentSql = makeMockSql([
+    const mock = makeMockSql([
       { id: "1", canonical_name: "United States", type: "country", status: "tracked", aliases: ["US", "USA"] },
     ]);
+    currentSql = mock.sql;
     const res = await GET(getRequest("usa"));
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.id).toBe(1);
+  });
+
+  it("orders by id ascending for deterministic resolution when aliases collide across rows", async () => {
+    const mock = makeMockSql([]);
+    currentSql = mock.sql;
+    await GET(getRequest("Russia"));
+    expect(mock.calls[0]).toContain("ORDER BY id ASC");
   });
 });

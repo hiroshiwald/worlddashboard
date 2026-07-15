@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
   }
 
   const sql = getSql();
-  const rows = await sql`SELECT id, canonical_name, type, status, aliases FROM entities`;
+  const rows = await sql`SELECT id, canonical_name, type, status, aliases FROM entities ORDER BY id ASC`;
   const match = findByNormalizedName(rows.map(parseEntityRow), normalizeName(name));
   if (!match) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
