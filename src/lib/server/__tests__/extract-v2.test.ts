@@ -80,9 +80,6 @@ describe("extractCandidates", () => {
   });
 
   it("'U.K.' resolves to United Kingdom via the dictionary layer", () => {
-    // Bare "UK" is blocked by entity-extractor's 2-char minimum match length
-    // (a pre-existing floor outside this task's file scope, unaffected by
-    // the alias additions here) — "U.K." clears it at 4 characters.
     const candidates = extractCandidates("U.K. ministers announced new sanctions today.", "");
     const uk = candidates.find((c) => c.norm === "united kingdom");
     expect(uk).toEqual({
@@ -91,6 +88,55 @@ describe("extractCandidates", () => {
       typeHint: "country",
       layer: "dictionary",
     });
+  });
+
+  it("bare all-caps 'UK' resolves to United Kingdom (acronym case-sensitivity lifts the 2-char floor)", () => {
+    const candidates = extractCandidates("UK strikes trade deal", "");
+    const uk = candidates.find((c) => c.norm === "united kingdom");
+    expect(uk).toEqual({
+      display: "United Kingdom",
+      norm: "united kingdom",
+      typeHint: "country",
+      layer: "dictionary",
+    });
+  });
+
+  it("'Kane on ice' yields no ICE mention (lowercase acronym collision blocked)", () => {
+    const candidates = extractCandidates("Kane on ice", "");
+    expect(candidates.find((c) => c.norm === "ice")).toBeUndefined();
+  });
+
+  it("'DeepSeek releases R2' yields a product-pattern candidate", () => {
+    const candidates = extractCandidates("DeepSeek releases R2", "");
+    const deepseek = candidates.find((c) => c.norm === "deepseek");
+    expect(deepseek).toEqual({
+      display: "DeepSeek",
+      norm: "deepseek",
+      typeHint: "other",
+      layer: "product-pattern",
+    });
+  });
+
+  it("product-pattern layer skips stoplisted disease/date shapes", () => {
+    const candidates = extractCandidates("COVID-19 cases rise across the region.", "");
+    expect(candidates.find((c) => c.layer === "product-pattern" && c.norm === "covid-19")).toBeUndefined();
+  });
+
+  it("product-pattern layer catches a digit-token model name (GPT-5o)", () => {
+    const candidates = extractCandidates("OpenAI unveils GPT-5o with new capabilities.", "");
+    const model = candidates.find((c) => c.norm === "gpt-5o");
+    expect(model).toEqual({ display: "GPT-5o", norm: "gpt-5o", typeHint: "other", layer: "product-pattern" });
+  });
+
+  it("product-pattern layer catches a digit-token product name (A320neo)", () => {
+    const candidates = extractCandidates("Airbus delivers the first A320neo to the airline.", "");
+    const model = candidates.find((c) => c.norm === "a320neo");
+    expect(model).toEqual({ display: "A320neo", norm: "a320neo", typeHint: "other", layer: "product-pattern" });
+  });
+
+  it("product-pattern layer ignores an ordinary capitalized word with no digit or interior cap", () => {
+    const candidates = extractCandidates("Analysts issued a report today.", "");
+    expect(candidates.find((c) => c.layer === "product-pattern")).toBeUndefined();
   });
 
   it("the new 'Great Britain' alias resolves to United Kingdom via the dictionary layer", () => {
@@ -149,5 +195,29 @@ describe("addCandidate layer priority", () => {
     addCandidate(map, "Veltrax Inc", "organization", "person-regex");
 
     expect(map.get("veltrax")!.display).toBe("Veltrax");
+  });
+
+  it("llm outranks compromise/acronym/person-regex but not dictionary", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Veltrax", "person", "compromise");
+    addCandidate(map, "Veltrax", "organization", "llm");
+    expect(map.get("veltrax")!.layer).toBe("llm");
+    expect(map.get("veltrax")!.typeHint).toBe("organization");
+
+    addCandidate(map, "Veltrax", "country", "dictionary");
+    expect(map.get("veltrax")!.layer).toBe("dictionary");
+  });
+
+  it("carries roleContext through when the llm candidate wins priority", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Jane Doe", "person", "llm", "former IRGC commander");
+    expect(map.get("jane doe")!.roleContext).toBe("former IRGC commander");
+  });
+
+  it("drops roleContext when a higher-priority layer without one wins", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Jane Doe", "person", "llm", "former IRGC commander");
+    addCandidate(map, "Jane Doe", "organization", "dictionary");
+    expect(map.get("jane doe")!.roleContext).toBeUndefined();
   });
 });

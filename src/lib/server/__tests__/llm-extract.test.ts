@@ -1,0 +1,318 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  isLlmConfigured,
+  extractEntitiesBatch,
+  getLlmMonthStats,
+  estimateCostUsd,
+  MODEL,
+} from "../llm-extract";
+import type { Sql, SqlRow } from "../db";
+
+interface RecordedCall {
+  query: string;
+  values: unknown[];
+}
+
+function makeMockSql(handler: (call: RecordedCall) => SqlRow[]) {
+  const calls: RecordedCall[] = [];
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const call: RecordedCall = { query: strings.join(" ? "), values };
+    calls.push(call);
+    return handler(call);
+  }) as Sql;
+  return { sql, calls };
+}
+
+function emptyUsageSql() {
+  return makeMockSql(() => []);
+}
+
+function usageRow(inputTokens: number, outputTokens: number, calls: number): SqlRow {
+  return { input_tokens: inputTokens, output_tokens: outputTokens, calls };
+}
+
+function anthropicResponse(text: string, usage = { input_tokens: 100, output_tokens: 50 }) {
+  return { content: [{ type: "text", text }], usage };
+}
+
+function mockFetchResolved(body: unknown, opts: { ok?: boolean; status?: number } = {}) {
+  const fn = vi.fn().mockResolvedValue({
+    ok: opts.ok ?? true,
+    status: opts.status ?? 200,
+    json: async () => body,
+  });
+  vi.stubGlobal("fetch", fn);
+  return fn;
+}
+
+const originalKey = process.env.ANTHROPIC_API_KEY;
+
+beforeEach(() => {
+  process.env.ANTHROPIC_API_KEY = "test-key-do-not-log";
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  // Guard: any test that reaches fetch without installing its own mock
+  // throws instead of silently making a real network call.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => {
+      throw new Error("fetch must be mocked per test");
+    }),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  if (originalKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = originalKey;
+});
+
+describe("isLlmConfigured", () => {
+  it("true when ANTHROPIC_API_KEY is set", () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    expect(isLlmConfigured()).toBe(true);
+  });
+
+  it("false when unset", () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    expect(isLlmConfigured()).toBe(false);
+  });
+});
+
+describe("estimateCostUsd / getLlmMonthStats", () => {
+  it("computes cost from input/output token rates", () => {
+    expect(estimateCostUsd(1_000_000, 0)).toBeCloseTo(1.0, 6);
+    expect(estimateCostUsd(0, 1_000_000)).toBeCloseTo(5.0, 6);
+    expect(estimateCostUsd(500_000, 200_000)).toBeCloseTo(0.5 + 1.0, 6);
+  });
+
+  it("returns zeroed stats when the month has no row", async () => {
+    const { sql } = emptyUsageSql();
+    const stats = await getLlmMonthStats(sql, new Date("2026-07-15T00:00:00Z"));
+    expect(stats).toEqual({ month: "2026-07", inputTokens: 0, outputTokens: 0, calls: 0, costUsd: 0 });
+  });
+
+  it("reads the existing month row and derives costUsd", async () => {
+    const { sql } = makeMockSql(() => [usageRow(2_000_000, 1_000_000, 4)]);
+    const stats = await getLlmMonthStats(sql, new Date("2026-07-15T00:00:00Z"));
+    expect(stats).toEqual({ month: "2026-07", inputTokens: 2_000_000, outputTokens: 1_000_000, calls: 4, costUsd: 7 });
+  });
+});
+
+describe("extractEntitiesBatch: request shape", () => {
+  it("calls api.anthropic.com with the pinned model and required headers", async () => {
+    const fetchMock = mockFetchResolved(anthropicResponse("[]"));
+    const { sql } = emptyUsageSql();
+
+    await extractEntitiesBatch(sql, 5, [{ index: 0, title: "Russia announces new policy", summary: "" }]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.anthropic.com/v1/messages");
+    expect(init.headers["x-api-key"]).toBe("test-key-do-not-log");
+    expect(init.headers["anthropic-version"]).toBe("2023-06-01");
+    expect(init.headers["content-type"]).toBe("application/json");
+    const body = JSON.parse(init.body);
+    expect(body.model).toBe(MODEL);
+    expect(body.max_tokens).toBe(2000);
+  });
+
+  it("truncates summary to 300 chars in the user message", async () => {
+    const fetchMock = mockFetchResolved(anthropicResponse("[]"));
+    const { sql } = emptyUsageSql();
+    const longSummary = "x".repeat(500);
+
+    await extractEntitiesBatch(sql, 5, [{ index: 0, title: "Title", summary: longSummary }]);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const userMessage = body.messages[0].content as string;
+    expect(userMessage).toContain("x".repeat(300));
+    expect(userMessage).not.toContain("x".repeat(301));
+  });
+
+  it("refuses a batch larger than 25 without calling fetch", async () => {
+    const { sql } = emptyUsageSql();
+    const articles = Array.from({ length: 26 }, (_, i) => ({ index: i, title: `T${i}`, summary: "" }));
+    const result = await extractEntitiesBatch(sql, 5, articles);
+    expect(result).toBeNull();
+    expect(console.warn).toHaveBeenCalled();
+  });
+
+  it("returns an empty map for an empty article list without calling fetch", async () => {
+    const { sql } = emptyUsageSql();
+    const result = await extractEntitiesBatch(sql, 5, []);
+    expect(result).toEqual(new Map());
+  });
+});
+
+describe("extractEntitiesBatch: parsing", () => {
+  it("parses a clean JSON array into per-article Candidate lists with type mapping", async () => {
+    mockFetchResolved(
+      anthropicResponse(
+        JSON.stringify([
+          { index: 0, entities: [{ name: "Firstname Lastname", type: "person", role: "former IRGC commander" }] },
+          { index: 1, entities: [{ name: "DeepSeek", type: "organization" }, { name: "Gaza", type: "place" }, { name: "R2", type: "product" }] },
+        ]),
+      ),
+    );
+    const { sql, calls } = emptyUsageSql();
+
+    const result = await extractEntitiesBatch(sql, 5, [
+      { index: 0, title: "A", summary: "" },
+      { index: 1, title: "B", summary: "" },
+    ]);
+
+    expect(result).not.toBeNull();
+    const article0 = result!.get(0)!;
+    expect(article0).toHaveLength(1);
+    expect(article0[0]).toMatchObject({
+      display: "Firstname Lastname",
+      typeHint: "person",
+      layer: "llm",
+      roleContext: "former IRGC commander",
+    });
+
+    const article1 = result!.get(1)!;
+    expect(article1.find((c) => c.display === "DeepSeek")).toMatchObject({ typeHint: "organization" });
+    expect(article1.find((c) => c.display === "Gaza")).toMatchObject({ typeHint: "region" });
+    expect(article1.find((c) => c.display === "R2")).toMatchObject({ typeHint: "other" });
+
+    // Usage recorded after a successfully-parsed call.
+    const upsertCall = calls.find((c) => c.query.includes("INSERT INTO llm_usage"));
+    expect(upsertCall).toBeDefined();
+  });
+
+  it("strips markdown code-fence wrapping around the JSON array", async () => {
+    mockFetchResolved(anthropicResponse('Here you go:\n```json\n[{"index": 0, "entities": []}]\n```'));
+    const { sql } = emptyUsageSql();
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result).toEqual(new Map([[0, []]]));
+  });
+
+  it("returns null for a batch that isn't valid JSON at all", async () => {
+    mockFetchResolved(anthropicResponse("Sorry, I can't help with that."));
+    const { sql } = emptyUsageSql();
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result).toBeNull();
+    expect(console.warn).toHaveBeenCalled();
+  });
+
+  it("skips a malformed per-article entry but keeps the rest of the batch", async () => {
+    mockFetchResolved(
+      anthropicResponse(
+        JSON.stringify([
+          { index: 0, entities: [{ name: "Valid Org", type: "organization" }] },
+          { index: 1, entities: "not-an-array" },
+          { notAnIndex: true },
+        ]),
+      ),
+    );
+    const { sql } = emptyUsageSql();
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result!.size).toBe(1);
+    expect(result!.get(0)![0].display).toBe("Valid Org");
+  });
+
+  it("drops an entity with an invalid type but keeps the article result", async () => {
+    mockFetchResolved(
+      anthropicResponse(
+        JSON.stringify([{ index: 0, entities: [{ name: "Bad", type: "planet" }, { name: "Good Org", type: "organization" }] }]),
+      ),
+    );
+    const { sql } = emptyUsageSql();
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result!.get(0)).toHaveLength(1);
+    expect(result!.get(0)![0].display).toBe("Good Org");
+  });
+
+  it("returns null (not throwing) on a non-2xx response", async () => {
+    mockFetchResolved({}, { ok: false, status: 529 });
+    const { sql } = emptyUsageSql();
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result).toBeNull();
+  });
+
+  it("returns null (not throwing) when fetch itself rejects", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    const { sql } = emptyUsageSql();
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result).toBeNull();
+  });
+
+  it("never logs the API key on any failure path", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    const { sql } = emptyUsageSql();
+    await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    const warnCalls = (console.warn as ReturnType<typeof vi.fn>).mock.calls.flat();
+    for (const arg of warnCalls) {
+      expect(String(arg)).not.toContain("test-key-do-not-log");
+    }
+  });
+});
+
+describe("extractEntitiesBatch: budget gating", () => {
+  it("proceeds and records usage when under budget", async () => {
+    mockFetchResolved(anthropicResponse("[]", { input_tokens: 1000, output_tokens: 500 }));
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("SELECT input_tokens")) return [usageRow(0, 0, 0)];
+      return [];
+    });
+
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result).not.toBeNull();
+
+    const upsertCall = calls.find((c) => c.query.includes("INSERT INTO llm_usage"));
+    expect(upsertCall).toBeDefined();
+    expect(upsertCall!.values).toEqual([expect.any(String), 1000, 500]);
+  });
+
+  it("skips the call (returns null, warns) when already at budget", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      // $5 budget, exactly 5M input tokens spent = $5.00 spent already.
+      if (call.query.includes("SELECT input_tokens")) return [usageRow(5_000_000, 0, 10)];
+      return [];
+    });
+
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result).toBeNull();
+    expect(console.warn).toHaveBeenCalled();
+    expect(calls.some((c) => c.query.includes("INSERT INTO llm_usage"))).toBe(false);
+  });
+
+  it("skips the call when already over budget", async () => {
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("SELECT input_tokens")) return [usageRow(10_000_000, 0, 20)];
+      return [];
+    });
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(result).toBeNull();
+  });
+
+  it("does not call fetch at all when over budget", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("SELECT input_tokens")) return [usageRow(10_000_000, 0, 20)];
+      return [];
+    });
+    await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("queries the new month's usage after a month rollover, ignoring the prior month's spend", async () => {
+    mockFetchResolved(anthropicResponse("[]"));
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("SELECT input_tokens")) return []; // no row yet for the new month
+      return [];
+    });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-01T00:00:00Z"));
+    const result = await extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    vi.useRealTimers();
+
+    expect(result).not.toBeNull();
+    const usageQuery = calls.find((c) => c.query.includes("SELECT input_tokens"));
+    expect(usageQuery!.values).toEqual(["2026-08"]);
+  });
+});

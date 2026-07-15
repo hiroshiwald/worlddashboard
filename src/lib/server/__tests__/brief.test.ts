@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { computeStoryScore } from "../brief";
+import { computeStoryScore, computeLift, getBrief } from "../brief";
+import { DEFAULTS } from "../settings";
+import type { Sql, SqlRow } from "../db";
+
+function makeMockSql(handler: (query: string) => SqlRow[]): Sql {
+  return (async (strings: TemplateStringsArray) => handler(strings.join(" ? "))) as Sql;
+}
 
 describe("computeStoryScore", () => {
   it("hand-checked: clusterSize=3, age=0h", () => {
@@ -27,5 +33,68 @@ describe("computeStoryScore", () => {
 
   it("age 0 applies no decay", () => {
     expect(computeStoryScore(4, 0)).toBeCloseTo(Math.log(5), 10);
+  });
+});
+
+describe("computeLift", () => {
+  it("divides observed by baseline when baseline is above the floor", () => {
+    expect(computeLift(20, 5)).toBe(4);
+  });
+
+  it("applies the 0.5 floor when baseline is below it", () => {
+    // baselineDaily=0.1 would give lift=40; the 0.5 floor caps it at 6.
+    expect(computeLift(3, 0.1)).toBe(6);
+  });
+
+  it("applies the 0.5 floor when baseline is exactly zero", () => {
+    expect(computeLift(4, 0)).toBe(8);
+  });
+
+  it("a bigger spike over the same baseline always scores a higher lift", () => {
+    expect(computeLift(10, 2)).toBeGreaterThan(computeLift(6, 2));
+  });
+});
+
+describe("getBrief: movers + warmup", () => {
+  it("during warm-up (no epoch yet), movers is empty and warmup reflects the full window", async () => {
+    const sql = makeMockSql(() => []);
+    const brief = await getBrief(sql, DEFAULTS);
+    expect(brief.warmup).toEqual({ active: true, daysRemaining: DEFAULTS.warmup_days });
+    expect(brief.movers).toEqual([]);
+  });
+
+  it("post-warm-up, ranks movers by lift desc, filters sub-threshold entities, and caps at 5", async () => {
+    const oldEpoch = new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString();
+    const sql = makeMockSql((query) => {
+      if (query.includes("min_first_seen")) return [{ min_first_seen: oldEpoch }];
+      if (query.includes("baseline_sum")) {
+        return [
+          { entity_id: "1", canonical_name: "Alpha", observed_24h: 10, baseline_sum: 20 },
+          { entity_id: "2", canonical_name: "Bravo", observed_24h: 30, baseline_sum: 14 },
+          { entity_id: "3", canonical_name: "Charlie", observed_24h: 2, baseline_sum: 0 },
+        ];
+      }
+      return [];
+    });
+
+    const brief = await getBrief(sql, DEFAULTS);
+    expect(brief.warmup.active).toBe(false);
+    expect(brief.movers.map((m) => m.name)).toEqual(["Bravo", "Alpha"]);
+    expect(brief.movers.find((m) => m.name === "Charlie")).toBeUndefined();
+  });
+
+  it("caps movers at 5 even when more entities clear the threshold", async () => {
+    const oldEpoch = new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString();
+    const sql = makeMockSql((query) => {
+      if (query.includes("min_first_seen")) return [{ min_first_seen: oldEpoch }];
+      if (query.includes("baseline_sum")) {
+        return Array.from({ length: 8 }, (_, i) => ({
+          entity_id: String(i), canonical_name: `Entity${i}`, observed_24h: 10 + i, baseline_sum: 14,
+        }));
+      }
+      return [];
+    });
+    const brief = await getBrief(sql, DEFAULTS);
+    expect(brief.movers).toHaveLength(5);
   });
 });

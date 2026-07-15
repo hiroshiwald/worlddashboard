@@ -156,7 +156,13 @@ describe.skipIf(!TEST_DATABASE_URL)("entity-ingest integration (real Postgres)",
     const second = await processNewArticles(sql!);
     const after = await snapshotAggregates();
 
-    expect(second).toEqual({ articlesProcessed: 0, mentionsWritten: 0, newEntities: 0, candidatesTouched: 0 });
+    expect(second).toEqual({
+      articlesProcessed: 0,
+      mentionsWritten: 0,
+      newEntities: 0,
+      candidatesTouched: 0,
+      llm: { used: false, articles: 0, monthCostUsd: 0 },
+    });
     expect(after).toEqual(before);
   });
 

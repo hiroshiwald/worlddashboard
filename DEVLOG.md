@@ -1,5 +1,103 @@
 # World Dashboard Development Log
 
+## 2026-07-15 — LLM extraction layer (Haiku), precision fixes, lift ranking
+
+Added an optional LLM entity-extraction layer to catch what the heuristic
+stack structurally can't (uncommon people, startups, AI model names,
+transliterated names), plus precision fixes for acronym/word collisions and
+a lift-based "unusually active" ranking so mega-entities stop dominating the
+Brief by raw volume.
+
+- **`src/lib/server/llm-extract.ts`** (new): one Anthropic Messages API call
+  per batch of ≤25 articles, pinned to `claude-haiku-4-5-20251001`, plain
+  `fetch` (no SDK, per constraint — no new dependency). Defensive parsing
+  (strips markdown wrapping, validates shape per article, an unparseable
+  batch returns `null` rather than partial garbage), 25s timeout via
+  `AbortController`, no retries — the next hourly `/api/ingest` run is the
+  retry. Budget-gated against a new `llm_usage` month ledger
+  (`settings.llm_monthly_budget_usd`, default $5): reads accumulated spend
+  before every call, skips at/over budget. Every failure mode (not
+  configured, budget, network, timeout, non-2xx, unparseable JSON) returns
+  `null` — **never throws** — so `processNewArticles` never depends on the
+  LLM succeeding.
+- **`src/lib/server/extract-v2.ts`**: `CandidateLayer` gains `'llm'`
+  (priority just under `'dictionary'`) and `'product-pattern'` (lowest —
+  the free, no-LLM fallback for model/product names like `DeepSeek`,
+  `GPT-5o`, `A320neo`, via a digit-token or interior-caps regex, stoplisted
+  against disease/date shapes like `COVID-19`). `Candidate` gained an
+  optional `roleContext` that flows through `addCandidate`'s priority merge.
+  New `extractDictionaryOnlyCandidates` export for the LLM-path union.
+- **`src/lib/server/entity-ingest.ts`**: when `isLlmConfigured()`, batches
+  all cluster-head articles through `extractEntitiesBatch` in chunks of 25
+  (`chunkArticles`). A successful per-article LLM result unions with the
+  dictionary layer only (compromise/acronym/person-regex/product-pattern
+  skipped — the dictionary stays the canonical anchor); a failed/unparseable
+  batch falls back to the unchanged full heuristic stack. Candidate
+  extraction moved out of `processArticle`'s try/catch into its own
+  per-article-resilient step (`extractAllCandidates`), since it's now
+  sometimes async (LLM) and sometimes sync (heuristic) — classification
+  still has its own try/catch, preserving the existing one-bad-article
+  doesn't-sink-the-batch contract and its exact log message. `entity_candidates`
+  rows gained `contexts` (LLM role phrases, deduped, capped 3) and
+  `co_entities` (canonical names of tracked entities resolved in the SAME
+  article, deduped, capped 5) — computed by classifying every candidate in
+  an article first, then attaching the resolved-entity set to each
+  unresolved sighting.
+- **`src/lib/entity-extractor.ts`**: `matchDictionaryEntries` (shared with
+  the client tabs) now matches ACRONYM-form dictionary terms (all-uppercase
+  name/alias, 2-5 chars) case-sensitively — an occurrence only counts if
+  it's all-caps in the source — which also lifts the 3-char floor for them.
+  Fixes "WHO" matching the pronoun "who" and (once `ICE` was added to
+  `ORG_DICT` as a real collision example) "ICE" matching "ice". Also now
+  scans every occurrence of a term, not just the first, so an earlier
+  non-matching casing can't hide a later valid one.
+- **`src/lib/server/brief.ts`**: `movers` — top 5 tracked entities by
+  `lift = observed24h / max(baselineDaily, 0.5)`, requiring `observed24h >=
+  3`, empty during warm-up. Reuses `detectors.ts`'s already-exported
+  `computeWarmupState`/`computeEffectiveBaselineDays` (imports only) and
+  duplicates its own tiny system-epoch query rather than exporting a new
+  helper from `detectors.ts` — deliberately, given the explicit "don't touch
+  detectors.ts" scope for this task. `src/app/api/ingest/route.ts` duplicates
+  the same tiny epoch query for its own `compute-warmup` stage, for the same
+  reason (small, established duplication pattern already used twice within
+  `detectors.ts` itself).
+- **`migrations/004_llm_and_candidate_context.sql`** (new, never edits
+  001-003): `llm_usage` table; `entity_candidates.contexts`/`co_entities`
+  (`TEXT[] NOT NULL DEFAULT '{}'`).
+- UI: `ReviewTab` candidate cards render `contexts`/`coEntities` when
+  present; `BriefTab` gained a `BriefMoversSection` "Unusually active" chip
+  strip (hidden when empty) plus a muted warm-up message.
+
+**Deviations from the task brief** (each has a one-line reason):
+- UK/EU/UN aliases were already present in `entity-dictionaries.ts` from an
+  earlier session (commit `3f33cee`) — no change needed there; added `ICE`
+  instead so the required "Kane on ice yields no ICE mention" test is a real
+  regression test rather than vacuously true (no `ICE` entry existed at all
+  before this change).
+- `console.warn` on a budget-exhausted skip fires per batch call, not
+  strictly once per run, when a run has multiple 25-article chunks — the
+  "once per run" wording would need extra state to enforce literally; in the
+  common case (one chunk, or budget exhausted before the run starts) it's
+  already once per run. Chose not to add shared/module-level state for a
+  log-spam nicety.
+- `entity_candidates`'s GET route (`/api/candidates`) and `ReviewTab` were
+  extended to expose `contexts`/`coEntities`, though not explicitly called
+  out as in-scope files — required for the explicitly-requested "ReviewTab
+  renders contexts/co_entities" UI task to have any data to render.
+- `api/ingest/route.ts`'s own `getSql`-mocked test previously left `sql` as
+  a non-callable `{}` stub, relying on every sql-touching call being routed
+  through an already-mocked module. The new `compute-warmup` stage queries
+  `sql` directly, so the test's `getSql` mock now returns a real callable
+  stub — a required, minimal fix, not a scope creep.
+
+**Gotchas for next time**: WHO/ICE historical mention-count pollution from
+before this fix self-heals via the existing 30-day article retention sweep
+— no backfill/migration needed for already-ingested rows. `toEqual` (not
+`toMatchObject`) assertions on full stats objects break loudly the moment a
+new field is added to a shared return type (`EntityIngestStats`,
+`CandidateSighting`) — two such assertions needed updating; grep for
+`toEqual({ articlesProcessed` before touching that type again.
+
 ## 2026-07-15 — Calibration fix-pack: news-time/watch-time conflation in the signal engine
 
 The signal engine shipped and immediately produced 140 signals, all

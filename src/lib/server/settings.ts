@@ -5,6 +5,7 @@ export interface Settings {
   dismiss_cooldown_hours: number;
   brief_max_blocks: number;
   warmup_days: number;
+  llm_monthly_budget_usd: number;
 }
 
 export const DEFAULTS: Settings = {
@@ -12,6 +13,7 @@ export const DEFAULTS: Settings = {
   dismiss_cooldown_hours: 72,
   brief_max_blocks: 10,
   warmup_days: 7,
+  llm_monthly_budget_usd: 5,
 };
 
 function isValidOverride(value: unknown): value is number {

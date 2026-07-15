@@ -1,11 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   processNewArticles,
   rollupHourlyMentions,
   rollupEntityEdges,
   rollupCandidate,
   dedupeMentions,
+  chunkArticles,
 } from "../entity-ingest";
+import { isLlmConfigured, extractEntitiesBatch } from "../llm-extract";
 import type { Sql, SqlRow } from "../db";
 
 // Only the "POISON" title throws; every other title delegates to the real
@@ -21,6 +23,16 @@ vi.mock("../extract-v2", async (importOriginal) => {
     },
   };
 });
+
+// Defaults every test in this file to the pre-LLM heuristic path (matching
+// this suite's original behavior, since it never sets ANTHROPIC_API_KEY);
+// the "LLM extraction path" describe block below overrides isLlmConfigured
+// per test.
+vi.mock("../llm-extract", () => ({
+  isLlmConfigured: vi.fn(() => false),
+  extractEntitiesBatch: vi.fn(),
+  getLlmMonthStats: vi.fn(async () => ({ month: "2026-07", inputTokens: 0, outputTokens: 0, calls: 0, costUsd: 0 })),
+}));
 
 interface RecordedCall {
   query: string;
@@ -72,7 +84,13 @@ describe("selectUnprocessedHeads (via processNewArticles)", () => {
     const { sql, calls } = makeMockSql(() => []);
     const stats = await processNewArticles(sql);
 
-    expect(stats).toEqual({ articlesProcessed: 0, mentionsWritten: 0, newEntities: 0, candidatesTouched: 0 });
+    expect(stats).toEqual({
+      articlesProcessed: 0,
+      mentionsWritten: 0,
+      newEntities: 0,
+      candidatesTouched: 0,
+      llm: { used: false, articles: 0, monthCostUsd: 0 },
+    });
     expect(calls).toHaveLength(1);
   });
 });
@@ -181,7 +199,7 @@ describe("rollupEntityEdges", () => {
 });
 
 describe("rollupCandidate", () => {
-  function sighting(overrides: Partial<{ effectiveAt: Date; sourceName: string; title: string }>) {
+  function sighting(overrides: Partial<{ effectiveAt: Date; sourceName: string; title: string; roleContext: string; coEntities: string[] }>) {
     return {
       norm: "kestrel basin",
       display: "Kestrel Basin",
@@ -189,6 +207,7 @@ describe("rollupCandidate", () => {
       effectiveAt: new Date("2026-07-15T09:00:00Z"),
       sourceName: "Source A",
       title: "Kestrel Basin sees new activity",
+      coEntities: [] as string[],
       ...overrides,
     };
   }
@@ -246,7 +265,7 @@ describe("rollupCandidate", () => {
     const row = rollupCandidate(
       "kestrel basin",
       [sighting({}), sighting({ sourceName: "Source B" })],
-      { nameNorm: "kestrel basin", displayName: "kestrel basin region", typeHint: "region", firstSeenAt: new Date("2026-07-14T00:00:00Z"), lastSeenAt: new Date("2026-07-14T00:00:00Z"), mentionCount: 1, sourceNames: [], dayCount: 1, sampleTitles: [] },
+      { nameNorm: "kestrel basin", displayName: "kestrel basin region", typeHint: "region", firstSeenAt: new Date("2026-07-14T00:00:00Z"), lastSeenAt: new Date("2026-07-14T00:00:00Z"), mentionCount: 1, sourceNames: [], dayCount: 1, sampleTitles: [], contexts: [], coEntities: [] },
     );
     expect(row.displayName).toBe("kestrel basin region");
   });
@@ -433,5 +452,118 @@ describe("review fix-pack: processed marker, last_seen_at bump, per-article resi
     expect(markCall.values[0]).toEqual([2]);
 
     consoleErrorSpy.mockRestore();
+  });
+});
+
+describe("chunkArticles", () => {
+  it("splits into chunks of the given size, with a smaller final chunk", () => {
+    const items = Array.from({ length: 7 }, (_, i) => i);
+    expect(chunkArticles(items, 3)).toEqual([[0, 1, 2], [3, 4, 5], [6]]);
+  });
+
+  it("returns a single chunk when every item fits within size", () => {
+    expect(chunkArticles([1, 2], 25)).toEqual([[1, 2]]);
+  });
+
+  it("returns an empty array for an empty input", () => {
+    expect(chunkArticles([], 25)).toEqual([]);
+  });
+});
+
+describe("LLM extraction path (entity-ingest wiring)", () => {
+  const headRow = {
+    id: "1",
+    title: "Firstname Lastname met officials in Iran today.",
+    summary: "",
+    published_at: "2026-07-15T09:00:00Z",
+    first_seen_at: "2026-07-15T09:00:00Z",
+    source_name: "Source A",
+  };
+
+  beforeEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    vi.mocked(extractEntitiesBatch).mockReset();
+  });
+
+  it("unions a successful LLM result with the dictionary layer only, threading roleContext into contexts and same-article resolutions into co_entities", async () => {
+    vi.mocked(extractEntitiesBatch).mockResolvedValue(
+      new Map([
+        [
+          0,
+          [
+            {
+              display: "Firstname Lastname",
+              norm: "firstname lastname",
+              typeHint: "person" as const,
+              layer: "llm" as const,
+              roleContext: "former IRGC commander",
+            },
+          ],
+        ],
+      ]),
+    );
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [headRow];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "1", canonical_name: "Iran" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.llm).toEqual({ used: true, articles: 1, monthCostUsd: 0 });
+    expect(stats.newEntities).toBe(1); // Iran, via the dictionary layer union
+
+    const candidatesUpsertCall = findCall(calls, "INSERT INTO entity_candidates");
+    expect(candidatesUpsertCall).toBeDefined();
+    const payload = JSON.parse(candidatesUpsertCall!.values[0] as string) as {
+      name_norm: string;
+      contexts: string[];
+      co_entities: string[];
+    }[];
+    const person = payload.find((p) => p.name_norm === "firstname lastname");
+    expect(person).toBeDefined();
+    expect(person!.contexts).toEqual(["former IRGC commander"]);
+    expect(person!.co_entities).toEqual(["Iran"]);
+  });
+
+  it("falls back to the full heuristic stack for an article whose batch returned null", async () => {
+    vi.mocked(extractEntitiesBatch).mockResolvedValue(null);
+    const russiaHead = { ...headRow, title: "Russia announces new policy." };
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [russiaHead];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.newEntities).toBe(1); // Russia still resolves via the heuristic dictionary layer
+    expect(stats.llm).toEqual({ used: false, articles: 0, monthCostUsd: 0 });
+  });
+
+  it("issues zero LLM-related queries when isLlmConfigured() is false", async () => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    const russiaHead = { ...headRow, title: "Russia announces new policy." };
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [russiaHead];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    await processNewArticles(sql);
+
+    expect(extractEntitiesBatch).not.toHaveBeenCalled();
+    expect(calls.some((c) => c.query.includes("llm_usage"))).toBe(false);
+    expect(calls.some((c) => c.query.includes("FROM settings"))).toBe(false);
   });
 });

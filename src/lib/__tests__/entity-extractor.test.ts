@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { extractEntities } from "../entity-extractor";
+import { extractEntities, matchDictionaryEntries } from "../entity-extractor";
 import { FeedItem } from "../types";
 
 function makeFeedItem(overrides: Partial<FeedItem> = {}): FeedItem {
@@ -145,5 +145,28 @@ describe("extractEntities", () => {
     expect(typeof entity.sentiment).toBe("number");
     expect(entity.sentiment).toBeGreaterThanOrEqual(-1);
     expect(entity.sentiment).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("matchDictionaryEntries: acronym case-sensitivity", () => {
+  const cases: { text: string; canonicalName: string; shouldMatch: boolean }[] = [
+    { text: "WHO Declares Emergency", canonicalName: "WHO", shouldMatch: true },
+    { text: "Who won the match", canonicalName: "WHO", shouldMatch: false },
+    { text: "Kane on ice", canonicalName: "ICE", shouldMatch: false },
+    { text: "ICE conducts raids in three cities", canonicalName: "ICE", shouldMatch: true },
+    { text: "UK strikes trade deal", canonicalName: "United Kingdom", shouldMatch: true },
+    { text: "uk strikes trade deal", canonicalName: "United Kingdom", shouldMatch: false },
+    { text: "U.K. ministers announced sanctions", canonicalName: "United Kingdom", shouldMatch: true },
+  ];
+
+  it.each(cases)("$text -> $canonicalName ($shouldMatch)", ({ text, canonicalName, shouldMatch }) => {
+    const names = matchDictionaryEntries(text).map((e) => e.name);
+    if (shouldMatch) expect(names).toContain(canonicalName);
+    else expect(names).not.toContain(canonicalName);
+  });
+
+  it("a later all-caps occurrence still matches even after an earlier lowercase occurrence of the same letters", () => {
+    const names = matchDictionaryEntries("who is responsible? WHO Declares Emergency").map((e) => e.name);
+    expect(names).toContain("WHO");
   });
 });

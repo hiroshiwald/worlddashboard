@@ -190,6 +190,7 @@ export const ORG_DICT: DictEntry[] = [
   { name: "Atlantic Council", aliases: [], type: "organization" },
   { name: "Samsung Electronics", aliases: ["Samsung Electronics Co"], type: "organization" },
   { name: "Pheu Thai", aliases: ["Pheu Thai Party"], type: "organization" },
+  { name: "ICE", aliases: ["Immigration and Customs Enforcement", "U.S. Immigration and Customs Enforcement"], type: "organization" },
 ];
 
 export const REGION_DICT: DictEntry[] = [

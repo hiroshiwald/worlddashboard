@@ -18,6 +18,8 @@ function toIsoString(value: unknown): string {
 function toCandidateJson(row: SqlRow) {
   const sourceNames = Array.isArray(row.source_names) ? (row.source_names as string[]) : [];
   const sampleTitles = Array.isArray(row.sample_titles) ? (row.sample_titles as string[]) : [];
+  const contexts = Array.isArray(row.contexts) ? (row.contexts as string[]) : [];
+  const coEntities = Array.isArray(row.co_entities) ? (row.co_entities as string[]) : [];
   return {
     nameNorm: String(row.name_norm),
     displayName: String(row.display_name),
@@ -29,6 +31,8 @@ function toCandidateJson(row: SqlRow) {
     sourceCount: sourceNames.length,
     dayCount: Number(row.day_count),
     sampleTitles,
+    contexts,
+    coEntities,
   };
 }
 
@@ -40,7 +44,7 @@ export async function GET() {
   const sql = getSql();
   const rows = await sql`
     SELECT name_norm, display_name, type_hint, first_seen_at, last_seen_at,
-           mention_count, source_names, day_count, sample_titles
+           mention_count, source_names, day_count, sample_titles, contexts, co_entities
     FROM entity_candidates
     WHERE array_length(source_names, 1) >= 3
       AND day_count >= 2

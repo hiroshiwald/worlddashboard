@@ -25,11 +25,25 @@ export interface BriefTopStory {
   sourceCount: number;
 }
 
+export interface BriefMover {
+  name: string;
+  observed24h: number;
+  baselineDaily: number;
+  lift: number;
+}
+
+export interface BriefWarmup {
+  active: boolean;
+  daysRemaining: number;
+}
+
 export interface BriefData {
   generatedAt: string;
   signals: BriefSignal[];
   newEntities: BriefNewEntity[];
   topStories: BriefTopStory[];
+  movers: BriefMover[];
+  warmup: BriefWarmup;
 }
 
 // Distinguishes "no database configured yet" from a genuine fetch/shape

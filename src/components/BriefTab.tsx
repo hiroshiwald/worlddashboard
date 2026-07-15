@@ -1,7 +1,7 @@
 "use client";
 
 import { useBriefTab } from "@/hooks/useBriefTab";
-import { BriefSignalsSection, BriefNewEntitiesSection, BriefTopStoriesSection } from "./brief";
+import { BriefSignalsSection, BriefNewEntitiesSection, BriefTopStoriesSection, BriefMoversSection } from "./brief";
 
 interface BriefTabProps {
   dark: boolean;
@@ -29,6 +29,7 @@ export default function BriefTab({ dark, onEntityClick }: BriefTabProps) {
 
   return (
     <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-4">
+      <BriefMoversSection movers={data.movers} warmup={data.warmup} dark={dark} onEntityClick={onEntityClick} />
       <BriefSignalsSection signals={data.signals} busyIds={busyIds} dark={dark} onAction={act} onEntityClick={onEntityClick} />
       <BriefNewEntitiesSection entities={data.newEntities} dark={dark} onEntityClick={onEntityClick} />
       <BriefTopStoriesSection stories={data.topStories} dark={dark} />
