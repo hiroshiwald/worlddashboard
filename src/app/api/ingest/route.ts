@@ -4,6 +4,7 @@ import { fetchAllFeeds, CacheEntry } from "@/lib/feed-fetcher";
 import { SourceMeta } from "@/lib/types";
 import { getSql } from "@/lib/server/db";
 import { persistArticles, sweepRetention } from "@/lib/server/ingest-writer";
+import { processNewArticles } from "@/lib/server/entity-ingest";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -32,24 +33,50 @@ function isAuthorized(req: NextRequest): boolean {
   return Boolean(cronSecret) && authHeader === `Bearer ${cronSecret}`;
 }
 
+class IngestStageError extends Error {
+  constructor(public readonly stage: string, public readonly cause: unknown) {
+    super(`Ingest stage "${stage}" failed`);
+  }
+}
+
+async function runStage<T>(stage: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    throw new IngestStageError(stage, err);
+  }
+}
+
+// Every stage is wrapped so a mid-pipeline throw is attributable: the
+// response names which stage failed and includes whatever counts prior
+// stages already produced, instead of a generic 500 that can't distinguish
+// a feed-fetch outage from an entity-step bug.
 async function runIngest() {
   const start = Date.now();
-  const { items, feedsAttempted, feedsSucceeded } = await fetchAllFeeds(
-    loadSources(),
-    ingestCache,
-  );
+  const counts: Record<string, unknown> = {};
 
-  const sql = getSql();
-  const { inserted, duplicates } = await persistArticles(sql, items);
-  await sweepRetention(sql);
+  try {
+    const { items, feedsAttempted, feedsSucceeded } = await runStage("fetch-feeds", () =>
+      fetchAllFeeds(loadSources(), ingestCache),
+    );
+    counts.feedsSucceeded = feedsSucceeded;
+    counts.feedsAttempted = feedsAttempted;
 
-  return NextResponse.json({
-    inserted,
-    duplicates,
-    feedsSucceeded,
-    feedsAttempted,
-    tookMs: Date.now() - start,
-  });
+    const sql = getSql();
+    const { inserted, duplicates } = await runStage("persist-articles", () => persistArticles(sql, items));
+    counts.inserted = inserted;
+    counts.duplicates = duplicates;
+
+    await runStage("sweep-retention", () => sweepRetention(sql));
+    counts.entities = await runStage("process-entities", () => processNewArticles(sql));
+
+    return NextResponse.json({ ...counts, tookMs: Date.now() - start });
+  } catch (err) {
+    const stage = err instanceof IngestStageError ? err.stage : "unknown";
+    const cause = err instanceof IngestStageError ? err.cause : err;
+    console.error(`[ingest] stage "${stage}" failed`, cause);
+    return NextResponse.json({ error: "Ingest failed", stage, ...counts }, { status: 500 });
+  }
 }
 
 function checkAccess(req: NextRequest): NextResponse | null {

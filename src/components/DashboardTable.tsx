@@ -2,6 +2,7 @@
 
 import { useDashboardTable } from "@/hooks/useDashboardTable";
 import HeaderBar from "./HeaderBar";
+import EntityPanel from "./EntityPanel";
 import { EntityFilterBanner, FeedTable, FeedCardList, TabContent } from "./dashboard";
 
 export default function DashboardTable() {
@@ -12,6 +13,8 @@ export default function DashboardTable() {
     setSearchQuery, setCategoryFilter, setEntityFilter, setActiveTab,
     categories, filteredItems, sortedItems, t,
     toggleTheme, handleSort, getSortArrow, handleEntityClick, clearFilters,
+    candidateCount, handleCandidatesChanged,
+    panelEntityId, setPanelEntityId,
   } = useDashboardTable();
 
   return (
@@ -26,6 +29,7 @@ export default function DashboardTable() {
         fetchedAt={fetchedAt} loading={loading} refresh={refresh}
         setEntityFilter={setEntityFilter} t={t}
         mode={mode} lastIngestAt={lastIngestAt}
+        candidateCount={candidateCount}
       />
 
       <div className={`flex-1 overflow-auto min-h-0 ${dark ? "dark-scrollbar" : ""}`}>
@@ -51,7 +55,10 @@ export default function DashboardTable() {
           </div>
         )}
 
-        <TabContent activeTab={activeTab} items={items} filteredItems={filteredItems} dark={dark} onEntityClick={handleEntityClick} />
+        <TabContent
+          activeTab={activeTab} items={items} filteredItems={filteredItems} dark={dark}
+          onEntityClick={handleEntityClick} onCandidatesChanged={handleCandidatesChanged}
+        />
 
         {activeTab === "feeds" && items.length > 0 && (
           <>
@@ -76,6 +83,15 @@ export default function DashboardTable() {
           </div>
         )}
       </div>
+
+      {panelEntityId !== null && (
+        <EntityPanel
+          entityId={panelEntityId}
+          dark={dark}
+          onClose={() => setPanelEntityId(null)}
+          onSelectRelated={setPanelEntityId}
+        />
+      )}
     </div>
   );
 }
