@@ -5,6 +5,9 @@ import { SourceMeta } from "@/lib/types";
 import { getSql } from "@/lib/server/db";
 import { persistArticles, sweepRetention } from "@/lib/server/ingest-writer";
 import { processNewArticles } from "@/lib/server/entity-ingest";
+import { getSettings } from "@/lib/server/settings";
+import { runDetectors } from "@/lib/server/detectors";
+import { persistSignals } from "@/lib/server/signal-store";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -69,6 +72,11 @@ async function runIngest() {
 
     await runStage("sweep-retention", () => sweepRetention(sql));
     counts.entities = await runStage("process-entities", () => processNewArticles(sql));
+    counts.signals = await runStage("detect-signals", async () => {
+      const settings = await getSettings(sql);
+      const candidates = await runDetectors(sql, settings);
+      return persistSignals(sql, candidates, settings);
+    });
 
     return NextResponse.json({ ...counts, tookMs: Date.now() - start });
   } catch (err) {

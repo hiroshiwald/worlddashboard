@@ -1,20 +1,14 @@
 "use client";
 
-import { useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { FeedItem, ExtractedEntity, Signal, EnrichedEntity } from "@/lib/types";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { FeedItem, EnrichedEntity } from "@/lib/types";
 import { extractEntities } from "@/lib/entity-extractor";
-import { detectSignals } from "@/lib/signal-detector";
-import { buildSituations } from "@/lib/situation-builder";
-import {
-  MUTE_DURATION,
-  SNAPSHOT_INTERVAL,
-  loadMutedEntities,
-  saveMutedEntities,
-  loadPreviousEntityNames,
-  saveEntitySnapshot,
-} from "@/lib/signal-storage";
+import { SignalCardData, SignalAction } from "@/components/signals/types";
 import { useEnrichedEntities } from "./useEnrichedEntities";
+import { useBusyIds } from "./useBusyIds";
 
+// Unchanged shape: WatchlistCard.tsx / WatchlistSection.tsx import this type
+// structurally and are kept exactly as-is by this rewrite.
 export interface SignalsTabTheme {
   cardBg: string;
   summaryBg: string;
@@ -31,13 +25,9 @@ export interface SignalsTabTheme {
   sparkBarEmpty: string;
 }
 
-interface UseSignalsTabParams {
-  items: FeedItem[];
-  dark: boolean;
-  onEntityClick: (name: string) => void;
-}
-
-const INITIAL_LIMIT = 12;
+export const STATE_FILTERS = ["all", "new", "seen", "dismissed", "promoted"] as const;
+export type StateFilter = (typeof STATE_FILTERS)[number];
+const FETCH_STATES = ["new", "seen", "dismissed", "promoted"];
 
 function buildSignalsTheme(dark: boolean): SignalsTabTheme {
   return {
@@ -59,169 +49,154 @@ function buildSignalsTheme(dark: boolean): SignalsTabTheme {
   };
 }
 
-// Exception to 50-line rule: tightly-coupled state management hook.
-// 4 source memos (entities, enriched, situations, signals), 2 pieces
-// of persisted UI state (mute map, snapshot refs), 4 derived memos
-// (activeSignals, itemMap, entityLookup, entitySituationMap), plus
-// 4 display memos (topEntities, sparklineData, severityCounts,
-// visibleSignals). Splitting would fragment related state wiring
-// across files. Only the pure theme block is extracted (buildSignalsTheme).
+function computeTopEntities(enriched: EnrichedEntity[]): EnrichedEntity[] {
+  return [...enriched].sort((a, b) => b.recentMentions.day - a.recentMentions.day).slice(0, 12);
+}
+
+function computeSparklineData(topEntities: EnrichedEntity[], itemMap: Map<string, FeedItem>): Map<string, number[]> {
+  const now = Date.now();
+  const result = new Map<string, number[]>();
+  for (const entity of topEntities) {
+    const bins = new Array(24).fill(0);
+    for (const itemId of entity.itemIds) {
+      const item = itemMap.get(itemId);
+      if (!item) continue;
+      const hoursAgo = Math.floor((now - new Date(item.published).getTime()) / (60 * 60 * 1000));
+      if (hoursAgo >= 0 && hoursAgo < 24) bins[23 - hoursAgo]++;
+    }
+    result.set(entity.name, bins);
+  }
+  return result;
+}
+
+function countByState(signals: SignalCardData[]): Record<StateFilter, number> {
+  const counts: Record<StateFilter, number> = { all: signals.length, new: 0, seen: 0, dismissed: 0, promoted: 0 };
+  for (const s of signals) {
+    if (s.state in counts) counts[s.state as StateFilter]++;
+  }
+  return counts;
+}
+
+class DatabaseNotConfiguredError extends Error {}
+
+async function fetchSignals(): Promise<SignalCardData[]> {
+  const res = await fetch(`/api/signals?state=${FETCH_STATES.join(",")}`, { cache: "no-store" });
+  if (res.status === 503) throw new DatabaseNotConfiguredError();
+  if (!res.ok) throw new Error(`Failed to load signals (${res.status})`);
+  const data = await res.json();
+  return Array.isArray(data.signals) ? data.signals : [];
+}
+
+async function postSignalAction(id: number, action: SignalAction): Promise<void> {
+  const res = await fetch("/api/signals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, action }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(typeof data.error === "string" ? data.error : `Action failed (${res.status})`);
+  }
+}
+
+interface UseSignalsTabParams {
+  items: FeedItem[];
+  dark: boolean;
+  onEntityClick: (name: string) => void;
+}
+
+// Exception to 50-line rule: tightly-coupled state management hook —
+// watchlist memos (entities/enriched/topEntities/sparklineData/itemMap) plus
+// the signal-manager fetch/action state (signals/loading/error/busyIds/
+// stateFilter) genuinely belong together as one hook's public surface.
+// Pure helpers (buildSignalsTheme, computeTopEntities, computeSparklineData,
+// countByState, fetchSignals, postSignalAction) are already extracted above.
 export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParams) {
   const entities = useMemo(() => extractEntities(items), [items]);
   const enriched = useEnrichedEntities(entities, items);
-  const situations = useMemo(() => buildSituations(enriched, items), [enriched, items]);
-
-  const [mutedEntities, setMutedEntities] = useState<Map<string, number>>(() => new Map());
-
-  useEffect(() => {
-    setMutedEntities(loadMutedEntities());
-  }, []);
-
-  const handleMute = useCallback((name: string) => {
-    setMutedEntities((prev) => {
-      const next = new Map(prev);
-      next.set(name, Date.now() + MUTE_DURATION);
-      saveMutedEntities(next);
-      return next;
-    });
-  }, []);
-
-  const handleUnmuteAll = useCallback(() => {
-    setMutedEntities(new Map());
-    localStorage.removeItem("wd-muted-entities");
-  }, []);
-
-  const previousEntityNames = useRef<Set<string>>(new Set());
-  const lastSnapshotTime = useRef<number>(0);
-
-  useEffect(() => {
-    previousEntityNames.current = loadPreviousEntityNames();
-  }, []);
-
-  useEffect(() => {
-    const now = Date.now();
-    if (entities.length > 0 && now - lastSnapshotTime.current > SNAPSHOT_INTERVAL) {
-      lastSnapshotTime.current = now;
-      saveEntitySnapshot(entities);
-    }
-  }, [entities]);
-
-  const signals = useMemo(
-    () => detectSignals(entities, items, previousEntityNames.current),
-    [entities, items]
-  );
-
-  const activeSignals = useMemo(() => {
-    const now = Date.now();
-    return signals
-      .filter((s) => s.confidence >= 0.70)
-      .filter((s) => !s.entities.every((e) => {
-        const expiry = mutedEntities.get(e);
-        return expiry !== undefined && expiry > now;
-      }));
-  }, [signals, mutedEntities]);
-
-  const [showAll, setShowAll] = useState(false);
-  const visibleSignals = showAll ? activeSignals : activeSignals.slice(0, INITIAL_LIMIT);
+  const topEntities = useMemo(() => computeTopEntities(enriched), [enriched]);
 
   const itemMap = useMemo(() => {
     const map = new Map<string, FeedItem>();
     for (const item of items) map.set(item.id, item);
     return map;
   }, [items]);
+  const sparklineData = useMemo(() => computeSparklineData(topEntities, itemMap), [topEntities, itemMap]);
 
-  const entityLookup = useMemo(() => {
-    const map = new Map<string, EnrichedEntity>();
-    for (const e of enriched) map.set(e.name, e);
-    return map;
-  }, [enriched]);
+  const [signals, setSignals] = useState<SignalCardData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [dbUnconfigured, setDbUnconfigured] = useState(false);
+  const { busyIds, withBusy } = useBusyIds();
+  const [stateFilter, setStateFilter] = useState<StateFilter>("all");
+  const loadSeq = useRef(0);
 
-  const entitySituationMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const sit of situations) {
-      for (const name of sit.entities) {
-        if (!map.has(name)) map.set(name, sit.title);
-      }
+  useEffect(() => {
+    // One-time cleanup: client-side muting is superseded by server-side dismiss.
+    localStorage.removeItem("wd-muted-entities");
+  }, []);
+
+  // Guards against an in-flight load's response landing after a newer one
+  // was started (e.g. a second action's refetch resolving before the
+  // first's) and overwriting fresher data with stale data.
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    setLoading(true);
+    setError(null);
+    setDbUnconfigured(false);
+    try {
+      const result = await fetchSignals();
+      if (seq !== loadSeq.current) return;
+      setSignals(result);
+    } catch (e) {
+      if (seq !== loadSeq.current) return;
+      if (e instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
+      else setError(e instanceof Error ? e.message : "Failed to load signals");
+    } finally {
+      if (seq === loadSeq.current) setLoading(false);
     }
-    return map;
-  }, [situations]);
+  }, []);
 
-  const getEvidenceArticles = useCallback(
-    (signal: Signal): FeedItem[] => {
-      const articleIds = new Set<string>();
-      for (const entityName of signal.entities) {
-        const entity = entityLookup.get(entityName);
-        if (entity) {
-          for (const id of entity.itemIds) articleIds.add(id);
+  useEffect(() => {
+    // Fire-and-forget: load() owns its own try/catch and reports via state.
+    load();
+  }, [load]);
+
+  const act = useCallback(
+    (id: number, action: SignalAction) =>
+      withBusy(id, async () => {
+        setError(null);
+        try {
+          await postSignalAction(id, action);
+          await load();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Action failed");
         }
-      }
-      return Array.from(articleIds)
-        .map((id) => itemMap.get(id))
-        .filter((item): item is FeedItem => !!item)
-        .sort((a, b) => new Date(b.published).getTime() - new Date(a.published).getTime())
-        .slice(0, 3);
-    },
-    [entityLookup, itemMap]
+      }),
+    [load, withBusy],
   );
 
-  const topEntities = useMemo(() => {
-    const now = Date.now();
-    return [...enriched]
-      .filter((e) => {
-        const expiry = mutedEntities.get(e.name);
-        return !expiry || expiry <= now;
-      })
-      .sort((a, b) => b.recentMentions.day - a.recentMentions.day)
-      .slice(0, 12);
-  }, [enriched, mutedEntities]);
-
-  const sparklineData = useMemo(() => {
-    const now = Date.now();
-    const result = new Map<string, number[]>();
-
-    for (const entity of topEntities) {
-      const bins = new Array(24).fill(0);
-      for (const itemId of entity.itemIds) {
-        const item = itemMap.get(itemId);
-        if (!item) continue;
-        const age = now - new Date(item.published).getTime();
-        const hoursAgo = Math.floor(age / (60 * 60 * 1000));
-        if (hoursAgo >= 0 && hoursAgo < 24) {
-          bins[23 - hoursAgo]++;
-        }
-      }
-      result.set(entity.name, bins);
-    }
-
-    return result;
-  }, [topEntities, itemMap]);
-
-  const severityCounts = useMemo(() => {
-    const c = { critical: 0, warning: 0, advisory: 0 };
-    for (const s of activeSignals) c[s.severity]++;
-    return c;
-  }, [activeSignals]);
-
-  const mutedCount = mutedEntities.size;
+  const visibleSignals = useMemo(
+    () => (stateFilter === "all" ? signals : signals.filter((s) => s.state === stateFilter)),
+    [signals, stateFilter],
+  );
+  const stateCounts = useMemo(() => countByState(signals), [signals]);
 
   const t = buildSignalsTheme(dark);
 
   return {
-    entities,
-    activeSignals,
-    visibleSignals,
-    severityCounts,
     topEntities,
     sparklineData,
-    entitySituationMap,
-    getEvidenceArticles,
-    mutedCount,
-    handleMute,
-    handleUnmuteAll,
-    showAll,
-    setShowAll,
-    initialLimit: INITIAL_LIMIT,
-    totalSignalCount: activeSignals.length,
+    signals,
+    visibleSignals,
+    stateCounts,
+    stateFilter,
+    setStateFilter,
+    loading,
+    error,
+    dbUnconfigured,
+    busyIds,
+    act,
     dark,
     onEntityClick,
     t,

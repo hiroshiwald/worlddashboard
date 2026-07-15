@@ -3,7 +3,7 @@
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
 
-type TabKey = "feeds" | "intel" | "network" | "map" | "signals" | "discovery" | "review";
+type TabKey = "brief" | "feeds" | "intel" | "network" | "map" | "signals" | "discovery" | "review";
 
 interface HeaderBarProps {
   dark: boolean;
@@ -65,6 +65,7 @@ function IngestBadge({
 }
 
 const tabs: { key: TabKey; label: string }[] = [
+  { key: "brief", label: "Brief" },
   { key: "feeds", label: "Feeds" },
   { key: "intel", label: "Intel" },
   { key: "network", label: "Network" },
@@ -258,7 +259,7 @@ export default function HeaderBar({
           ))}
         </select>
 
-        {(activeTab === "feeds" || activeTab === "map" || activeTab === "signals" || activeTab === "discovery") && (
+        {(activeTab === "brief" || activeTab === "feeds" || activeTab === "map" || activeTab === "signals" || activeTab === "discovery") && (
           <div className="hidden sm:flex items-center gap-4 text-xs">
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-red-500" />

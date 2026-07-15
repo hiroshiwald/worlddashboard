@@ -5,7 +5,7 @@ import { FeedItem, SortConfig } from "@/lib/types";
 import { useFeed } from "@/hooks/useSources";
 import { getThemeClasses, ThemeClasses } from "@/lib/theme";
 
-export type TabKey = "feeds" | "intel" | "network" | "map" | "signals" | "discovery" | "review";
+export type TabKey = "brief" | "feeds" | "intel" | "network" | "map" | "signals" | "discovery" | "review";
 export type ColumnKey = keyof FeedItem;
 
 interface UseDashboardTableReturn {
@@ -136,7 +136,7 @@ export function useDashboardTable(): UseDashboardTableReturn {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [dark, setDark] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>("feeds");
+  const [activeTab, setActiveTab] = useState<TabKey>("brief");
   const [candidateCount, setCandidateCount] = useState(0);
   const [panelEntityId, setPanelEntityId] = useState<number | null>(null);
   const entityClickSeq = useRef(0);

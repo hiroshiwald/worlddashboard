@@ -36,11 +36,13 @@ export function normalizeName(raw: string): string {
 
 const STOP_LOWER = new Set(Array.from(PERSON_STOPWORDS).map((s) => s.toLowerCase()));
 
+// Topic-word acronyms (not actors) plus role/unit words — kept as a single
+// alphabetically sorted set.
 const ACRONYM_STOPLIST = new Set([
-  "CEO", "CFO", "CTO", "COO", "GDP", "TV", "PM", "AM",
-  "Q1", "Q2", "Q3", "Q4", "USD", "EUR", "GMT", "BST",
-  "FAQ", "DIY", "OK", "NEW", "VIP", "ASAP", "ETA", "FYI",
-  "AKA", "ID", "IT", "PR", "HR", "VP", "JR", "SR",
+  "AI", "AKA", "AM", "APP", "ASAP", "BST", "CEO", "CFO", "COO", "CPI", "CTO",
+  "DIY", "ETA", "EUR", "EV", "FAQ", "FYI", "GDP", "GMT", "GPS", "HR", "ID",
+  "IPO", "IT", "JR", "ML", "NEW", "OK", "PDF", "PM", "PR", "Q1", "Q2", "Q3",
+  "Q4", "SR", "TV", "URL", "USD", "VIP", "VP", "VPN",
 ]);
 
 // Higher number = more trusted. A norm collision must never let a
