@@ -5,10 +5,16 @@
 | `src/app/api/sources/route.ts` | API endpoint that orchestrates feed fetching and returns aggregated items | `GET` handler |
 | `src/app/api/ingest/route.ts` | Fetches all feeds, persists to Postgres, sweeps retention. Auth via `x-ingest-key` or `Authorization: Bearer` (`CRON_SECRET`) | `POST`, `GET` handlers |
 | `src/app/api/articles/route.ts` | DB-backed read path — cluster heads only, `days`/`category` filters, 503 when unconfigured/empty | `GET` handler |
+| `src/app/api/candidates/route.ts` | Review queue: promotable unresolved entity names, accept/merge/dismiss actions | `GET`, `POST` handlers |
+| `src/app/api/entities/route.ts` | Resolves a name to a tracked/dismissed entity id by canonical_name or alias | `GET` handler |
+| `src/app/api/entities/[id]/route.ts` | Entity profile + 7-day hourly mention series + last 20 articles + top 10 co-occurring entities | `GET` handler |
 | `src/lib/server/db.ts` | Thin Postgres query helper over `@neondatabase/serverless` | `getSql`, `Sql`, `SqlRow` |
 | `src/lib/server/article-identity.ts` | Pure article identity hashing for de-duplication | `contentHash` |
 | `src/lib/server/ingest-writer.ts` | Batched article persistence, cross-source dup-group linking, retention sweep | `persistArticles`, `sweepRetention` |
+| `src/lib/server/extract-v2.ts` | Pure candidate extraction: dictionary + compromise NLP + acronym + person-regex layers, normalization | `normalizeName`, `extractCandidates`, `Candidate`, `TypeHint` |
+| `src/lib/server/entity-ingest.ts` | Resolves extracted candidates against the DB registry then static dictionaries, else queues as a candidate; batches all entity/mention/edge/candidate writes | `processNewArticles`, `dedupeMentions`, `rollupHourlyMentions`, `rollupEntityEdges`, `rollupCandidate`, `EntityIngestStats` |
 | `migrations/001_core.sql` | Schema v1: articles, entities, article_entities, entity_mentions_hourly, entity_edges, entity_candidates, signals, settings | — |
+| `migrations/002_entity_indexes.sql` | entity_id-first index on article_entities for entity→articles lookups (not yet run) | — |
 | `scripts/migrate.mjs` | Idempotent migration runner (`schema_migrations` ledger) | — |
 | `src/app/page.tsx` | Home page — renders the main dashboard | `Home` component |
 | `src/app/layout.tsx` | Root HTML layout with metadata and font loading | `RootLayout` component |
@@ -17,9 +23,11 @@
 | `src/components/dashboard/EntityFilterBanner.tsx` | Entity filter notification bar with clear controls | `EntityFilterBanner` |
 | `src/components/dashboard/FeedTable.tsx` | Desktop sortable table with header and row sub-components | `FeedTable` |
 | `src/components/dashboard/FeedCardList.tsx` | Mobile responsive card layout for feed items | `FeedCardList` |
-| `src/components/dashboard/TabContent.tsx` | Lazy-loaded tab switcher for Intel, Signals, Network, Map, Discovery | `TabContent` |
+| `src/components/dashboard/TabContent.tsx` | Lazy-loaded tab switcher for Intel, Signals, Network, Map, Discovery, Review | `TabContent` |
 | `src/components/dashboard/index.ts` | Barrel export for dashboard sub-components | — |
-| `src/components/HeaderBar.tsx` | Top navigation with search, category filter, theme toggle, tab switcher, ingest-mode badge | `HeaderBar` |
+| `src/components/HeaderBar.tsx` | Top navigation with search, category filter, theme toggle, tab switcher (incl. Review's pending-count badge), ingest-mode badge | `HeaderBar` |
+| `src/components/ReviewTab.tsx` | Entity candidate review queue: counts, source chips, sample titles, Accept/Merge/Dismiss actions | `ReviewTab` |
+| `src/components/EntityPanel.tsx` | Slide-over entity timeline: profile, inline-SVG hourly sparkline, recent articles, related-entity chips | `EntityPanel` |
 | `src/components/IntelTab.tsx` | Thin composition shell: imports hook + sub-components, composes layout | `IntelTab` |
 | `src/components/intel/IntelSummary.tsx` | Summary bar with entity/situation counts and low-data warning | `IntelSummary` |
 | `src/components/intel/KnownSituationsSection.tsx` | Expandable row strip for known situations with article drill-down | `KnownSituationsSection` |
@@ -45,14 +53,14 @@
 | `src/components/discovery/utils.ts` | Shared constants and helpers: TYPE_DOT_COLORS, getDotColor | `TYPE_DOT_COLORS`, `getDotColor` |
 | `src/components/discovery/index.ts` | Barrel export for discovery sub-components | — |
 | `src/components/FeedItemImage.tsx` | Image component with Google favicon and text-initial fallbacks | `FeedItemImage` |
-| `src/hooks/useDashboardTable.ts` | Custom hook: all DashboardTable state, memos, effects, handlers | `useDashboardTable`, `TabKey`, `ColumnKey` |
+| `src/hooks/useDashboardTable.ts` | Custom hook: all DashboardTable state, memos, effects, handlers. `handleEntityClick` resolves a name to an entity id (opens `EntityPanel`) before falling back to the text filter; tracks `candidateCount` for the Review tab badge | `useDashboardTable`, `TabKey`, `ColumnKey` |
 | `src/hooks/useSignalsTab.ts` | Custom hook: all SignalsTab state, memos, effects, handlers, theme | `useSignalsTab`, `SignalsTabTheme` |
 | `src/hooks/useDiscoveryTab.ts` | Custom hook: all DiscoveryTab state, memos, callbacks, theme | `useDiscoveryTab`, `EdgeMode`, `EdgeData`, `DiscoveryTabTheme` |
 | `src/hooks/useIntelTab.ts` | Custom hook: all IntelTab state, memos, callbacks, theme | `useIntelTab`, `IntelTabTheme` |
 | `src/hooks/useSources.ts` | React hook for fetching feed data: tries DB-backed `/api/articles` first, falls back to live `/api/sources` | `useFeed` |
 | `src/lib/types.ts` | All shared TypeScript interfaces | `FeedItem`, `SourceMeta`, `ExtractedEntity`, `EnrichedEntity`, `Signal`, `Situation`, `UrgencyLevel`, `SortConfig`, etc. |
 | `src/lib/feed-fetcher.ts` | RSS/Atom fetching with 3-phase fallback (direct → relay → altUrl), parsing, and caller-owned cache | `fetchAllFeeds`, `parseFeedXml`, `parseRssItems`, `parseAtomEntries`, `CacheEntry` |
-| `src/lib/entity-extractor.ts` | Dictionary-based NER from feed text with a hand-rolled lexicon sentiment scorer | `extractEntities` |
+| `src/lib/entity-extractor.ts` | Dictionary-based NER from feed text with a hand-rolled lexicon sentiment scorer | `extractEntities`, `matchDictionaryEntries`, `isDictionaryTerm`, `scoreSentiment`, `LookupEntry` |
 | `src/lib/entity-dictionaries.ts` | Country, org, region dictionaries and person stopwords | `COUNTRY_DICT`, `ORG_DICT`, `REGION_DICT`, `PERSON_STOPWORDS` |
 | `src/lib/signal-detector.ts` | Six-type anomaly detection (surge, sentiment, cross-category, novel co-occurrence, escalation, emergence) | `detectSignals` |
 | `src/lib/novelty-scorer.ts` | Five-dimension novelty scoring (0–100) and known-situation detection | `enrichEntities`, `isKnownSituation` |
@@ -77,6 +85,11 @@
 | `src/lib/__tests__/signal-detector.test.ts` | Tests for anomaly signal detection algorithms | — |
 | `src/lib/server/__tests__/article-identity.test.ts` | Tests for contentHash stability, normalization, distinctness | — |
 | `src/lib/server/__tests__/ingest-writer.test.ts` | Tests for persistArticles (dup-group linking, batching) and sweepRetention (mocked sql client) | — |
+| `src/lib/server/__tests__/extract-v2.test.ts` | Tests for normalizeName and each extractCandidates layer, dedup tie-break | — |
+| `src/lib/server/__tests__/entity-ingest.test.ts` | Tests for resolution order, rollup math (hourly/edges/candidates), mention dedup, idempotency query shape (mocked sql client) | — |
+| `src/app/api/candidates/__tests__/route.test.ts` | Tests for GET filtering/shaping and POST accept/merge/dismiss incl. validation and conflict 409s | — |
+| `src/app/api/entities/__tests__/route.test.ts` | Tests for name/alias resolution and deterministic ordering | — |
+| `src/app/api/entities/[id]/__tests__/route.test.ts` | Tests for entity profile + series/articles/edges query shape | — |
 
 ## Invariants
 
@@ -89,8 +102,13 @@
 - **Signal confidence cap**: Entities appearing in >15% of all items receive a 0.5× dominance penalty to avoid noise.
 - **Novelty score range**: Composite score is 0–100 across five dimensions; no single dimension can exceed its cap (spread: 30, diversity: 15, edges: 25, surprise: 20, emergence: 10).
 - **Situation clustering threshold**: Entity pairs must share ≥2 articles to form a cluster; clusters merge only at >50% article overlap.
-- **Single Neon Postgres, written only by `/api/ingest`**: server-side persistence (articles, and — as later tasks wire them up — entities, mentions, edges, candidates, signals) lives in one Neon Postgres database. `/api/ingest` (hourly GitHub Actions cron + daily Vercel cron fallback) is the only writer; `/api/articles` and all other routes are read-only. Client-side ephemera (muted signals, edge history, entity snapshots, baselines, theme) still lives in browser localStorage.
+- **Single Neon Postgres, written only by `/api/ingest`**: server-side persistence (articles, entities, mentions, edges, candidates, signals) lives in one Neon Postgres database. `/api/ingest` (hourly GitHub Actions cron + daily Vercel cron fallback) is the only writer for the article/entity pipeline; `/api/candidates` POST is the one other writer (reviewer-triggered accept/merge/dismiss, unauthenticated by design — single-user hobby app, no login exists anywhere in the system). `/api/articles`, `/api/entities`, `/api/entities/[id]`, and `/api/candidates` GET are read-only. Client-side ephemera (muted signals, edge history, entity snapshots, baselines, theme) still lives in browser localStorage.
 - **Dup-group retention safety**: `articles.dup_group_id` FK is `ON DELETE SET NULL` — `sweepRetention`'s 30-day delete on a dup-group head is never blocked by newer member rows (up to 48h younger) still referencing it.
+- **Entity resolution order**: DB registry (canonical_name or any alias, normalized, all statuses including dismissed) → static dictionaries (creates the entity row on first hit) → otherwise accumulates into `entity_candidates`. Dismissed entities still resolve and get mentions recorded (so they never re-surface as candidates) but are excluded from every user-facing list.
+- **Entity-pass idempotency**: `processNewArticles` selects cluster heads from the last 6h with no `article_entities` rows yet (`NOT EXISTS`) — re-runs and catch-up runs self-heal. An article that resolves zero candidates to actual entities gets no `article_entities` row and can be reprocessed within its 6h window on subsequent hourly runs; this can inflate `entity_candidates.mention_count` for that article but not `day_count` or `source_names` (both naturally idempotent to repeat same-day/same-source sightings).
+- **One mention per article per entity**: `dedupeMentions` collapses two resolved mentions of the same entity from one article (possible when two of its aliases both appear in the text) before `article_entities`/`entity_mentions_hourly`/`entity_edges` are written, so a single article can't double-count itself into an hourly bucket's mentions/sentiment_sum.
+- **Candidate promotion rule**: the Review queue shows only candidates with ≥3 distinct sources, ≥2 distinct days, last seen within 14 days.
+- **entity_edges pair ordering**: always stored as `entity_a < entity_b` (by id) — enforced by a DB CHECK and by `rollupEntityEdges` sorting ids before pairing.
 - **Muted signal expiry**: 24-hour duration, enforced by wall-clock comparison on load.
 - **Edge history retention**: 30-day window; entries older than 30 days are pruned on save.
 - **Entity snapshot window**: 2-hour retention for emergence detection.
@@ -103,6 +121,9 @@
 **Browser → Server**
 - `useFeed` hook fetches `GET /api/articles` (DB-backed) first; on a 503, network error, or malformed response it falls back to `GET /api/sources` (live), both with `cache: 'no-store'`
 - Response includes `items[]`; the live path also includes feed diagnostics and metadata, the DB path includes `lastIngestAt`
+- `useDashboardTable`'s `handleEntityClick` fetches `GET /api/entities?name=`; on a hit it opens `EntityPanel` (which then fetches `GET /api/entities/[id]`); on 404/malformed/network failure it warns and falls back to the text filter
+- `ReviewTab` fetches `GET /api/candidates` on mount and after every action; `POST /api/candidates` for accept/merge/dismiss
+- `useDashboardTable` fetches `GET /api/candidates` once on mount for the header badge count; `ReviewTab` syncs it after each action via a callback (no extra fetch)
 
 **Server → External Feeds**
 - `fetchAllFeeds` hits ~147 RSS/Atom sources in parallel — called from `/api/sources` (live reads) and `/api/ingest` (hourly/daily writes)
@@ -111,8 +132,11 @@
 - All fetches use `cache: 'no-store'` to bypass Next.js Data Cache
 
 **Server → Postgres**
-- `/api/ingest` (hourly GitHub Actions cron + daily Vercel cron fallback) is the only writer: fetches all feeds, `persistArticles` (batched insert + dup-group linking), `sweepRetention`
-- `/api/articles` is the only DB reader: cluster heads (`dup_group_id IS NULL`) from the last N days, capped at 500
+- `/api/ingest` (hourly GitHub Actions cron + daily Vercel cron fallback) is the only writer for articles/entities: fetches all feeds, `persistArticles` (batched insert + dup-group linking), `sweepRetention`, then `processNewArticles` (entity resolution + rollup writes)
+- `/api/candidates` POST is the only other writer: accept/merge/dismiss, each ending in a delete from `entity_candidates`
+- `/api/articles` reads cluster heads (`dup_group_id IS NULL`) from the last N days, capped at 500
+- `/api/entities` resolves a name to an entity id; `/api/entities/[id]` reads that entity's profile, hourly series, articles, and edges
+- `/api/candidates` GET reads promotable candidates
 - `scripts/migrate.mjs` (manual, owner-run) applies `migrations/*.sql` against `DATABASE_URL`
 - All access goes through `getSql()` (`src/lib/server/db.ts`) — no module-level client, no shared connection state
 
@@ -129,9 +153,15 @@
 - Theme preference stored as `wd-theme`
 
 **Internal Module Dependencies**
-- `DashboardTable` → `useDashboardTable` + `HeaderBar` + dashboard sub-components
-- `useDashboardTable` → `useFeed` + `theme`
-- `TabContent` → all tab components (dynamic imports)
+- `DashboardTable` → `useDashboardTable` + `HeaderBar` + `EntityPanel` + dashboard sub-components
+- `useDashboardTable` → `useFeed` + `theme` + `/api/entities` (name resolution) + `/api/candidates` (badge count)
+- `TabContent` → all tab components (dynamic imports) + `ReviewTab`
+- `ReviewTab` → `/api/candidates` (GET/POST)
+- `EntityPanel` → `/api/entities/[id]`
+- `/api/ingest` → `entity-ingest` (`processNewArticles`) after `ingest-writer`
+- `entity-ingest` → `extract-v2` + `entity-extractor` (`scoreSentiment`)
+- `extract-v2` → `entity-extractor` (`matchDictionaryEntries`, `isDictionaryTerm`) + `entity-dictionaries` (`PERSON_STOPWORDS`) + `compromise`
+- `/api/entities`, `/api/entities/[id]` → `extract-v2` (`normalizeName`)
 - `FeedTable` / `FeedCardList` → `FeedItemImage` + `urgency` + `date-utils`
 - All analysis tabs → `entity-extractor` → `entity-dictionaries` + `urgency`
 - `SignalsTab` → `useSignalsTab` + signals sub-components
