@@ -2,6 +2,15 @@ import dynamic from "next/dynamic";
 import { FeedItem } from "@/lib/types";
 import IntelTab from "../IntelTab";
 
+const BriefTab = dynamic(() => import("../BriefTab"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-sm text-gray-400">Loading brief...</p>
+    </div>
+  ),
+});
+
 const MapTab = dynamic(() => import("../MapTab"), {
   ssr: false,
   loading: () => (
@@ -58,8 +67,9 @@ interface TabContentProps {
 
 export default function TabContent({ activeTab, items, filteredItems, dark, onEntityClick, onCandidatesChanged }: TabContentProps) {
   if (activeTab === "feeds") return null;
-  // Review is DB-backed, independent of the live feed items array, so it
-  // isn't gated behind items.length like the other analysis tabs below.
+  // Brief and Review are DB-backed, independent of the live feed items
+  // array, so they aren't gated behind items.length like the tabs below.
+  if (activeTab === "brief") return <BriefTab dark={dark} onEntityClick={onEntityClick} />;
   if (activeTab === "review") return <ReviewTab dark={dark} onCandidatesChanged={onCandidatesChanged} />;
   if (items.length === 0) return null;
 

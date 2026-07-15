@@ -1,27 +1,6 @@
 import { ExtractedEntity } from "./types";
 
-export const MUTE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 export const SNAPSHOT_INTERVAL = 5 * 60 * 1000; // 5 minutes
-
-export function loadMutedEntities(): Map<string, number> {
-  try {
-    const raw = localStorage.getItem("wd-muted-entities");
-    if (!raw) return new Map();
-    const arr: [string, number][] = JSON.parse(raw);
-    const now = Date.now();
-    return new Map(arr.filter(([, expiry]) => expiry > now));
-  } catch (e) {
-    console.error("loadMutedEntities: failed to load from localStorage, returning empty Map", e);
-    return new Map();
-  }
-}
-
-export function saveMutedEntities(muted: Map<string, number>) {
-  localStorage.setItem(
-    "wd-muted-entities",
-    JSON.stringify(Array.from(muted.entries()))
-  );
-}
 
 export function loadPreviousEntityNames(): Set<string> {
   try {
