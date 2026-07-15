@@ -17,8 +17,14 @@ interface Candidate {
 
 const TYPE_OPTIONS = ["country", "organization", "region", "person", "other"];
 
+// Distinguishes "no database configured yet" (a normal, expected state for
+// this app) from a genuine fetch/shape failure, so the UI can show a
+// friendly empty state instead of an error banner.
+class DatabaseNotConfiguredError extends Error {}
+
 async function fetchCandidates(): Promise<Candidate[]> {
   const res = await fetch("/api/candidates", { cache: "no-store" });
+  if (res.status === 503) throw new DatabaseNotConfiguredError();
   if (!res.ok) throw new Error(`Failed to load candidates (${res.status})`);
   const data = await res.json();
   if (!Array.isArray(data.candidates)) throw new Error("Malformed candidates response");
@@ -139,17 +145,23 @@ export default function ReviewTab({ dark, onCandidatesChanged }: ReviewTabProps)
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dbUnconfigured, setDbUnconfigured] = useState(false);
   const [busyNorm, setBusyNorm] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setDbUnconfigured(false);
     try {
       const list = await fetchCandidates();
       setCandidates(list);
       onCandidatesChanged(list.length);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load candidates");
+      // Reset the header badge on any failure — a stale positive count
+      // shouldn't linger once the list itself couldn't be confirmed.
+      onCandidatesChanged(0);
+      if (e instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
+      else setError(e instanceof Error ? e.message : "Failed to load candidates");
     } finally {
       setLoading(false);
     }
@@ -175,17 +187,23 @@ export default function ReviewTab({ dark, onCandidatesChanged }: ReviewTabProps)
 
   return (
     <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-4">
-      {error && (
+      {dbUnconfigured && (
+        <p className={`text-sm ${dark ? "text-slate-400" : "text-gray-500"}`}>
+          Entity review requires a configured database.
+        </p>
+      )}
+
+      {!dbUnconfigured && error && (
         <div className={`mb-4 border text-sm px-4 py-3 rounded-xl ${dark ? "bg-red-950 border-red-800 text-red-300" : "bg-red-50 border-red-200 text-red-700"}`}>
           {error}
         </div>
       )}
 
-      {loading && candidates.length === 0 && !error && (
+      {!dbUnconfigured && loading && candidates.length === 0 && !error && (
         <p className={`text-sm ${dark ? "text-slate-400" : "text-gray-500"}`}>Loading candidates...</p>
       )}
 
-      {!loading && candidates.length === 0 && !error && (
+      {!dbUnconfigured && !loading && candidates.length === 0 && !error && (
         <p className={`text-sm ${dark ? "text-slate-400" : "text-gray-500"}`}>No entities awaiting review.</p>
       )}
 

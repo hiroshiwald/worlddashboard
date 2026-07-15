@@ -43,7 +43,20 @@ const ACRONYM_STOPLIST = new Set([
   "AKA", "ID", "IT", "PR", "HR", "VP", "JR", "SR",
 ]);
 
-function addCandidate(
+// Higher number = more trusted. A norm collision must never let a
+// lower-priority layer demote an existing higher-priority one's layer/
+// typeHint (e.g. a dictionary hit "Veltrax" losing its layer to a same-norm
+// compromise match "Veltrax Inc" just because the latter's display is
+// longer — that demotion used to send a known dictionary entity into the
+// human review queue instead of auto-tracking it).
+const LAYER_PRIORITY: Record<CandidateLayer, number> = {
+  dictionary: 3,
+  compromise: 2,
+  acronym: 1,
+  "person-regex": 0,
+};
+
+export function addCandidate(
   map: Map<string, Candidate>,
   display: string,
   typeHint: TypeHint,
@@ -52,9 +65,17 @@ function addCandidate(
   const norm = normalizeName(display);
   if (!norm) return;
   const existing = map.get(norm);
-  if (!existing || display.length > existing.display.length) {
+  if (!existing) {
     map.set(norm, { display, norm, typeHint, layer });
+    return;
   }
+
+  const newRank = LAYER_PRIORITY[layer];
+  const existingRank = LAYER_PRIORITY[existing.layer];
+  const winner = newRank > existingRank ? { typeHint, layer } : { typeHint: existing.typeHint, layer: existing.layer };
+  const longestDisplay = newRank >= existingRank && display.length > existing.display.length ? display : existing.display;
+
+  map.set(norm, { display: longestDisplay, norm, typeHint: winner.typeHint, layer: winner.layer });
 }
 
 function extractDictionaryCandidates(text: string, map: Map<string, Candidate>): void {

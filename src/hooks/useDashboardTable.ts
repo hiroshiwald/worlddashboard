@@ -199,6 +199,7 @@ export function useDashboardTable(): UseDashboardTableReturn {
       setPanelEntityId(entityId);
       return;
     }
+    setPanelEntityId(null);
     setEntityFilter(name);
     setActiveTab("feeds");
   };

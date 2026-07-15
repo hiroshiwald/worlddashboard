@@ -148,10 +148,25 @@ describe("POST /api/candidates", () => {
     expect(calls.some((c) => c.query.includes("DELETE FROM entity_candidates"))).toBe(true);
   });
 
-  it("accept 409s when a concurrent request already promoted the same name", async () => {
+  it("accept race: a candidate resurrected by a concurrent ingest resolves as success and is deleted, not stranded on 409", async () => {
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
       if (call.query.includes("INSERT INTO entities")) return [];
+      if (call.query.includes("SELECT id FROM entities WHERE canonical_name")) return [{ id: "42" }];
+      return [];
+    });
+    currentSql = sql;
+    const res = await POST(postRequest({ nameNorm: "kestrel basin", action: "accept", type: "region" }));
+
+    expect(res.status).toBe(200);
+    expect(calls.some((c) => c.query.includes("DELETE FROM entity_candidates"))).toBe(true);
+  });
+
+  it("accept 409s only when the conflicting entity genuinely doesn't exist", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
+      if (call.query.includes("INSERT INTO entities")) return [];
+      if (call.query.includes("SELECT id FROM entities WHERE canonical_name")) return [];
       return [];
     });
     currentSql = sql;
@@ -176,10 +191,25 @@ describe("POST /api/candidates", () => {
     expect(insertCall!.values).toEqual(["Kestrel Basin", "region", "2026-07-01T00:00:00Z", "2026-07-10T00:00:00Z"]);
   });
 
-  it("dismiss 409s when a concurrent request already promoted the same name", async () => {
+  it("dismiss race: a candidate resurrected by a concurrent ingest resolves as success, not stranded on 409", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
+      if (call.query.includes("INSERT INTO entities")) return [];
+      if (call.query.includes("SELECT id FROM entities WHERE canonical_name")) return [{ id: "42" }];
+      return [];
+    });
+    currentSql = sql;
+    const res = await POST(postRequest({ nameNorm: "kestrel basin", action: "dismiss" }));
+
+    expect(res.status).toBe(200);
+    expect(calls.some((c) => c.query.includes("DELETE FROM entity_candidates"))).toBe(true);
+  });
+
+  it("dismiss 409s only when the conflicting entity genuinely doesn't exist", async () => {
     const { sql } = makeMockSql((call) => {
       if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
       if (call.query.includes("INSERT INTO entities")) return [];
+      if (call.query.includes("SELECT id FROM entities WHERE canonical_name")) return [];
       return [];
     });
     currentSql = sql;

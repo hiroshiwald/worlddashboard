@@ -109,9 +109,21 @@ async function deleteCandidate(sql: Sql, nameNorm: string): Promise<void> {
   await sql`DELETE FROM entity_candidates WHERE name_norm = ${nameNorm}`;
 }
 
-// ON CONFLICT DO NOTHING + RETURNING guards a double-submitted accept/dismiss
-// (double-click, client retry): the losing request sees zero returned rows
-// instead of throwing an uncaught unique-violation on canonical_name.
+// ON CONFLICT (canonical_name) can only no-op for one reason: an entity with
+// that name already exists. So on zero returned rows we check for it
+// explicitly and, if found, treat the name as resolved and clean up the
+// candidate anyway — otherwise a candidate an hourly ingest re-inserted
+// between the reviewer's page load and their click would 409 forever and
+// sit stranded for the full 14-day retention window. Read-then-delete below
+// isn't transactional; a single-writer app accepts that as a rare, bounded
+// undercount rather than added complexity, never data corruption.
+async function resolveConflictedCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<boolean> {
+  const existing = await sql`SELECT id FROM entities WHERE canonical_name = ${candidate.displayName}`;
+  if (existing.length === 0) return false;
+  await deleteCandidate(sql, candidate.nameNorm);
+  return true;
+}
+
 async function acceptCandidate(sql: Sql, candidate: CandidateSnapshot, type: string): Promise<boolean> {
   const result = await sql`
     INSERT INTO entities (canonical_name, type, status, first_seen_at, last_seen_at)
@@ -119,9 +131,11 @@ async function acceptCandidate(sql: Sql, candidate: CandidateSnapshot, type: str
     ON CONFLICT (canonical_name) DO NOTHING
     RETURNING id
   `;
-  if (result.length === 0) return false;
-  await deleteCandidate(sql, candidate.nameNorm);
-  return true;
+  if (result.length > 0) {
+    await deleteCandidate(sql, candidate.nameNorm);
+    return true;
+  }
+  return resolveConflictedCandidate(sql, candidate);
 }
 
 async function dismissCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<boolean> {
@@ -131,9 +145,11 @@ async function dismissCandidate(sql: Sql, candidate: CandidateSnapshot): Promise
     ON CONFLICT (canonical_name) DO NOTHING
     RETURNING id
   `;
-  if (result.length === 0) return false;
-  await deleteCandidate(sql, candidate.nameNorm);
-  return true;
+  if (result.length > 0) {
+    await deleteCandidate(sql, candidate.nameNorm);
+    return true;
+  }
+  return resolveConflictedCandidate(sql, candidate);
 }
 
 /** Returns false if mergeInto doesn't name an existing entity (caller 404s). */
@@ -155,7 +171,7 @@ function validateActionFields(action: CandidateAction): string | null {
   return null;
 }
 
-const CONFLICT_MESSAGE = "An entity with this name was already promoted by a concurrent request";
+const CONFLICT_MESSAGE = "Could not resolve a naming conflict for this candidate — please retry";
 
 async function dispatchAction(sql: Sql, candidate: CandidateSnapshot, action: CandidateAction): Promise<NextResponse> {
   if (action.action === "accept") {

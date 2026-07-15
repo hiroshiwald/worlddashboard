@@ -99,6 +99,86 @@ an entity opens a real timeline instead of a text search.
   `/api/entities/:id` response and screenshotted in both themes (removed
   after — no dependency or file changes left behind).
 
+### Review fixes (same day, second pass — not yet merged when this landed)
+
+A second review of the branch (still unmerged) found seven further issues,
+all fixed here:
+
+- **FIX 1 (blocker) — explicit processed marker**: the entity pass's
+  idempotency gate was `NOT EXISTS(article_entities)`. An article whose
+  extracted names were *all* unresolved candidates never got an
+  `article_entities` row, so it was re-selected for its entire 6h lookback
+  window every run and its `entity_candidates` sightings re-accumulated —
+  `mention_count` could inflate ~6x (`day_count`/source dedup were already
+  immune, `mention_count` wasn't). Separately, the marker write
+  (`article_entities`) happened *before* the hourly/edges/candidates
+  rollups, so a mid-run crash after it permanently skipped those. Fixed with
+  `migrations/002_entity_indexes.sql`'s new `articles.entities_processed_at`
+  column (`ALTER TABLE`, not yet run) — `selectUnprocessedHeads` now filters
+  on `entities_processed_at IS NULL` instead of `NOT EXISTS`, and
+  `processNewArticles` sets it as the deliberately-last statement of a run,
+  after every aggregate write. A crash between those writes and the marker
+  now means one batch retries next run (additive rollups double-count for
+  that one batch — rare, bounded, and explicitly preferred over silently
+  losing articles whose entities never got recorded at all; see the comment
+  above the marker UPDATE).
+- **FIX 2 — stale `last_seen_at`**: `entities.last_seen_at` was only ever
+  set by the first-mention upsert; a mention resolving against an *existing*
+  registry entity never touched it again, so a tracked entity's
+  `last_seen_at` froze at creation while `/api/entities/[id]` served it as
+  live data. `processNewArticles` now bumps it for every resolved mention in
+  one grouped `UPDATE ... FROM UNNEST(...) ... GREATEST(...)` statement
+  (harmless no-op re-set for just-created entities, essential for
+  registry-resolved ones).
+- **FIX 3 — layer-priority bug**: `extract-v2.ts`'s `addCandidate` upgraded
+  a norm's entry whenever the new candidate's display was longer —
+  including its `layer` and `typeHint` — so a dictionary hit could be
+  silently demoted by a same-norm compromise/acronym/person-regex match with
+  a longer display (e.g. "Veltrax" → "Veltrax Inc" after suffix-stripping),
+  sending a known dictionary entity into the human review queue instead of
+  auto-tracking it. Fixed with an explicit layer-priority ranking
+  (dictionary > compromise > acronym > person-regex): a collision keeps the
+  higher-priority layer's `layer`/`typeHint` unconditionally, and only
+  upgrades the display string when the new layer's priority is ≥ the
+  existing one's.
+- **FIX 4 — stranded candidate race**: if an hourly ingest re-inserted a
+  candidate a reviewer had just accepted/dismissed, `ON CONFLICT (canonical_name)
+  DO NOTHING` returning zero rows was treated as a hard failure (409), and
+  since the candidate row never got deleted, it stayed un-actionable for the
+  full 14-day retention window. Since that `ON CONFLICT` target can only
+  no-op for one reason (the `canonical_name` already exists),
+  `acceptCandidate`/`dismissCandidate` now explicitly check for that entity
+  on a zero-row return and, if found, delete the candidate and return
+  success anyway — the name is resolved either way. 409 is now reserved for
+  the case where the entity genuinely doesn't exist. Noted as a single-writer
+  assumption in a comment: this read-then-delete isn't transactional, so two
+  ingest runs racing here could each see zero rows, but that's a rare,
+  bounded undercount, not data corruption.
+- **FIX 5 — per-article resilience**: `processNewArticles`'s classification
+  loop now wraps each article's extraction + classification in its own
+  try/catch — a pathological title logs `console.error` with the article id
+  and is skipped (left unmarked, so it retries next run) instead of
+  aborting the whole batch.
+- **FIX 6 — observable ingest failures**: `/api/ingest`'s pipeline stages
+  (fetch-feeds, persist-articles, sweep-retention, process-entities) are now
+  each wrapped so a throw is attributable — `console.error`'d with the
+  stage name, and the 500 response includes `{ error, stage, ...whatever
+  counts prior stages already produced }` instead of a generic
+  undifferentiated 500.
+- **FIX 7 — small UI fixes**: `handleEntityClick`'s text-filter fallback now
+  also closes any already-open `EntityPanel`; `ReviewTab` treats a 503 from
+  `/api/candidates` as a friendly "Entity review requires a configured
+  database" empty state rather than the generic error banner, and resets
+  the header badge count to 0 on any load failure so it can't show a stale
+  positive number.
+- Tests: 13 new (3 entity-ingest — marker-is-final-statement, grouped
+  `last_seen_at` bump, throwing-article-skipped-rest-commits; 4 extract-v2
+  layer-priority cases; 4 candidates route — race-resolves-as-success and
+  genuinely-absent-entity-409, for both accept and dismiss; a new
+  `src/app/api/ingest/__tests__/route.test.ts`, 4 tests, covering stage
+  attribution and partial-counts-on-failure). 227 → 240 passing. `tsc
+  --noEmit` and `npm run build` both clean.
+
 ## 2026-07-15 — Fix-pack: Postgres ingest layer (PR #47 follow-up)
 - `migrations/001_core.sql`: `articles.dup_group_id` FK changed from default `NO ACTION` to `ON DELETE SET NULL`. `sweepRetention` deletes articles older than 30d, but a dup-group head can be up to 48h older than its members — under `NO ACTION` the delete aborted once a head crossed the cutoff before its members. Edited the migration in place (never applied to any database yet), no second migration file.
 - `src/lib/server/ingest-writer.ts`: replaced the per-article `assignDupGroup` (one `SELECT` + one `UPDATE` per inserted row, called sequentially oldest-first) with a single set-based `assignDupGroups(sql)` — one `WITH heads AS (...) UPDATE articles ... FROM heads` statement issued once after all insert batches. It scans every article from the last 48h with `dup_group_id IS NULL`, joins each to the earliest same-`title_signature` article within the 48h window before it (`DISTINCT ON`, tie-broken by lowest id), and excludes self-matches so heads keep `dup_group_id` NULL. Because it re-scans the whole window every run, it also self-heals rows an earlier partial ingest left ungrouped — the old per-row version couldn't. `InsertedArticle`/`parseInsertedRow`/`toIsoString` and the `SELECT id, title_signature, first_seen_at` return shape were no longer needed and were deleted; `insertBatch` now just returns the inserted row count (`RETURNING id`).

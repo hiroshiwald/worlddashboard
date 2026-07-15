@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeName, extractCandidates } from "../extract-v2";
+import { normalizeName, extractCandidates, addCandidate, Candidate } from "../extract-v2";
 
 describe("normalizeName", () => {
   it("folds diacritics", () => {
@@ -77,5 +77,44 @@ describe("extractCandidates", () => {
   it("person-regex layer is filtered by PERSON_STOPWORDS", () => {
     const candidates = extractCandidates("Just In: Sky News reports new developments today.", "");
     expect(candidates.find((c) => c.norm === "just in")).toBeUndefined();
+  });
+});
+
+describe("addCandidate layer priority", () => {
+  it("never demotes a dictionary hit's layer/typeHint when a lower-priority layer produces a longer same-norm display", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Veltrax", "country", "dictionary");
+    addCandidate(map, "Veltrax Inc", "organization", "compromise");
+
+    const entry = map.get("veltrax")!;
+    expect(entry.layer).toBe("dictionary");
+    expect(entry.typeHint).toBe("country");
+    expect(entry.display).toBe("Veltrax");
+  });
+
+  it("never demotes regardless of arrival order (lower-priority layer arrives first)", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Veltrax", "person", "person-regex");
+    addCandidate(map, "Veltrax", "country", "dictionary");
+
+    const entry = map.get("veltrax")!;
+    expect(entry.layer).toBe("dictionary");
+    expect(entry.typeHint).toBe("country");
+  });
+
+  it("upgrades the display to the longer string within the same layer priority", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Veltrax Industries", "organization", "compromise");
+    addCandidate(map, "Veltrax Industries Inc", "organization", "compromise");
+
+    expect(map.get("veltrax industries")!.display).toBe("Veltrax Industries Inc");
+  });
+
+  it("does not upgrade the display when the new candidate is from a lower-priority layer, even if longer", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Veltrax", "country", "dictionary");
+    addCandidate(map, "Veltrax Inc", "organization", "person-regex");
+
+    expect(map.get("veltrax")!.display).toBe("Veltrax");
   });
 });

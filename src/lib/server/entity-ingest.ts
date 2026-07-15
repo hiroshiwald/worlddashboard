@@ -43,20 +43,30 @@ function parseHeadRow(row: SqlRow): HeadArticle {
   };
 }
 
-/** Cluster heads from the lookback window with no article_entities rows
- * yet — the idempotency check that lets re-runs and catch-up runs self-heal
- * without reprocessing already-resolved articles. */
+/** Cluster heads from the lookback window not yet marked processed — the
+ * idempotency check that lets re-runs and catch-up runs self-heal without
+ * reprocessing already-resolved articles. Uses an explicit
+ * entities_processed_at marker (set at the end of a successful run) rather
+ * than NOT EXISTS(article_entities): an article whose extracted names are
+ * all unresolved candidates never gets an article_entities row, so under a
+ * NOT EXISTS gate it would be re-selected — and its entity_candidates
+ * sightings re-accumulated — every run for its whole lookback window. */
 async function selectUnprocessedHeads(sql: Sql): Promise<HeadArticle[]> {
   const rows = await sql`
     SELECT a.id, a.title, a.summary, a.published_at, a.first_seen_at, a.source_name
     FROM articles a
     WHERE a.dup_group_id IS NULL
       AND a.first_seen_at >= now() - make_interval(hours => ${LOOKBACK_HOURS}::int)
-      AND NOT EXISTS (
-        SELECT 1 FROM article_entities ae WHERE ae.article_id = a.id
-      )
+      AND a.entities_processed_at IS NULL
   `;
   return rows.map(parseHeadRow);
+}
+
+async function markArticlesProcessed(sql: Sql, articleIds: number[]): Promise<void> {
+  if (articleIds.length === 0) return;
+  await sql`
+    UPDATE articles SET entities_processed_at = now() WHERE id = ANY(${articleIds}::bigint[])
+  `;
 }
 
 // ---- entity registry (resolution step 1: DB, all statuses incl. dismissed) ----
@@ -163,6 +173,7 @@ interface ClassifiedBatch {
   resolved: ResolvedMention[];
   newEntities: Map<string, PendingNewEntity>;
   candidateSightings: CandidateSighting[];
+  processedArticleIds: number[];
 }
 
 function addNewEntityMention(
@@ -176,25 +187,44 @@ function addNewEntityMention(
   else newEntities.set(canonicalName, { canonicalName, type, mentions: [mention] });
 }
 
-function classifyAll(
-  perArticle: { article: HeadArticle; candidates: Candidate[] }[],
+// Extraction (compromise NLP, regex layers) and classification run per
+// article inside their own try/catch: one pathological title must not abort
+// the whole batch. A failing article is logged and left out of
+// processedArticleIds, so it's simply not marked processed and retries
+// on the next run.
+function processArticle(
+  article: HeadArticle,
   registry: Map<string, EntityRecord>,
-): ClassifiedBatch {
-  const resolved: ResolvedMention[] = [];
-  const newEntities = new Map<string, PendingNewEntity>();
-  const candidateSightings: CandidateSighting[] = [];
-
-  for (const { article, candidates } of perArticle) {
+  batch: Omit<ClassifiedBatch, "processedArticleIds">,
+): boolean {
+  try {
+    const candidates = extractCandidates(article.title, article.summary);
     const sentiment = scoreSentiment(`${article.title} ${article.summary}`);
     for (const candidate of candidates) {
       const result = classifyCandidate(candidate, article, sentiment, registry);
-      if (result.kind === "resolved") resolved.push(result.mention);
+      if (result.kind === "resolved") batch.resolved.push(result.mention);
       else if (result.kind === "new-entity") {
-        addNewEntityMention(newEntities, result.canonicalName, result.type, result.mention);
-      } else candidateSightings.push(result.sighting);
+        addNewEntityMention(batch.newEntities, result.canonicalName, result.type, result.mention);
+      } else batch.candidateSightings.push(result.sighting);
     }
+    return true;
+  } catch (err) {
+    console.error(`processNewArticles: failed to process article ${article.id}, skipping (will retry next run)`, err);
+    return false;
   }
-  return { resolved, newEntities, candidateSightings };
+}
+
+function classifyAll(heads: HeadArticle[], registry: Map<string, EntityRecord>): ClassifiedBatch {
+  const batch = {
+    resolved: [] as ResolvedMention[],
+    newEntities: new Map<string, PendingNewEntity>(),
+    candidateSightings: [] as CandidateSighting[],
+  };
+  const processedArticleIds: number[] = [];
+  for (const article of heads) {
+    if (processArticle(article, registry, batch)) processedArticleIds.push(article.id);
+  }
+  return { ...batch, processedArticleIds };
 }
 
 // ---- new dictionary-first-hit entities: batch insert, then resolve ids ----
@@ -268,6 +298,35 @@ export function dedupeMentions(mentions: ResolvedMention[]): ResolvedMention[] {
     deduped.push(m);
   }
   return deduped;
+}
+
+// ---- entity last_seen_at bump ----
+
+// entities.last_seen_at is only ever set by upsertNewEntities (on first
+// mention). A mention that resolves against an EXISTING registry entity
+// never touches it again, so a tracked entity's last_seen_at freezes at
+// creation time even while it keeps being mentioned. Bump it here for every
+// resolved mention (a harmless no-op re-set for just-created entities, since
+// upsertNewEntities already set it to the same value).
+function maxSeenByEntity(mentions: ResolvedMention[]): Map<number, Date> {
+  const maxSeen = new Map<number, Date>();
+  for (const m of mentions) {
+    const current = maxSeen.get(m.entityId);
+    if (!current || m.effectiveAt > current) maxSeen.set(m.entityId, m.effectiveAt);
+  }
+  return maxSeen;
+}
+
+async function bumpEntityLastSeen(sql: Sql, mentions: ResolvedMention[]): Promise<void> {
+  const maxSeen = maxSeenByEntity(mentions);
+  if (maxSeen.size === 0) return;
+  const ids = Array.from(maxSeen.keys());
+  const maxes = ids.map((id) => maxSeen.get(id)!.toISOString());
+  await sql`
+    UPDATE entities SET last_seen_at = GREATEST(COALESCE(entities.last_seen_at, '-infinity'), v.max_seen)
+    FROM UNNEST(${ids}::bigint[], ${maxes}::timestamptz[]) AS v(id, max_seen)
+    WHERE entities.id = v.id
+  `;
 }
 
 // ---- article_entities ----
@@ -568,20 +627,28 @@ export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
   }
 
   const registry = await loadEntityRegistry(sql);
-  const perArticle = heads.map((article) => ({ article, candidates: extractCandidates(article.title, article.summary) }));
-  const classified = classifyAll(perArticle, registry);
+  const classified = classifyAll(heads, registry);
 
   const insertedEntities = await upsertNewEntities(sql, classified.newEntities);
   const newEntityMentions = resolveNewEntityMentions(classified.newEntities, insertedEntities);
   const allMentions = dedupeMentions([...classified.resolved, ...newEntityMentions]);
 
+  await bumpEntityLastSeen(sql, allMentions);
   await insertArticleEntities(sql, allMentions);
   await upsertHourlyMentions(sql, rollupHourlyMentions(allMentions));
   await upsertEntityEdges(sql, rollupEntityEdges(allMentions));
   const candidatesTouched = await persistCandidates(sql, classified.candidateSightings);
 
+  // Marking processed is deliberately the LAST statement of a run: a crash
+  // between the aggregate writes above and this UPDATE leaves this batch's
+  // articles unmarked, so they retry next run — additive rollups (mentions,
+  // edges, candidate counts) would double-count for that one batch. Rare
+  // and bounded (at most one extra batch), chosen over silently losing
+  // articles whose entities never got recorded at all.
+  await markArticlesProcessed(sql, classified.processedArticleIds);
+
   return {
-    articlesProcessed: heads.length,
+    articlesProcessed: classified.processedArticleIds.length,
     mentionsWritten: allMentions.length,
     newEntities: insertedEntities.length,
     candidatesTouched,

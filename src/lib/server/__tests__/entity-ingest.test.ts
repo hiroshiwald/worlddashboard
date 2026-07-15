@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   processNewArticles,
   rollupHourlyMentions,
@@ -7,6 +7,20 @@ import {
   dedupeMentions,
 } from "../entity-ingest";
 import type { Sql, SqlRow } from "../db";
+
+// Only the "POISON" title throws; every other title delegates to the real
+// extractCandidates, so this mock doesn't change behavior for other tests —
+// it just gives FIX 5's per-article resilience test a deterministic trigger.
+vi.mock("../extract-v2", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../extract-v2")>();
+  return {
+    ...actual,
+    extractCandidates: (title: string, summary: string) => {
+      if (title.includes("POISON")) throw new Error("simulated extraction failure");
+      return actual.extractCandidates(title, summary);
+    },
+  };
+});
 
 interface RecordedCall {
   query: string;
@@ -28,14 +42,14 @@ function findCall(calls: RecordedCall[], marker: string): RecordedCall | undefin
 }
 
 describe("selectUnprocessedHeads (via processNewArticles)", () => {
-  it("issues a NOT EXISTS clause against article_entities scoped to cluster heads", async () => {
+  it("scopes cluster heads by the entities_processed_at marker, not NOT EXISTS", async () => {
     const { sql, calls } = makeMockSql(() => []);
     await processNewArticles(sql);
 
     const headsCall = calls[0];
-    expect(headsCall.query).toContain("NOT EXISTS");
-    expect(headsCall.query).toContain("FROM article_entities ae");
-    expect(headsCall.query).toContain("ae.article_id = a.id");
+    expect(headsCall.query).toContain("a.entities_processed_at IS NULL");
+    expect(headsCall.query).not.toContain("NOT EXISTS");
+    expect(headsCall.query).not.toContain("article_entities");
     expect(headsCall.query).toContain("a.dup_group_id IS NULL");
   });
 
@@ -315,5 +329,86 @@ describe("processNewArticles resolution order and idempotency", () => {
     expect(candidatesUpsertCall).toBeDefined();
     const payload = JSON.parse(candidatesUpsertCall!.values[0] as string);
     expect(payload.some((p: { name_norm: string }) => p.name_norm === "jonas kestrel")).toBe(true);
+  });
+});
+
+describe("review fix-pack: processed marker, last_seen_at bump, per-article resilience", () => {
+  it("marks articles processed as the final statement of a successful run", async () => {
+    const headRow = {
+      id: "1", title: "Russia and China sign new trade deal.", summary: "",
+      published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A",
+    };
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [headRow];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) {
+        return [{ id: "1", canonical_name: "Russia" }, { id: "2", canonical_name: "China" }];
+      }
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    await processNewArticles(sql);
+
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall.query).toContain("UPDATE articles SET entities_processed_at = now()");
+    expect(lastCall.values[0]).toEqual([1]);
+  });
+
+  it("bumps last_seen_at once per entity, grouped to the max effective time across the batch", async () => {
+    const article1 = {
+      id: "1", title: "Russia announces new policy.", summary: "",
+      published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A",
+    };
+    const article2 = {
+      id: "2", title: "Russia responds to sanctions pressure.", summary: "",
+      published_at: "2026-07-15T14:00:00Z", first_seen_at: "2026-07-15T14:00:00Z", source_name: "Source B",
+    };
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [article1, article2];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) {
+        return [{ id: "7", canonical_name: "Russia", type: "country", aliases: [] }];
+      }
+      if (call.query.includes("INSERT INTO entities")) return [];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    await processNewArticles(sql);
+
+    const bumpCall = calls.find((c) => c.query.includes("UPDATE entities SET last_seen_at"));
+    expect(bumpCall).toBeDefined();
+    expect(bumpCall!.values[0]).toEqual([7]);
+    expect(bumpCall!.values[1]).toEqual(["2026-07-15T14:00:00.000Z"]);
+  });
+
+  it("skips an article whose extraction throws, while the rest of the batch still commits", async () => {
+    const poisonArticle = {
+      id: "1", title: "POISON pathological title.", summary: "",
+      published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A",
+    };
+    const goodArticle = {
+      id: "2", title: "Russia announces new policy.", summary: "",
+      published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source B",
+    };
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [poisonArticle, goodArticle];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.articlesProcessed).toBe(1);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("article 1"), expect.anything());
+
+    const markCall = calls[calls.length - 1];
+    expect(markCall.query).toContain("entities_processed_at = now()");
+    expect(markCall.values[0]).toEqual([2]);
+
+    consoleErrorSpy.mockRestore();
   });
 });
