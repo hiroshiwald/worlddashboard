@@ -1,5 +1,92 @@
 # World Dashboard Development Log
 
+## 2026-07-15 — CI workflow, real-Postgres integration tests, docs catch-up
+
+Tests/CI/docs only — no production source, migration, or config touched.
+
+- `.github/workflows/test.yml` (new): "Tests" workflow on `pull_request` and
+  push to `main`. One `ubuntu-latest` job with a Postgres 16 service
+  container (`pg_isready` health check), `actions/checkout@v4` +
+  `actions/setup-node@v4` (node 20, npm cache), `npm ci`, `npx tsc --noEmit`,
+  `npm test` (with `TEST_DATABASE_URL` pointed at the service container),
+  `npm run build`.
+- `src/lib/server/__tests__/helpers/pg-sql.ts` (new): `makePgSql(pool)` —
+  a ~10-line adapter from a node-postgres `Pool` to the tagged-template
+  `Sql` contract (positional `$1..$n` from the template's string parts;
+  node-postgres already serializes JS arrays/strings correctly for the
+  production queries' `::text[]`/`::jsonb` casts, so no special-casing was
+  needed). `applyMigrations`/`freshSchema` — a from-scratch migration
+  applier (deliberately not importing `scripts/migrate.mjs`, which runs
+  `main()` at import time) that reads `migrations/*.sql` in filename order
+  and executes them against a real Postgres, so the integration suite
+  validates the actual migration files rather than a hand-copied schema.
+  Added `pg` + `@types/pg` as devDependencies — justified because
+  `@neondatabase/serverless` (the production driver) requires Neon's HTTP
+  proxy and cannot reach a plain Postgres, so it's unusable for real
+  integration testing.
+- `src/lib/server/__tests__/integration/` (new): gated with
+  `describe.skipIf(!process.env.TEST_DATABASE_URL)` so the suite skips
+  cleanly wherever no database is configured and runs for real in CI, plus
+  one ungated canary (`env-canary.test.ts`) that fails loudly if `CI` is
+  set without `TEST_DATABASE_URL` — guards against the whole layer silently
+  skipping while CI stays green.
+  - `ingest-writer.integration.test.ts`: exact-duplicate insert/re-insert,
+    `published_at NULL` for a dateless item, cross-source paraphrase
+    dup-group linking, the three-consecutive-days recurring-headline case
+    (day 2 attaches to day 1's head; after day 1 ages out of the 48h
+    window, day 3 starts a new head rather than chaining to day 2), and
+    `sweepRetention`'s 30-day delete plus the `ON DELETE SET NULL` path on
+    a younger dup-group member.
+  - `entity-ingest.integration.test.ts`: `processNewArticles` happy path
+    (dictionary entities with correct type/first_seen_at, article_entities
+    written for cluster heads only, hourly bucket math on
+    `COALESCE(published_at, first_seen_at)`, `entity_a < entity_b` edge
+    ordering, an unresolved recurring name landing in `entity_candidates`
+    with correct mention_count/source_names/day_count), full-run
+    idempotency (a second run touches zero rows anywhere — the regression
+    test for the mention-inflation blocker), `entities.last_seen_at`
+    advancing on a later mention while `first_seen_at` stays put, and a
+    SQL-level candidate accept flow (insert entity from the candidate's
+    fields, delete the candidate, confirm the next article resolves to it
+    and no candidate row reappears) — done directly against the tables
+    since the route handlers construct their own Neon client and aren't
+    importable here.
+- **Gotcha (caught by actually running against Postgres, not just
+  reasoning about the SQL): schema races between concurrent test files.**
+  vitest runs test files concurrently by default; both integration files
+  share the one `TEST_DATABASE_URL` database, and each originally did
+  `DROP SCHEMA public CASCADE` in its own `beforeEach` — one file's drop
+  would occasionally wipe the other's mid-test (`relation "articles" does
+  not exist`). Fixed by giving each file its own named schema
+  (`wd_test_ingest_writer` / `wd_test_entity_ingest`) via the pool's
+  `options: "-c search_path=<name>"`, so `freshSchema` now drops/creates a
+  caller-given schema instead of hardcoding `public`. `vitest.config.ts` is
+  outside the authorized file list for this task, so this was fixed at the
+  test-helper level rather than by disabling file parallelism.
+- **Deviation from the task brief**: the brief assumed this sandbox has no
+  database and that the integration tests would first execute in CI. It
+  actually has Postgres 16 installed (just not running) — started it
+  locally, pointed `TEST_DATABASE_URL` at it with the exact
+  `POSTGRES_PASSWORD=test`/`POSTGRES_DB=test` the CI service container
+  uses, and ran the full integration suite for real (5 repeated runs, no
+  flakiness) before this ever reached GitHub Actions. That's how the
+  schema-race gotcha above was caught instead of shipped. This local
+  Postgres was sandbox-only setup, not a repo or CI change.
+- MANIFEST.md: added `addCandidate` to `extract-v2.ts`'s exports; expanded
+  `migrations/002_entity_indexes.sql`'s row to cover all three of its
+  statements (the prior fix-pack had only documented the first index);
+  added rows for the four new test-helper/integration files; added a CI
+  test gate invariant and an integration-test-layer invariant (schema
+  isolation included); corrected the entity-pass idempotency invariant,
+  which still described the old `NOT EXISTS(article_entities)` gate even
+  though the code (and this same section's migration row) already reflects
+  the `entities_processed_at` marker.
+- Local: 240 pre-existing tests still pass; with no `TEST_DATABASE_URL` set
+  the 10 new integration tests report as skipped (241 passed | 10 skipped,
+  21 files) and the 1 new canary test passes; with `TEST_DATABASE_URL` set
+  against a real local Postgres, all 251 tests pass (21 files, 0 skipped).
+  `tsc --noEmit` and `npm run build` both clean.
+
 ## 2026-07-15 — Entity database persistence: registry, review queue, timeline
 
 Entities become durable database objects with real first-seen dates; unknown
