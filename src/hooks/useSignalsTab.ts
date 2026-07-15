@@ -4,7 +4,6 @@ import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { FeedItem, ExtractedEntity, Signal, EnrichedEntity } from "@/lib/types";
 import { extractEntities } from "@/lib/entity-extractor";
 import { detectSignals } from "@/lib/signal-detector";
-import { enrichEntities } from "@/lib/novelty-scorer";
 import { buildSituations } from "@/lib/situation-builder";
 import {
   MUTE_DURATION,
@@ -14,6 +13,7 @@ import {
   loadPreviousEntityNames,
   saveEntitySnapshot,
 } from "@/lib/signal-storage";
+import { useEnrichedEntities } from "./useEnrichedEntities";
 
 export interface SignalsTabTheme {
   cardBg: string;
@@ -68,7 +68,7 @@ function buildSignalsTheme(dark: boolean): SignalsTabTheme {
 // across files. Only the pure theme block is extracted (buildSignalsTheme).
 export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParams) {
   const entities = useMemo(() => extractEntities(items), [items]);
-  const enriched = useMemo(() => enrichEntities(entities, items), [entities, items]);
+  const enriched = useEnrichedEntities(entities, items);
   const situations = useMemo(() => buildSituations(enriched, items), [enriched, items]);
 
   const [mutedEntities, setMutedEntities] = useState<Map<string, number>>(() => new Map());

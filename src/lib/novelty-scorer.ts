@@ -3,17 +3,9 @@ import {
   FeedItem,
   EnrichedEntity,
   NoveltyReason,
+  EdgeHistoryEntry,
 } from "./types";
-import { EdgeHistoryEntry } from "./types";
-import {
-  loadEdgeHistory,
-  saveEdgeHistory,
-  edgeKey,
-  loadEntityBaselines,
-  updateEntityBaselines,
-  getBaselineRate,
-  EntityBaseline,
-} from "./signal-storage";
+import { edgeKey, getBaselineRate, EntityBaseline, AnalysisStores } from "./signal-storage";
 
 interface CategorySpreadResult {
   catScore: number;
@@ -117,7 +109,8 @@ function scoreQuietMover(entity: ExtractedEntity, hasOtherReasons: boolean): Sco
   return { score: quietBonus, reason };
 }
 
-function buildCurrentEdges(entities: ExtractedEntity[]): Map<string, number> {
+/** Pure helper: current run's edge counts, for the caller to persist via saveEdgeHistory. */
+export function computeCurrentEdges(entities: ExtractedEntity[]): Map<string, number> {
   const currentEdges = new Map<string, number>();
   for (const e of entities) {
     for (const [coName, count] of e.cooccurrences) {
@@ -171,22 +164,14 @@ function enrichSingleEntity(
 
 export function enrichEntities(
   entities: ExtractedEntity[],
-  items: FeedItem[]
+  items: FeedItem[],
+  stores: AnalysisStores,
 ): EnrichedEntity[] {
   const itemMap = new Map<string, FeedItem>();
   for (const item of items) itemMap.set(item.id, item);
-  const edgeHistory = loadEdgeHistory();
-  const baselines = loadEntityBaselines();
-  const currentEdges = buildCurrentEdges(entities);
-  const enriched = entities.map((entity) =>
-    enrichSingleEntity(entity, itemMap, edgeHistory, baselines),
+  return entities.map((entity) =>
+    enrichSingleEntity(entity, itemMap, stores.edgeHistory, stores.baselines),
   );
-  // Persist state for next refresh
-  saveEdgeHistory(currentEdges);
-  updateEntityBaselines(
-    entities.map((e) => ({ name: e.name, mentions: e.mentions }))
-  );
-  return enriched;
 }
 
 /**

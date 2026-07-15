@@ -170,3 +170,17 @@ export function getBaselineRate(
   const sum = entry.hourlyMentions.reduce((a, b) => a + b, 0);
   return sum / entry.hourlyMentions.length;
 }
+
+// ── Combined read for pure analytics (novelty-scorer) ──
+
+export interface AnalysisStores {
+  edgeHistory: Map<string, EdgeHistoryEntry>;
+  baselines: Map<string, EntityBaseline>;
+}
+
+export function loadAnalysisStores(): AnalysisStores {
+  return {
+    edgeHistory: loadEdgeHistory(),
+    baselines: loadEntityBaselines(),
+  };
+}
