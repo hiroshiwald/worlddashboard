@@ -5,7 +5,7 @@ import { FeedItem, SortConfig } from "@/lib/types";
 import { useFeed } from "@/hooks/useSources";
 import { getThemeClasses, ThemeClasses } from "@/lib/theme";
 
-export type TabKey = "feeds" | "intel" | "network" | "map" | "signals" | "discovery";
+export type TabKey = "feeds" | "intel" | "network" | "map" | "signals" | "discovery" | "review";
 export type ColumnKey = keyof FeedItem;
 
 interface UseDashboardTableReturn {
@@ -38,6 +38,15 @@ interface UseDashboardTableReturn {
   getSortArrow: (key: ColumnKey) => string;
   handleEntityClick: (name: string) => void;
   clearFilters: () => void;
+  candidateCount: number;
+  handleCandidatesChanged: (count: number) => void;
+}
+
+async function fetchCandidateCount(): Promise<number> {
+  const res = await fetch("/api/candidates", { cache: "no-store" });
+  if (!res.ok) return 0;
+  const data = await res.json();
+  return Array.isArray(data.candidates) ? data.candidates.length : 0;
 }
 
 function matchesText(item: FeedItem, query: string): boolean {
@@ -77,11 +86,11 @@ function sortItems(items: FeedItem[], sort: SortConfig): FeedItem[] {
   return arr;
 }
 
-// Exception to 50-line rule: 6 state variables + 1 effect + 2 memos +
+// Exception to 50-line rule: 7 state variables + 2 effects + 2 memos +
 // 5 handlers make further reduction below 50 counterproductive. Pure
-// helpers (matchesText, filterItems, sortItems) are already extracted
-// above; remaining code is React state/effect wiring that must stay
-// co-located with the hook.
+// helpers (matchesText, filterItems, sortItems, fetchCandidateCount) are
+// already extracted above; remaining code is React state/effect wiring
+// that must stay co-located with the hook.
 export function useDashboardTable(): UseDashboardTableReturn {
   const {
     items, loading, error, fetchedAt,
@@ -94,10 +103,17 @@ export function useDashboardTable(): UseDashboardTableReturn {
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [dark, setDark] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("feeds");
+  const [candidateCount, setCandidateCount] = useState(0);
 
   useEffect(() => {
     const saved = localStorage.getItem("wd-theme");
     if (saved === "dark") setDark(true);
+  }, []);
+
+  useEffect(() => {
+    // Fire-and-forget: fetchCandidateCount never throws (it swallows a
+    // non-ok response into a 0 count), so there's nothing to catch here.
+    fetchCandidateCount().then(setCandidateCount);
   }, []);
 
   const toggleTheme = () => {
@@ -154,5 +170,6 @@ export function useDashboardTable(): UseDashboardTableReturn {
     setSearchQuery, setCategoryFilter, setEntityFilter, setActiveTab,
     categories, filteredItems, sortedItems, t,
     toggleTheme, handleSort, getSortArrow, handleEntityClick, clearFilters,
+    candidateCount, handleCandidatesChanged: setCandidateCount,
   };
 }

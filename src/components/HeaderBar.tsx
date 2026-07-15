@@ -3,7 +3,7 @@
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
 
-type TabKey = "feeds" | "intel" | "network" | "map" | "signals" | "discovery";
+type TabKey = "feeds" | "intel" | "network" | "map" | "signals" | "discovery" | "review";
 
 interface HeaderBarProps {
   dark: boolean;
@@ -26,6 +26,7 @@ interface HeaderBarProps {
   t: ThemeClasses;
   mode?: "db" | "live";
   lastIngestAt?: string | null;
+  candidateCount: number;
 }
 
 const STALE_INGEST_MS = 3 * 60 * 60 * 1000;
@@ -70,6 +71,7 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: "map", label: "Map" },
   { key: "signals", label: "Signals" },
   { key: "discovery", label: "Discovery" },
+  { key: "review", label: "Review" },
 ];
 
 function SearchInput({
@@ -132,6 +134,7 @@ export default function HeaderBar({
   t,
   mode,
   lastIngestAt,
+  candidateCount,
 }: HeaderBarProps) {
   return (
     <div className={`shrink-0 z-30 ${t.headerBg}`}>
@@ -237,7 +240,7 @@ export default function HeaderBar({
                 activeTab === tab.key ? t.tabActive : t.tabInactive
               }`}
             >
-              {tab.label}
+              {tab.key === "review" && candidateCount > 0 ? `${tab.label} (${candidateCount})` : tab.label}
             </button>
           ))}
         </div>

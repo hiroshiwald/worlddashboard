@@ -38,16 +38,30 @@ const DiscoveryTab = dynamic(() => import("../DiscoveryTab"), {
   ),
 });
 
+const ReviewTab = dynamic(() => import("../ReviewTab"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-sm text-gray-400">Loading review queue...</p>
+    </div>
+  ),
+});
+
 interface TabContentProps {
   activeTab: string;
   items: FeedItem[];
   filteredItems: FeedItem[];
   dark: boolean;
   onEntityClick: (name: string) => void;
+  onCandidatesChanged: (count: number) => void;
 }
 
-export default function TabContent({ activeTab, items, filteredItems, dark, onEntityClick }: TabContentProps) {
-  if (activeTab === "feeds" || items.length === 0) return null;
+export default function TabContent({ activeTab, items, filteredItems, dark, onEntityClick, onCandidatesChanged }: TabContentProps) {
+  if (activeTab === "feeds") return null;
+  // Review is DB-backed, independent of the live feed items array, so it
+  // isn't gated behind items.length like the other analysis tabs below.
+  if (activeTab === "review") return <ReviewTab dark={dark} onCandidatesChanged={onCandidatesChanged} />;
+  if (items.length === 0) return null;
 
   switch (activeTab) {
     case "map":
