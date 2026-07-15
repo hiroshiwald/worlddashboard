@@ -1,0 +1,583 @@
+import type { Sql, SqlRow } from "./db";
+import { extractCandidates, normalizeName, Candidate, TypeHint } from "./extract-v2";
+import { scoreSentiment } from "../entity-extractor";
+
+const LOOKBACK_HOURS = 6;
+const MAX_CANDIDATE_SOURCES = 10;
+const MAX_SAMPLE_TITLES = 3;
+
+export interface EntityIngestStats {
+  articlesProcessed: number;
+  mentionsWritten: number;
+  newEntities: number;
+  candidatesTouched: number;
+}
+
+// ---- shared row/date parsing ----
+
+function toDate(value: unknown): Date {
+  return value instanceof Date ? value : new Date(value as string);
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? (value as string[]) : [];
+}
+
+// ---- cluster-head selection ----
+
+interface HeadArticle {
+  id: number;
+  title: string;
+  summary: string;
+  effectiveAt: Date;
+  sourceName: string;
+}
+
+function parseHeadRow(row: SqlRow): HeadArticle {
+  return {
+    id: Number(row.id),
+    title: String(row.title),
+    summary: row.summary != null ? String(row.summary) : "",
+    effectiveAt: toDate(row.published_at ?? row.first_seen_at),
+    sourceName: String(row.source_name),
+  };
+}
+
+/** Cluster heads from the lookback window with no article_entities rows
+ * yet — the idempotency check that lets re-runs and catch-up runs self-heal
+ * without reprocessing already-resolved articles. */
+async function selectUnprocessedHeads(sql: Sql): Promise<HeadArticle[]> {
+  const rows = await sql`
+    SELECT a.id, a.title, a.summary, a.published_at, a.first_seen_at, a.source_name
+    FROM articles a
+    WHERE a.dup_group_id IS NULL
+      AND a.first_seen_at >= now() - make_interval(hours => ${LOOKBACK_HOURS}::int)
+      AND NOT EXISTS (
+        SELECT 1 FROM article_entities ae WHERE ae.article_id = a.id
+      )
+  `;
+  return rows.map(parseHeadRow);
+}
+
+// ---- entity registry (resolution step 1: DB, all statuses incl. dismissed) ----
+
+interface EntityRecord {
+  id: number;
+  canonicalName: string;
+  type: TypeHint;
+}
+
+function buildRegistryIndex(rows: SqlRow[]): Map<string, EntityRecord> {
+  const index = new Map<string, EntityRecord>();
+  for (const row of rows) {
+    const record: EntityRecord = {
+      id: Number(row.id),
+      canonicalName: String(row.canonical_name),
+      type: String(row.type) as TypeHint,
+    };
+    const names = [record.canonicalName, ...toStringArray(row.aliases)];
+    for (const name of names) {
+      const key = normalizeName(name);
+      if (key && !index.has(key)) index.set(key, record);
+    }
+  }
+  return index;
+}
+
+async function loadEntityRegistry(sql: Sql): Promise<Map<string, EntityRecord>> {
+  const rows = await sql`SELECT id, canonical_name, type, aliases FROM entities`;
+  return buildRegistryIndex(rows);
+}
+
+// ---- candidate resolution (registry -> dictionary -> entity_candidates) ----
+
+interface ResolvedMention {
+  articleId: number;
+  entityId: number;
+  effectiveAt: Date;
+  sourceName: string;
+  sentiment: number;
+}
+
+interface PendingMention {
+  articleId: number;
+  effectiveAt: Date;
+  sourceName: string;
+  sentiment: number;
+}
+
+interface PendingNewEntity {
+  canonicalName: string;
+  type: TypeHint;
+  mentions: PendingMention[];
+}
+
+interface CandidateSighting {
+  norm: string;
+  display: string;
+  typeHint: TypeHint;
+  effectiveAt: Date;
+  sourceName: string;
+  title: string;
+}
+
+type Classification =
+  | { kind: "resolved"; mention: ResolvedMention }
+  | { kind: "new-entity"; canonicalName: string; type: TypeHint; mention: PendingMention }
+  | { kind: "candidate"; sighting: CandidateSighting };
+
+function classifyCandidate(
+  candidate: Candidate,
+  article: HeadArticle,
+  sentiment: number,
+  registry: Map<string, EntityRecord>,
+): Classification {
+  const known = registry.get(candidate.norm);
+  const mention: PendingMention = {
+    articleId: article.id,
+    effectiveAt: article.effectiveAt,
+    sourceName: article.sourceName,
+    sentiment,
+  };
+
+  if (known) {
+    return { kind: "resolved", mention: { ...mention, entityId: known.id } };
+  }
+  if (candidate.layer === "dictionary") {
+    return { kind: "new-entity", canonicalName: candidate.display, type: candidate.typeHint, mention };
+  }
+  return {
+    kind: "candidate",
+    sighting: {
+      norm: candidate.norm,
+      display: candidate.display,
+      typeHint: candidate.typeHint,
+      effectiveAt: article.effectiveAt,
+      sourceName: article.sourceName,
+      title: article.title,
+    },
+  };
+}
+
+interface ClassifiedBatch {
+  resolved: ResolvedMention[];
+  newEntities: Map<string, PendingNewEntity>;
+  candidateSightings: CandidateSighting[];
+}
+
+function addNewEntityMention(
+  newEntities: Map<string, PendingNewEntity>,
+  canonicalName: string,
+  type: TypeHint,
+  mention: PendingMention,
+): void {
+  const existing = newEntities.get(canonicalName);
+  if (existing) existing.mentions.push(mention);
+  else newEntities.set(canonicalName, { canonicalName, type, mentions: [mention] });
+}
+
+function classifyAll(
+  perArticle: { article: HeadArticle; candidates: Candidate[] }[],
+  registry: Map<string, EntityRecord>,
+): ClassifiedBatch {
+  const resolved: ResolvedMention[] = [];
+  const newEntities = new Map<string, PendingNewEntity>();
+  const candidateSightings: CandidateSighting[] = [];
+
+  for (const { article, candidates } of perArticle) {
+    const sentiment = scoreSentiment(`${article.title} ${article.summary}`);
+    for (const candidate of candidates) {
+      const result = classifyCandidate(candidate, article, sentiment, registry);
+      if (result.kind === "resolved") resolved.push(result.mention);
+      else if (result.kind === "new-entity") {
+        addNewEntityMention(newEntities, result.canonicalName, result.type, result.mention);
+      } else candidateSightings.push(result.sighting);
+    }
+  }
+  return { resolved, newEntities, candidateSightings };
+}
+
+// ---- new dictionary-first-hit entities: batch insert, then resolve ids ----
+
+interface InsertedEntity {
+  id: number;
+  canonicalName: string;
+}
+
+async function upsertNewEntities(
+  sql: Sql,
+  newEntities: Map<string, PendingNewEntity>,
+): Promise<InsertedEntity[]> {
+  if (newEntities.size === 0) return [];
+  const rows = Array.from(newEntities.values()).map((e) => {
+    const times = e.mentions.map((m) => m.effectiveAt.getTime());
+    return {
+      canonicalName: e.canonicalName,
+      type: e.type,
+      firstSeenAt: new Date(Math.min(...times)).toISOString(),
+      lastSeenAt: new Date(Math.max(...times)).toISOString(),
+    };
+  });
+
+  const result = await sql`
+    INSERT INTO entities (canonical_name, type, status, first_seen_at, last_seen_at)
+    SELECT name, type, 'tracked', first_seen, last_seen FROM UNNEST(
+      ${rows.map((r) => r.canonicalName)}::text[],
+      ${rows.map((r) => r.type)}::text[],
+      ${rows.map((r) => r.firstSeenAt)}::timestamptz[],
+      ${rows.map((r) => r.lastSeenAt)}::timestamptz[]
+    ) AS t(name, type, first_seen, last_seen)
+    ON CONFLICT (canonical_name) DO UPDATE
+      SET last_seen_at = GREATEST(entities.last_seen_at, EXCLUDED.last_seen_at)
+    RETURNING id, canonical_name
+  `;
+
+  return result.map((row) => ({ id: Number(row.id), canonicalName: String(row.canonical_name) }));
+}
+
+function resolveNewEntityMentions(
+  newEntities: Map<string, PendingNewEntity>,
+  inserted: InsertedEntity[],
+): ResolvedMention[] {
+  const idByName = new Map(inserted.map((e) => [e.canonicalName, e.id]));
+  const mentions: ResolvedMention[] = [];
+  for (const entity of newEntities.values()) {
+    const id = idByName.get(entity.canonicalName);
+    if (id === undefined) {
+      throw new Error(`resolveNewEntityMentions: no id returned for entity "${entity.canonicalName}"`);
+    }
+    for (const m of entity.mentions) mentions.push({ ...m, entityId: id });
+  }
+  return mentions;
+}
+
+// ---- article_entities ----
+
+function dedupeArticleEntityPairs(mentions: ResolvedMention[]): { articleId: number; entityId: number }[] {
+  const seen = new Set<string>();
+  const pairs: { articleId: number; entityId: number }[] = [];
+  for (const m of mentions) {
+    const key = `${m.articleId}:${m.entityId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push({ articleId: m.articleId, entityId: m.entityId });
+  }
+  return pairs;
+}
+
+async function insertArticleEntities(sql: Sql, mentions: ResolvedMention[]): Promise<void> {
+  const pairs = dedupeArticleEntityPairs(mentions);
+  if (pairs.length === 0) return;
+  await sql`
+    INSERT INTO article_entities (article_id, entity_id)
+    SELECT * FROM UNNEST(
+      ${pairs.map((p) => p.articleId)}::bigint[],
+      ${pairs.map((p) => p.entityId)}::bigint[]
+    )
+    ON CONFLICT DO NOTHING
+  `;
+}
+
+// ---- entity_mentions_hourly rollup ----
+
+export interface HourlyRollupRow {
+  entityId: number;
+  bucket: string;
+  mentions: number;
+  sourceCount: number;
+  sentimentSum: number;
+}
+
+function hourBucket(date: Date): string {
+  const truncated = new Date(date);
+  truncated.setUTCMinutes(0, 0, 0);
+  return truncated.toISOString();
+}
+
+export function rollupHourlyMentions(mentions: ResolvedMention[]): HourlyRollupRow[] {
+  const groups = new Map<string, { entityId: number; bucket: string; mentions: number; sources: Set<string>; sentimentSum: number }>();
+  for (const m of mentions) {
+    const bucket = hourBucket(m.effectiveAt);
+    const key = `${m.entityId}:${bucket}`;
+    const group = groups.get(key);
+    if (group) {
+      group.mentions += 1;
+      group.sources.add(m.sourceName);
+      group.sentimentSum += m.sentiment;
+    } else {
+      groups.set(key, { entityId: m.entityId, bucket, mentions: 1, sources: new Set([m.sourceName]), sentimentSum: m.sentiment });
+    }
+  }
+  return Array.from(groups.values()).map((g) => ({
+    entityId: g.entityId,
+    bucket: g.bucket,
+    mentions: g.mentions,
+    sourceCount: g.sources.size,
+    sentimentSum: g.sentimentSum,
+  }));
+}
+
+// source_count is a same-batch approximation (distinct sources seen in this
+// run only) reconciled upward via GREATEST; exact per-source counts require
+// joining article_entities while the underlying articles are still retained.
+async function upsertHourlyMentions(sql: Sql, rows: HourlyRollupRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  await sql`
+    INSERT INTO entity_mentions_hourly (entity_id, bucket, mentions, source_count, sentiment_sum)
+    SELECT * FROM UNNEST(
+      ${rows.map((r) => r.entityId)}::bigint[],
+      ${rows.map((r) => r.bucket)}::timestamptz[],
+      ${rows.map((r) => r.mentions)}::int[],
+      ${rows.map((r) => r.sourceCount)}::int[],
+      ${rows.map((r) => r.sentimentSum)}::real[]
+    )
+    ON CONFLICT (entity_id, bucket) DO UPDATE SET
+      mentions = entity_mentions_hourly.mentions + EXCLUDED.mentions,
+      source_count = GREATEST(entity_mentions_hourly.source_count, EXCLUDED.source_count),
+      sentiment_sum = entity_mentions_hourly.sentiment_sum + EXCLUDED.sentiment_sum
+  `;
+}
+
+// ---- entity_edges rollup ----
+
+export interface EdgeRollupRow {
+  entityA: number;
+  entityB: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  articleCount: number;
+}
+
+function groupMentionsByArticle(mentions: ResolvedMention[]): Map<number, { entityIds: Set<number>; effectiveAt: Date }> {
+  const byArticle = new Map<number, { entityIds: Set<number>; effectiveAt: Date }>();
+  for (const m of mentions) {
+    const group = byArticle.get(m.articleId);
+    if (group) group.entityIds.add(m.entityId);
+    else byArticle.set(m.articleId, { entityIds: new Set([m.entityId]), effectiveAt: m.effectiveAt });
+  }
+  return byArticle;
+}
+
+export function rollupEntityEdges(mentions: ResolvedMention[]): EdgeRollupRow[] {
+  const byArticle = groupMentionsByArticle(mentions);
+  const groups = new Map<string, { entityA: number; entityB: number; articleCount: number; firstSeenAt: Date; lastSeenAt: Date }>();
+
+  for (const { entityIds, effectiveAt } of byArticle.values()) {
+    const ids = Array.from(entityIds).sort((a, b) => a - b);
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const key = `${ids[i]}:${ids[j]}`;
+        const group = groups.get(key);
+        if (group) {
+          group.articleCount += 1;
+          if (effectiveAt < group.firstSeenAt) group.firstSeenAt = effectiveAt;
+          if (effectiveAt > group.lastSeenAt) group.lastSeenAt = effectiveAt;
+        } else {
+          groups.set(key, { entityA: ids[i], entityB: ids[j], articleCount: 1, firstSeenAt: effectiveAt, lastSeenAt: effectiveAt });
+        }
+      }
+    }
+  }
+
+  return Array.from(groups.values()).map((g) => ({
+    entityA: g.entityA,
+    entityB: g.entityB,
+    firstSeenAt: g.firstSeenAt.toISOString(),
+    lastSeenAt: g.lastSeenAt.toISOString(),
+    articleCount: g.articleCount,
+  }));
+}
+
+async function upsertEntityEdges(sql: Sql, rows: EdgeRollupRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  await sql`
+    INSERT INTO entity_edges (entity_a, entity_b, first_seen_at, last_seen_at, article_count)
+    SELECT * FROM UNNEST(
+      ${rows.map((r) => r.entityA)}::bigint[],
+      ${rows.map((r) => r.entityB)}::bigint[],
+      ${rows.map((r) => r.firstSeenAt)}::timestamptz[],
+      ${rows.map((r) => r.lastSeenAt)}::timestamptz[],
+      ${rows.map((r) => r.articleCount)}::int[]
+    )
+    ON CONFLICT (entity_a, entity_b) DO UPDATE SET
+      first_seen_at = LEAST(entity_edges.first_seen_at, EXCLUDED.first_seen_at),
+      last_seen_at = GREATEST(entity_edges.last_seen_at, EXCLUDED.last_seen_at),
+      article_count = entity_edges.article_count + EXCLUDED.article_count
+  `;
+}
+
+// ---- entity_candidates rollup (unresolved norms) ----
+
+interface CandidateRow {
+  nameNorm: string;
+  displayName: string;
+  typeHint: TypeHint;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  mentionCount: number;
+  sourceNames: string[];
+  dayCount: number;
+  sampleTitles: string[];
+}
+
+function parseCandidateRow(row: SqlRow): CandidateRow {
+  return {
+    nameNorm: String(row.name_norm),
+    displayName: String(row.display_name),
+    typeHint: String(row.type_hint) as TypeHint,
+    firstSeenAt: toDate(row.first_seen_at),
+    lastSeenAt: toDate(row.last_seen_at),
+    mentionCount: Number(row.mention_count),
+    sourceNames: toStringArray(row.source_names),
+    dayCount: Number(row.day_count),
+    sampleTitles: toStringArray(row.sample_titles),
+  };
+}
+
+async function loadExistingCandidates(sql: Sql, norms: string[]): Promise<Map<string, CandidateRow>> {
+  const rows = await sql`
+    SELECT name_norm, display_name, type_hint, first_seen_at, last_seen_at,
+           mention_count, source_names, day_count, sample_titles
+    FROM entity_candidates
+    WHERE name_norm = ANY(${norms}::text[])
+  `;
+  return new Map(rows.map((r) => [String(r.name_norm), parseCandidateRow(r)]));
+}
+
+function groupSightingsByNorm(sightings: CandidateSighting[]): Map<string, CandidateSighting[]> {
+  const groups = new Map<string, CandidateSighting[]>();
+  for (const s of sightings) {
+    const group = groups.get(s.norm);
+    if (group) group.push(s);
+    else groups.set(s.norm, [s]);
+  }
+  return groups;
+}
+
+function utcDay(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+// Only increments once per newly-crossed UTC calendar day, chronologically —
+// repeated same-day sightings (including reprocessing within the lookback
+// window before an article resolves) never inflate it.
+function computeDayCount(sortedSightings: CandidateSighting[], existing: CandidateRow | undefined): number {
+  let dayCount = existing?.dayCount ?? 0;
+  let lastDay = existing ? utcDay(existing.lastSeenAt) : null;
+  for (const sighting of sortedSightings) {
+    const day = utcDay(sighting.effectiveAt);
+    if (lastDay === null || day > lastDay) {
+      dayCount += 1;
+      lastDay = day;
+    }
+  }
+  return dayCount;
+}
+
+function pickDisplay(existing: CandidateRow | undefined, sorted: CandidateSighting[]): { display: string; typeHint: TypeHint } {
+  if (existing) return { display: existing.displayName, typeHint: existing.typeHint };
+  let best = sorted[0];
+  for (const s of sorted) if (s.display.length > best.display.length) best = s;
+  return { display: best.display, typeHint: best.typeHint };
+}
+
+export function rollupCandidate(
+  norm: string,
+  sightings: CandidateSighting[],
+  existing: CandidateRow | undefined,
+): CandidateRow {
+  const sorted = [...sightings].sort((a, b) => a.effectiveAt.getTime() - b.effectiveAt.getTime());
+  const batchFirstSeen = sorted[0].effectiveAt;
+  const batchLastSeen = sorted[sorted.length - 1].effectiveAt;
+  const picked = pickDisplay(existing, sorted);
+
+  return {
+    nameNorm: norm,
+    displayName: picked.display,
+    typeHint: picked.typeHint,
+    firstSeenAt: existing?.firstSeenAt ?? batchFirstSeen,
+    lastSeenAt: existing && existing.lastSeenAt > batchLastSeen ? existing.lastSeenAt : batchLastSeen,
+    mentionCount: (existing?.mentionCount ?? 0) + sorted.length,
+    sourceNames: Array.from(new Set([...(existing?.sourceNames ?? []), ...sorted.map((s) => s.sourceName)])).slice(0, MAX_CANDIDATE_SOURCES),
+    dayCount: computeDayCount(sorted, existing),
+    sampleTitles: Array.from(new Set([...(existing?.sampleTitles ?? []), ...sorted.map((s) => s.title)])).slice(0, MAX_SAMPLE_TITLES),
+  };
+}
+
+// Array-typed columns (source_names, sample_titles) are jagged per row, so a
+// plain UNNEST (which flattens nested arrays) can't build them — jsonb_to_recordset
+// decodes one JSON array of row objects into typed columns instead.
+async function upsertCandidates(sql: Sql, rows: CandidateRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  const payload = rows.map((r) => ({
+    name_norm: r.nameNorm,
+    display_name: r.displayName,
+    type_hint: r.typeHint,
+    first_seen_at: r.firstSeenAt.toISOString(),
+    last_seen_at: r.lastSeenAt.toISOString(),
+    mention_count: r.mentionCount,
+    source_names: r.sourceNames,
+    day_count: r.dayCount,
+    sample_titles: r.sampleTitles,
+  }));
+
+  await sql`
+    INSERT INTO entity_candidates (
+      name_norm, display_name, type_hint, first_seen_at, last_seen_at,
+      mention_count, source_names, day_count, sample_titles
+    )
+    SELECT name_norm, display_name, type_hint, first_seen_at, last_seen_at,
+           mention_count, source_names, day_count, sample_titles
+    FROM jsonb_to_recordset(${JSON.stringify(payload)}::jsonb) AS t(
+      name_norm text, display_name text, type_hint text,
+      first_seen_at timestamptz, last_seen_at timestamptz,
+      mention_count int, source_names text[], day_count int, sample_titles text[]
+    )
+    ON CONFLICT (name_norm) DO UPDATE SET
+      display_name = EXCLUDED.display_name,
+      type_hint = EXCLUDED.type_hint,
+      last_seen_at = EXCLUDED.last_seen_at,
+      mention_count = EXCLUDED.mention_count,
+      source_names = EXCLUDED.source_names,
+      day_count = EXCLUDED.day_count,
+      sample_titles = EXCLUDED.sample_titles
+  `;
+}
+
+async function persistCandidates(sql: Sql, sightings: CandidateSighting[]): Promise<number> {
+  const grouped = groupSightingsByNorm(sightings);
+  if (grouped.size === 0) return 0;
+  const existing = await loadExistingCandidates(sql, Array.from(grouped.keys()));
+  const rows = Array.from(grouped.entries()).map(([norm, group]) => rollupCandidate(norm, group, existing.get(norm)));
+  await upsertCandidates(sql, rows);
+  return rows.length;
+}
+
+// ---- orchestrator ----
+
+export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
+  const heads = await selectUnprocessedHeads(sql);
+  if (heads.length === 0) {
+    return { articlesProcessed: 0, mentionsWritten: 0, newEntities: 0, candidatesTouched: 0 };
+  }
+
+  const registry = await loadEntityRegistry(sql);
+  const perArticle = heads.map((article) => ({ article, candidates: extractCandidates(article.title, article.summary) }));
+  const classified = classifyAll(perArticle, registry);
+
+  const insertedEntities = await upsertNewEntities(sql, classified.newEntities);
+  const newEntityMentions = resolveNewEntityMentions(classified.newEntities, insertedEntities);
+  const allMentions = [...classified.resolved, ...newEntityMentions];
+
+  await insertArticleEntities(sql, allMentions);
+  await upsertHourlyMentions(sql, rollupHourlyMentions(allMentions));
+  await upsertEntityEdges(sql, rollupEntityEdges(allMentions));
+  const candidatesTouched = await persistCandidates(sql, classified.candidateSightings);
+
+  return {
+    articlesProcessed: heads.length,
+    mentionsWritten: allMentions.length,
+    newEntities: insertedEntities.length,
+    candidatesTouched,
+  };
+}

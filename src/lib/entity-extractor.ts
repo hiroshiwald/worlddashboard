@@ -254,7 +254,9 @@ const POS_WORDS = new Set([
   "resolution","resolve","reconciliation","reunite","alliance","partner","partnership",
 ]);
 
-function scoreSentiment(text: string): number {
+/** Exported for reuse by entity-ingest.ts's mentions_hourly rollup — same
+ * lexicon scorer the client tabs use, no behavior change. */
+export function scoreSentiment(text: string): number {
   const words = text.toLowerCase().split(/\W+/);
   let score = 0;
   for (const w of words) {

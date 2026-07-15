@@ -4,6 +4,7 @@ import { fetchAllFeeds, CacheEntry } from "@/lib/feed-fetcher";
 import { SourceMeta } from "@/lib/types";
 import { getSql } from "@/lib/server/db";
 import { persistArticles, sweepRetention } from "@/lib/server/ingest-writer";
+import { processNewArticles } from "@/lib/server/entity-ingest";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -42,12 +43,14 @@ async function runIngest() {
   const sql = getSql();
   const { inserted, duplicates } = await persistArticles(sql, items);
   await sweepRetention(sql);
+  const entities = await processNewArticles(sql);
 
   return NextResponse.json({
     inserted,
     duplicates,
     feedsSucceeded,
     feedsAttempted,
+    entities,
     tookMs: Date.now() - start,
   });
 }
