@@ -78,6 +78,7 @@ describe("persistArticles", () => {
     expect(query).toContain("h.title_signature = a.title_signature");
     expect(query).toContain("h.first_seen_at <= a.first_seen_at");
     expect(query).toContain("INTERVAL '48 hours'");
+    expect(query).toContain("h.dup_group_id IS NULL");
     expect(query).toContain("a.dup_group_id IS NULL");
     expect(query).toContain("DISTINCT ON (a.id)");
     expect(query).toContain("ORDER BY a.id, h.first_seen_at ASC, h.id ASC");

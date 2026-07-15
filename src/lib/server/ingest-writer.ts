@@ -58,11 +58,16 @@ async function insertBatch(sql: Sql, items: FeedItem[]): Promise<number> {
   return result.length;
 }
 
-/** Links every ungrouped article from the last 48h to the earliest article
- * sharing its title_signature within the 48h window before it (ties broken
- * by lowest id); heads keep dup_group_id NULL. One set-based UPDATE, run
- * after all insert batches, so it also self-heals rows an earlier partial
- * ingest left ungrouped. */
+/** Links every ungrouped article from the last 48h to the earliest actual
+ * head sharing its title_signature within the 48h window before it (ties
+ * broken by lowest id); heads keep dup_group_id NULL. Only attaches to a
+ * row that is itself a head (dup_group_id IS NULL) — otherwise recurring
+ * same-signature headlines would chain member-to-member indefinitely, and
+ * once a head ages out of the window, its most recent same-signature
+ * article becomes the new head instead of staying hidden. One set-based
+ * UPDATE, run after all insert batches; the CTE reads a pre-update
+ * snapshot, so same-run grouping of a fresh batch still works, and it
+ * self-heals rows an earlier partial ingest left ungrouped. */
 async function assignDupGroups(sql: Sql): Promise<void> {
   await sql`
     WITH heads AS (
@@ -74,6 +79,7 @@ async function assignDupGroups(sql: Sql): Promise<void> {
         ON h.title_signature = a.title_signature
        AND h.first_seen_at <= a.first_seen_at
        AND h.first_seen_at >= a.first_seen_at - INTERVAL '48 hours'
+       AND h.dup_group_id IS NULL
       WHERE a.first_seen_at >= now() - INTERVAL '48 hours'
         AND a.dup_group_id IS NULL
       ORDER BY a.id, h.first_seen_at ASC, h.id ASC
