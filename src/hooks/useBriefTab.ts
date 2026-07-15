@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { SignalCardData, SignalAction } from "@/components/signals/types";
+import { useBusyIds } from "./useBusyIds";
 
 export type { SignalAction } from "@/components/signals/types";
 export type BriefSignal = SignalCardData;
@@ -60,19 +61,27 @@ export function useBriefTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dbUnconfigured, setDbUnconfigured] = useState(false);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const { busyIds, withBusy } = useBusyIds();
+  const loadSeq = useRef(0);
 
+  // Guards against an in-flight load's response landing after a newer one
+  // was started (e.g. a second action's refetch resolving before the
+  // first's) and overwriting fresher data with stale data.
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     setDbUnconfigured(false);
     try {
-      setData(await fetchBrief());
+      const result = await fetchBrief();
+      if (seq !== loadSeq.current) return;
+      setData(result);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       if (e instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
       else setError(e instanceof Error ? e.message : "Failed to load brief");
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, []);
 
@@ -82,20 +91,18 @@ export function useBriefTab() {
   }, [load]);
 
   const act = useCallback(
-    async (id: number, action: SignalAction) => {
-      setBusyId(id);
-      setError(null);
-      try {
-        await postSignalAction(id, action);
-        await load();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Action failed");
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [load],
+    (id: number, action: SignalAction) =>
+      withBusy(id, async () => {
+        setError(null);
+        try {
+          await postSignalAction(id, action);
+          await load();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Action failed");
+        }
+      }),
+    [load, withBusy],
   );
 
-  return { data, loading, error, dbUnconfigured, busyId, act };
+  return { data, loading, error, dbUnconfigured, busyIds, act };
 }

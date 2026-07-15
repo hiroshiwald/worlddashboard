@@ -221,6 +221,43 @@ describe.skipIf(!TEST_DATABASE_URL)("signal engine integration (real Postgres)",
     expect(candidates.find((c) => c.dedupeKey === `first_seen:${cohortId}`)).toBeUndefined();
   });
 
+  it("novel-edge bootstrap guard ignores a dismissed entity's edge when computing the global min (regression)", async () => {
+    // A dismissed entity's edge with a very old first_seen_at must NOT skew the global
+    // MIN(first_seen_at) used by the bootstrap guard — the registry resolves mentions
+    // against dismissed entities too, so entity_edges rows aren't restricted to
+    // tracked-tracked pairs. If this leaked in, the guard would compute the recent
+    // tracked-tracked edge below as ">72h past" a stale ancient minimum and wrongly
+    // let it fire, instead of suppressing it as the true (recent) bootstrap cohort.
+    const dismissedId = await seedEntity("Dismissedland", new Date(Date.now() - 5000 * 3600 * 1000).toISOString());
+    await sql!`UPDATE entities SET status = 'dismissed' WHERE id = ${dismissedId}`;
+    const trackedPeer = await seedEntity("Trackedpeer", new Date(Date.now() - 5000 * 3600 * 1000).toISOString());
+    const [da, db] = [dismissedId, trackedPeer].sort((x, y) => x - y);
+    await sql!`
+      INSERT INTO entity_edges (entity_a, entity_b, first_seen_at, last_seen_at, article_count)
+      VALUES (${da}, ${db}, now() - interval '5000 hours', now() - interval '4999 hours', 3)
+    `;
+
+    // The only tracked-tracked edge, seen 10h ago — this IS the true bootstrap cohort
+    // for tracked-tracked edges and must be suppressed.
+    const entityA = await seedEntity("Gamma State", new Date(Date.now() - 10 * 3600 * 1000).toISOString());
+    const entityB = await seedEntity("Delta Union", new Date(Date.now() - 10 * 3600 * 1000).toISOString());
+    const [a, b] = [entityA, entityB].sort((x, y) => x - y);
+    const article1 = await seedClusterHeadArticle("Source A", "world", 2);
+    const article2 = await seedClusterHeadArticle("Source B", "world", 3);
+    for (const articleId of [article1, article2]) {
+      await linkArticleEntity(articleId, entityA);
+      await linkArticleEntity(articleId, entityB);
+    }
+    await sql!`
+      INSERT INTO entity_edges (entity_a, entity_b, first_seen_at, last_seen_at, article_count)
+      VALUES (${a}, ${b}, now() - interval '10 hours', now() - interval '1 hour', 2)
+    `;
+
+    const settings = await getSettings(sql!);
+    const candidates = await runDetectors(sql!, settings);
+    expect(candidates.find((c) => c.dedupeKey === `novel_edge:${a}:${b}`)).toBeUndefined();
+  });
+
   it("novel edge fires for two co-mentioned recently-linked tracked entities and resolves shared evidence articles", async () => {
     const bootstrapId = await seedEntity("Bootstrapland", new Date(Date.now() - 500 * 3600 * 1000).toISOString());
     const entityA = await seedEntity("Alpha Nation", new Date(Date.now() - 500 * 3600 * 1000).toISOString());
@@ -286,6 +323,24 @@ describe.skipIf(!TEST_DATABASE_URL)("signal engine integration (real Postgres)",
     expect(story).toBeDefined();
     expect(story!.clusterSize).toBe(2);
     expect(story!.sourceCount).toBe(1); // both rows are "Source A" — must dedupe, not double-count
+  });
+
+  it("getBrief falls back to first_seen_at for a story's age when published_at is NULL (regression)", async () => {
+    // A dateless feed item stores published_at = NULL (ingest-writer.ts); the story's
+    // reported age/publishedAt must fall back to first_seen_at, matching the query's own
+    // COALESCE(published_at, first_seen_at) — not silently collapse to the Unix epoch.
+    const [{ id: headId }] = (await sql!`
+      INSERT INTO articles (content_hash, title_signature, title, link, published_at, source_name, source_category, source_tier)
+      VALUES ('hash-null-pub', 'sig-null-pub', 'Dateless story', 'https://a.example.com/null-pub', NULL, 'Source A', 'world', '1')
+      RETURNING id
+    `) as [{ id: number }];
+
+    const settings = await getSettings(sql!);
+    const brief = await getBrief(sql!, settings);
+    const story = brief.topStories.find((s) => s.id === Number(headId));
+    expect(story).toBeDefined();
+    expect(new Date(story!.publishedAt).getFullYear()).toBeGreaterThan(2000); // not 1970
+    expect(Date.now() - new Date(story!.publishedAt).getTime()).toBeLessThan(60_000); // ~now (first_seen_at default)
   });
 
   it("getBrief returns ranked top stories with correct cluster size and source count", async () => {

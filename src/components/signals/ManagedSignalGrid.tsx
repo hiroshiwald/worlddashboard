@@ -12,13 +12,13 @@ function actionsFor(state: string): SignalAction[] {
 
 interface ManagedSignalGridProps {
   signals: SignalCardData[];
-  busyId: number | null;
+  busyIds: Set<number>;
   dark: boolean;
   onAction: (id: number, action: SignalAction) => void;
   onEntityClick: (name: string) => void;
 }
 
-export default function ManagedSignalGrid({ signals, busyId, dark, onAction, onEntityClick }: ManagedSignalGridProps) {
+export default function ManagedSignalGrid({ signals, busyIds, dark, onAction, onEntityClick }: ManagedSignalGridProps) {
   if (signals.length === 0) {
     return (
       <div className={`text-center py-12 text-sm ${dark ? "text-slate-400" : "text-gray-500"}`}>
@@ -34,7 +34,7 @@ export default function ManagedSignalGrid({ signals, busyId, dark, onAction, onE
           key={signal.id}
           signal={signal}
           dark={dark}
-          busy={busyId === signal.id}
+          busy={busyIds.has(signal.id)}
           actions={actionsFor(signal.state)}
           onAction={onAction}
           onEntityClick={onEntityClick}

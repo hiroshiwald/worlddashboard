@@ -13,13 +13,13 @@ const BRIEF_ACTIONS: SignalAction[] = ["seen", "promoted", "dismissed"];
 
 interface BriefSignalsSectionProps {
   signals: BriefSignal[];
-  busyId: number | null;
+  busyIds: Set<number>;
   dark: boolean;
   onAction: (id: number, action: SignalAction) => void;
   onEntityClick: (name: string) => void;
 }
 
-export default function BriefSignalsSection({ signals, busyId, dark, onAction, onEntityClick }: BriefSignalsSectionProps) {
+export default function BriefSignalsSection({ signals, busyIds, dark, onAction, onEntityClick }: BriefSignalsSectionProps) {
   if (signals.length === 0) {
     return (
       <p className={`text-sm mb-6 ${dark ? "text-slate-400" : "text-gray-500"}`}>
@@ -44,7 +44,7 @@ export default function BriefSignalsSection({ signals, busyId, dark, onAction, o
                   key={signal.id}
                   signal={signal}
                   dark={dark}
-                  busy={busyId === signal.id}
+                  busy={busyIds.has(signal.id)}
                   actions={BRIEF_ACTIONS}
                   onAction={onAction}
                   onEntityClick={onEntityClick}

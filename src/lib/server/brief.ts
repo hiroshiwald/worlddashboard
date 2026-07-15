@@ -50,13 +50,18 @@ interface RawStory {
   sourceCount: number;
 }
 
+// Mirrors the query's own COALESCE(published_at, first_seen_at) — a dateless
+// feed item stores published_at = NULL, and without this fallback `new
+// Date(null)` silently becomes the Unix epoch, sinking the story's rank and
+// reporting a bogus 1970 publish date.
 function parseStoryRow(row: SqlRow): RawStory {
+  const effectiveAt = row.published_at ?? row.first_seen_at;
   return {
     id: Number(row.id),
     title: String(row.title),
     link: String(row.link),
     sourceName: String(row.source_name),
-    publishedAt: row.published_at instanceof Date ? row.published_at : new Date(row.published_at as string),
+    publishedAt: effectiveAt instanceof Date ? effectiveAt : new Date(effectiveAt as string),
     clusterSize: Number(row.cluster_size),
     sourceCount: Number(row.source_count),
   };

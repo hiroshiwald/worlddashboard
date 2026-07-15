@@ -17,7 +17,7 @@ function EmptyState({ dark, message }: { dark: boolean; message: string }) {
 export default function SignalsTab({ items, dark, onEntityClick }: SignalsTabProps) {
   const {
     topEntities, sparklineData, visibleSignals, stateCounts, stateFilter, setStateFilter,
-    loading, error, dbUnconfigured, busyId, act, t,
+    loading, error, dbUnconfigured, busyIds, act, t,
   } = useSignalsTab({ items, dark, onEntityClick });
 
   return (
@@ -37,7 +37,7 @@ export default function SignalsTab({ items, dark, onEntityClick }: SignalsTabPro
       {!dbUnconfigured && !loading && (
         <>
           <StateFilterBar counts={stateCounts} active={stateFilter} dark={dark} onChange={setStateFilter} />
-          <ManagedSignalGrid signals={visibleSignals} busyId={busyId} dark={dark} onAction={act} onEntityClick={onEntityClick} />
+          <ManagedSignalGrid signals={visibleSignals} busyIds={busyIds} dark={dark} onAction={act} onEntityClick={onEntityClick} />
         </>
       )}
 

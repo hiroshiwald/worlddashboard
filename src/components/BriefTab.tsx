@@ -17,7 +17,7 @@ function EmptyState({ dark, message }: { dark: boolean; message: string }) {
 }
 
 export default function BriefTab({ dark, onEntityClick }: BriefTabProps) {
-  const { data, loading, error, dbUnconfigured, busyId, act } = useBriefTab();
+  const { data, loading, error, dbUnconfigured, busyIds, act } = useBriefTab();
 
   if (dbUnconfigured) return <EmptyState dark={dark} message="The daily brief requires a configured database." />;
   if (error) return <EmptyState dark={dark} message={`Couldn't load the brief: ${error}`} />;
@@ -29,7 +29,7 @@ export default function BriefTab({ dark, onEntityClick }: BriefTabProps) {
 
   return (
     <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-4">
-      <BriefSignalsSection signals={data.signals} busyId={busyId} dark={dark} onAction={act} onEntityClick={onEntityClick} />
+      <BriefSignalsSection signals={data.signals} busyIds={busyIds} dark={dark} onAction={act} onEntityClick={onEntityClick} />
       <BriefNewEntitiesSection entities={data.newEntities} dark={dark} onEntityClick={onEntityClick} />
       <BriefTopStoriesSection stories={data.topStories} dark={dark} />
     </div>

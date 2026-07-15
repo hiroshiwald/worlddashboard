@@ -4,6 +4,14 @@ import { useDashboardTable } from "@/hooks/useDashboardTable";
 import HeaderBar from "./HeaderBar";
 import EntityPanel from "./EntityPanel";
 import { EntityFilterBanner, FeedTable, FeedCardList, TabContent } from "./dashboard";
+import { TabKey } from "@/hooks/useDashboardTable";
+
+// Brief and Review are DB-backed and render independently of the live feed
+// items array (see TabContent.tsx) — every other tab needs items to render
+// at all, so only they should show the live-feed loading/empty states.
+function isItemsDependentTab(activeTab: TabKey): boolean {
+  return activeTab !== "brief" && activeTab !== "review";
+}
 
 export default function DashboardTable() {
   const {
@@ -16,6 +24,7 @@ export default function DashboardTable() {
     candidateCount, handleCandidatesChanged,
     panelEntityId, setPanelEntityId,
   } = useDashboardTable();
+  const itemsDependentTab = isItemsDependentTab(activeTab);
 
   return (
     <div className={`h-screen flex flex-col ${t.bg} transition-colors duration-200 ${dark ? "dark-scrollbar" : ""}`}>
@@ -45,7 +54,7 @@ export default function DashboardTable() {
           </div>
         )}
 
-        {loading && items.length === 0 && (
+        {itemsDependentTab && loading && items.length === 0 && (
           <div className="max-w-[1920px] mx-auto px-6 py-20 text-center">
             <svg className={`w-8 h-8 mx-auto mb-4 animate-spin ${dark ? "text-slate-500" : "text-gray-400"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -67,7 +76,7 @@ export default function DashboardTable() {
           </>
         )}
 
-        {!loading && items.length === 0 && !error && (
+        {itemsDependentTab && !loading && items.length === 0 && !error && (
           <div className="max-w-[1920px] mx-auto px-6 py-20 text-center">
             <p className={`text-sm ${t.loadingText}`}>No feed items — past 7 days</p>
             <button onClick={refresh} className={`mt-3 text-sm font-medium hover:underline ${dark ? "text-blue-400" : "text-blue-600"}`}>Retry</button>

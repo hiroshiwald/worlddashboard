@@ -190,22 +190,26 @@ const ALLOWED_ACTIONS = new Set<SignalAction>(["seen", "dismissed", "promoted", 
  * an illegal transition (e.g. reopening a non-dismissed signal, or acting on
  * a dismissed one with anything but reopen) — the caller turns that into a
  * 404/409. */
+// A single conditional UPDATE (state as both the target and a WHERE guard)
+// rather than a separate SELECT-then-UPDATE: two concurrent transitions on
+// the same id can no longer race, since only the UPDATE that still matches
+// the guard at commit time affects any row — the loser's zero-row result
+// falls straight out as `false`, the same value an unknown id or an
+// already-illegal transition produces.
 export async function transitionSignal(sql: Sql, id: number, action: SignalAction): Promise<boolean> {
   if (!ALLOWED_ACTIONS.has(action)) return false;
 
-  const rows = await sql`SELECT state FROM signals WHERE id = ${id}`;
-  if (rows.length === 0) return false;
-  const currentState = String(rows[0].state);
+  const rows = action === "reopen"
+    ? await sql`
+        UPDATE signals SET state = 'new', state_changed_at = now()
+        WHERE id = ${id} AND state = 'dismissed'
+        RETURNING id
+      `
+    : await sql`
+        UPDATE signals SET state = ${action}, state_changed_at = now()
+        WHERE id = ${id} AND state = ANY(${ACTIVE_STATES}::text[])
+        RETURNING id
+      `;
 
-  let nextState: string;
-  if (action === "reopen") {
-    if (currentState !== "dismissed") return false;
-    nextState = "new";
-  } else {
-    if (!ACTIVE_STATES.includes(currentState)) return false;
-    nextState = action;
-  }
-
-  await sql`UPDATE signals SET state = ${nextState}, state_changed_at = now() WHERE id = ${id}`;
-  return true;
+  return rows.length > 0;
 }

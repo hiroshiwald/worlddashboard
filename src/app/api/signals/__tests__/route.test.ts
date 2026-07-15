@@ -116,7 +116,7 @@ describe("POST /api/signals", () => {
   it("200s and transitions a legal action", async () => {
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("SELECT id FROM signals")) return [{ id: 1 }];
-      if (call.query.includes("SELECT state")) return [{ state: "new" }];
+      if (call.query.includes("UPDATE signals")) return [{ id: 1 }]; // guarded UPDATE matched a row
       return [];
     });
     currentSql = sql;

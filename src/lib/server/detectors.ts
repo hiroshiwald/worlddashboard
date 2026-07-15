@@ -267,10 +267,22 @@ interface NewEntityRow {
   firstSeenAt: Date;
 }
 
+// Both branches must scope to tracked-tracked pairs: entity_edges rows are
+// written for ANY resolved mention pair regardless of entity status (the
+// registry resolves dismissed entities too), so an unscoped MIN here could
+// be pulled from a stray dismissed-entity edge with an unrelated
+// first_seen_at, skewing the bootstrap guard against the tracked-tracked
+// population loadRecentNovelEdges actually detects on.
 async function loadGlobalMinFirstSeen(sql: Sql, table: "entities" | "entity_edges"): Promise<Date | null> {
   const rows = table === "entities"
     ? await sql`SELECT MIN(first_seen_at) AS min_first_seen FROM entities WHERE status = 'tracked'`
-    : await sql`SELECT MIN(first_seen_at) AS min_first_seen FROM entity_edges`;
+    : await sql`
+        SELECT MIN(ee.first_seen_at) AS min_first_seen
+        FROM entity_edges ee
+        JOIN entities ea ON ea.id = ee.entity_a
+        JOIN entities eb ON eb.id = ee.entity_b
+        WHERE ea.status = 'tracked' AND eb.status = 'tracked'
+      `;
   const value = rows[0]?.min_first_seen;
   return value == null ? null : toDate(value);
 }

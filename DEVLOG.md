@@ -146,6 +146,72 @@ bounded daily brief.
   evidence join and the `cardinality`/`array_agg` source-dedup expression in
   `brief.ts` — was correct on first real execution. `tsc --noEmit` and
   `npm run build` both clean.
+- **Fix-pack** (same day, after a 5-dimension adversarial review of the diff
+  with independent 3-verifier confirmation per finding — 8 raw findings
+  collapsing to 6 distinct issues, all confirmed real): (1) `detectors.ts`'s
+  `loadGlobalMinFirstSeen` computed the novel-edge bootstrap guard's global
+  `MIN(first_seen_at)` over *all* `entity_edges` rows with no
+  `status='tracked'` join — unlike its sibling `entities` branch — even
+  though the registry resolves mentions against dismissed entities too, so
+  a stray dismissed-entity edge with an old timestamp could skew the guard
+  and either flood the queue on bootstrap day or wrongly suppress genuine
+  novelty. Fixed by joining `entity_edges` to `entities` on both sides and
+  requiring `status='tracked'`, matching `loadRecentNovelEdges`'s own
+  scoping; added a regression test seeding exactly that dismissed-entity
+  skew. (2) `brief.ts`'s `parseStoryRow` read only `row.published_at`,
+  so a dateless article (`published_at = NULL`, a routine, reachable state
+  per `ingest-writer.ts`) silently became the Unix epoch via `new
+  Date(null)` — sinking the story's rank to zero and reporting a bogus
+  1970 `publishedAt` in the API response — instead of falling back to
+  `first_seen_at` like the query's own `COALESCE` and `WHERE` clause
+  already do. Fixed with `row.published_at ?? row.first_seen_at`; added a
+  regression test (reproduced live pre-fix: `topStories[0].publishedAt ===
+  "1970-01-01T00:00:00.000Z"`). (3) `signal-store.ts`'s `transitionSignal`
+  was a non-atomic read-then-write (separate `SELECT state` then `UPDATE`,
+  no transaction, no guard) — two concurrent transitions on the same id
+  could race, with the loser's request silently discarded while still
+  reporting success. Rewritten as a single conditional
+  `UPDATE ... WHERE id = $1 AND state = $2 RETURNING id`, collapsing the
+  two round-trips into one atomic compare-and-swap; a zero-row result now
+  covers unknown-id, illegal-transition, *and* lost-the-race uniformly,
+  which is exactly the boolean the API route already expected. (4)
+  `DashboardTable.tsx`'s "Fetching live feeds..." and "No feed items" blocks
+  were gated only on `loading`/`items.length`, not `activeTab` — Brief is
+  now the default tab and is DB-backed (its data doesn't depend on the live
+  feed items array at all), so every fresh page load briefly showed a
+  spinner about an unrelated data source stacked on top of Brief's own
+  content, and a live-feed outage would show "No feed items — past 7 days"
+  underneath a Brief tab that had already loaded fine. This was visible in
+  this same session's own earlier browser screenshot and misdiagnosed as
+  pre-existing Review-tab behavior at the time. Fixed with an
+  `isItemsDependentTab(activeTab)` predicate excluding `brief`/`review`
+  (the two DB-backed tabs); re-verified in browser that the stray text is
+  gone. (5) `useBriefTab.ts`/`useSignalsTab.ts` each tracked in-flight
+  actions with a single `busyId: number | null` — clicking a second card's
+  action while a first was still in flight silently re-enabled the first
+  card's buttons (letting a second, possibly conflicting action fire before
+  the first resolved) and an unsequenced `load()` refetch could let a
+  slower-resolving response from an earlier action overwrite fresher state
+  from a later one. Extracted `useBusyIds()` (a `Set<number>`, shared by
+  both hooks) plus a `loadSeq` ref sequence-guard on `load()` in each,
+  mirroring the `entityClickSeq` pattern `useDashboardTable.ts`'s
+  `handleEntityClick` already uses for the identical class of bug. (6)
+  `SignalIcon` in `signals/utils.tsx` was dead code orphaned by the
+  `SignalCard.tsx` deletion — unreferenced anywhere, and stale against the
+  live signal-type surface besides (its switch statement only covered the
+  old client detector's six types; three of the five real server-side
+  types would fall through with no case). Deleted, along with its
+  `signals/index.ts` re-export.
+- Tests: 3 new real-Postgres regression tests (dismissed-entity edge
+  skewing the bootstrap guard; the epoch-fallback bug) plus a rewritten
+  `transitionSignal` unit-test block matching the new atomic-UPDATE shape
+  (net -1 test — the old block's per-scenario mock coverage is now
+  redundant with the integration suite, which exercises the real guarded
+  SQL directly). 320 → 321 passing (298 unit + 23 integration). `tsc
+  --noEmit` and `npm run build` both clean; re-verified BriefTab/SignalsTab
+  in browser post-fix (Playwright route interception, same method as the
+  first pass) — the stray "No feed items" text is gone and the busyIds
+  refactor renders identically to before.
 
 ## 2026-07-15 — CI workflow, real-Postgres integration tests, docs catch-up
 

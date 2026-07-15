@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { FeedItem, EnrichedEntity } from "@/lib/types";
 import { extractEntities } from "@/lib/entity-extractor";
 import { SignalCardData, SignalAction } from "@/components/signals/types";
 import { useEnrichedEntities } from "./useEnrichedEntities";
+import { useBusyIds } from "./useBusyIds";
 
 // Unchanged shape: WatchlistCard.tsx / WatchlistSection.tsx import this type
 // structurally and are kept exactly as-is by this rewrite.
@@ -106,7 +107,7 @@ interface UseSignalsTabParams {
 
 // Exception to 50-line rule: tightly-coupled state management hook —
 // watchlist memos (entities/enriched/topEntities/sparklineData/itemMap) plus
-// the signal-manager fetch/action state (signals/loading/error/busyId/
+// the signal-manager fetch/action state (signals/loading/error/busyIds/
 // stateFilter) genuinely belong together as one hook's public surface.
 // Pure helpers (buildSignalsTheme, computeTopEntities, computeSparklineData,
 // countByState, fetchSignals, postSignalAction) are already extracted above.
@@ -126,25 +127,33 @@ export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParam
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dbUnconfigured, setDbUnconfigured] = useState(false);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const { busyIds, withBusy } = useBusyIds();
   const [stateFilter, setStateFilter] = useState<StateFilter>("all");
+  const loadSeq = useRef(0);
 
   useEffect(() => {
     // One-time cleanup: client-side muting is superseded by server-side dismiss.
     localStorage.removeItem("wd-muted-entities");
   }, []);
 
+  // Guards against an in-flight load's response landing after a newer one
+  // was started (e.g. a second action's refetch resolving before the
+  // first's) and overwriting fresher data with stale data.
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     setDbUnconfigured(false);
     try {
-      setSignals(await fetchSignals());
+      const result = await fetchSignals();
+      if (seq !== loadSeq.current) return;
+      setSignals(result);
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       if (e instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
       else setError(e instanceof Error ? e.message : "Failed to load signals");
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, []);
 
@@ -154,19 +163,17 @@ export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParam
   }, [load]);
 
   const act = useCallback(
-    async (id: number, action: SignalAction) => {
-      setBusyId(id);
-      setError(null);
-      try {
-        await postSignalAction(id, action);
-        await load();
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Action failed");
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [load],
+    (id: number, action: SignalAction) =>
+      withBusy(id, async () => {
+        setError(null);
+        try {
+          await postSignalAction(id, action);
+          await load();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : "Action failed");
+        }
+      }),
+    [load, withBusy],
   );
 
   const visibleSignals = useMemo(
@@ -188,7 +195,7 @@ export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParam
     loading,
     error,
     dbUnconfigured,
-    busyId,
+    busyIds,
     act,
     dark,
     onEntityClick,

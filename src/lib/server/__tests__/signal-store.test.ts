@@ -76,41 +76,39 @@ describe("persistSignals", () => {
 });
 
 describe("transitionSignal", () => {
-  it("returns false for an unknown id", async () => {
+  // transitionSignal is a single conditional UPDATE (state doubles as the
+  // WHERE guard) rather than a separate SELECT-then-UPDATE — a mocked sql
+  // client has no real row to guard against, so each test just tells the
+  // mock whether the (id, state-guard) pair "matches" by returning a row
+  // from RETURNING or not, exactly like a real UPDATE would.
+
+  it("returns false when the guarded UPDATE matches no row (unknown id or wrong current state)", async () => {
     const { sql } = makeMockSql(() => []);
     expect(await transitionSignal(sql, 999, "seen")).toBe(false);
   });
 
-  it("allows any active state to move to seen/dismissed/promoted", async () => {
-    for (const from of ["new", "seen", "promoted"]) {
-      for (const action of ["seen", "dismissed", "promoted"] as const) {
-        const { sql, calls } = makeMockSql((call) => (call.query.includes("SELECT state") ? [{ state: from }] : []));
-        const ok = await transitionSignal(sql, 1, action);
-        expect(ok).toBe(true);
-        const updateCall = calls.find((c) => c.query.includes("UPDATE signals"));
-        expect(updateCall!.values[0]).toBe(action);
-      }
+  it("returns false for an action outside the allowed set without querying", async () => {
+    const { sql, calls } = makeMockSql(() => [{ id: 1 }]);
+    expect(await transitionSignal(sql, 1, "bogus" as never)).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("seen/dismissed/promoted guard on the active-states set and return true when a row matches", async () => {
+    for (const action of ["seen", "dismissed", "promoted"] as const) {
+      const { sql, calls } = makeMockSql(() => [{ id: 1 }]);
+      const ok = await transitionSignal(sql, 1, action);
+      expect(ok).toBe(true);
+      expect(calls[0].query).toContain("state = ANY(");
+      expect(calls[0].values).toEqual([action, 1, ["new", "seen", "promoted"]]);
     }
   });
 
-  it("allows dismissed -> new via reopen", async () => {
-    const { sql, calls } = makeMockSql((call) => (call.query.includes("SELECT state") ? [{ state: "dismissed" }] : []));
+  it("reopen guards on state = 'dismissed' and sets state to 'new'", async () => {
+    const { sql, calls } = makeMockSql(() => [{ id: 1 }]);
     const ok = await transitionSignal(sql, 1, "reopen");
     expect(ok).toBe(true);
-    const updateCall = calls.find((c) => c.query.includes("UPDATE signals"));
-    expect(updateCall!.values[0]).toBe("new");
-  });
-
-  it("rejects reopen on a non-dismissed signal", async () => {
-    const { sql } = makeMockSql((call) => (call.query.includes("SELECT state") ? [{ state: "new" }] : []));
-    expect(await transitionSignal(sql, 1, "reopen")).toBe(false);
-  });
-
-  it("rejects seen/dismissed/promoted actions on an already-dismissed signal", async () => {
-    for (const action of ["seen", "dismissed", "promoted"] as const) {
-      const { sql } = makeMockSql((call) => (call.query.includes("SELECT state") ? [{ state: "dismissed" }] : []));
-      expect(await transitionSignal(sql, 1, action)).toBe(false);
-    }
+    expect(calls[0].query).toContain("state = 'dismissed'");
+    expect(calls[0].values).toEqual([1]);
   });
 });
 
