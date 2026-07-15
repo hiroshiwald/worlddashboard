@@ -2,6 +2,7 @@
 
 import { useDashboardTable } from "@/hooks/useDashboardTable";
 import HeaderBar from "./HeaderBar";
+import EntityPanel from "./EntityPanel";
 import { EntityFilterBanner, FeedTable, FeedCardList, TabContent } from "./dashboard";
 
 export default function DashboardTable() {
@@ -13,6 +14,7 @@ export default function DashboardTable() {
     categories, filteredItems, sortedItems, t,
     toggleTheme, handleSort, getSortArrow, handleEntityClick, clearFilters,
     candidateCount, handleCandidatesChanged,
+    panelEntityId, setPanelEntityId,
   } = useDashboardTable();
 
   return (
@@ -81,6 +83,15 @@ export default function DashboardTable() {
           </div>
         )}
       </div>
+
+      {panelEntityId !== null && (
+        <EntityPanel
+          entityId={panelEntityId}
+          dark={dark}
+          onClose={() => setPanelEntityId(null)}
+          onSelectRelated={setPanelEntityId}
+        />
+      )}
     </div>
   );
 }

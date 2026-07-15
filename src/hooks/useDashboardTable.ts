@@ -40,6 +40,8 @@ interface UseDashboardTableReturn {
   clearFilters: () => void;
   candidateCount: number;
   handleCandidatesChanged: (count: number) => void;
+  panelEntityId: number | null;
+  setPanelEntityId: (id: number | null) => void;
 }
 
 async function fetchCandidateCount(): Promise<number> {
@@ -47,6 +49,28 @@ async function fetchCandidateCount(): Promise<number> {
   if (!res.ok) return 0;
   const data = await res.json();
   return Array.isArray(data.candidates) ? data.candidates.length : 0;
+}
+
+// Resolves a clicked name to a tracked entity id. Returns null (and warns)
+// on a 404, any other non-2xx, a malformed body, or a network error — the
+// caller then falls back to the existing text-filter behavior.
+async function resolveEntityIdByName(name: string): Promise<number | null> {
+  try {
+    const res = await fetch(`/api/entities?name=${encodeURIComponent(name)}`, { cache: "no-store" });
+    if (!res.ok) {
+      console.warn(`[useDashboardTable] /api/entities returned ${res.status}, falling back to text filter`);
+      return null;
+    }
+    const data = await res.json();
+    if (typeof data.id !== "number") {
+      console.warn("[useDashboardTable] /api/entities response has unexpected shape, falling back to text filter");
+      return null;
+    }
+    return data.id;
+  } catch (err) {
+    console.warn("[useDashboardTable] /api/entities fetch failed, falling back to text filter", err);
+    return null;
+  }
 }
 
 function matchesText(item: FeedItem, query: string): boolean {
@@ -86,11 +110,11 @@ function sortItems(items: FeedItem[], sort: SortConfig): FeedItem[] {
   return arr;
 }
 
-// Exception to 50-line rule: 7 state variables + 2 effects + 2 memos +
+// Exception to 50-line rule: 8 state variables + 2 effects + 3 memos +
 // 5 handlers make further reduction below 50 counterproductive. Pure
-// helpers (matchesText, filterItems, sortItems, fetchCandidateCount) are
-// already extracted above; remaining code is React state/effect wiring
-// that must stay co-located with the hook.
+// helpers (matchesText, filterItems, sortItems, fetchCandidateCount,
+// resolveEntityIdByName) are already extracted above; remaining code is
+// React state/effect wiring that must stay co-located with the hook.
 export function useDashboardTable(): UseDashboardTableReturn {
   const {
     items, loading, error, fetchedAt,
@@ -104,6 +128,7 @@ export function useDashboardTable(): UseDashboardTableReturn {
   const [dark, setDark] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("feeds");
   const [candidateCount, setCandidateCount] = useState(0);
+  const [panelEntityId, setPanelEntityId] = useState<number | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("wd-theme");
@@ -152,7 +177,12 @@ export function useDashboardTable(): UseDashboardTableReturn {
 
   const t = getThemeClasses(dark);
 
-  const handleEntityClick = (name: string) => {
+  const handleEntityClick = async (name: string) => {
+    const entityId = await resolveEntityIdByName(name);
+    if (entityId !== null) {
+      setPanelEntityId(entityId);
+      return;
+    }
     setEntityFilter(name);
     setActiveTab("feeds");
   };
@@ -171,5 +201,6 @@ export function useDashboardTable(): UseDashboardTableReturn {
     categories, filteredItems, sortedItems, t,
     toggleTheme, handleSort, getSortArrow, handleEntityClick, clearFilters,
     candidateCount, handleCandidatesChanged: setCandidateCount,
+    panelEntityId, setPanelEntityId,
   };
 }
