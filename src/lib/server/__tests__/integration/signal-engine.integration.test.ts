@@ -62,9 +62,24 @@ async function linkArticleEntity(articleId: number, entityId: number): Promise<v
   await sql!`INSERT INTO article_entities (article_id, entity_id) VALUES (${articleId}, ${entityId})`;
 }
 
+// Every history-dependent detector (surge/first_seen/novel_edge) is silent
+// until warmup_days have passed since the system epoch (MIN(articles.first_seen_at)).
+// Most tests below seed entities/edges/mentions directly without ever touching
+// `articles`, so without this the epoch would be null and every one of them
+// would be wrongly warm-up-gated. Dated far outside getBrief's 48h top-stories
+// window, so it never leaks into those assertions.
+async function seedSystemEpoch(): Promise<void> {
+  await sql!`
+    INSERT INTO articles (content_hash, title_signature, title, link, published_at, first_seen_at, source_name, source_category, source_tier)
+    VALUES ('epoch-seed', 'epoch-seed-sig', 'Epoch seed', 'https://epoch.example.com/seed',
+      now() - interval '30 days', now() - interval '30 days', 'Epoch Source', 'world', '1')
+  `;
+}
+
 describe.skipIf(!TEST_DATABASE_URL)("signal engine integration (real Postgres)", () => {
   beforeEach(async () => {
     await freshSchema(pool!, TEST_SCHEMA);
+    await seedSystemEpoch();
   });
 
   afterAll(async () => {
@@ -201,7 +216,7 @@ describe.skipIf(!TEST_DATABASE_URL)("signal engine integration (real Postgres)",
 
     const novel = candidates.find((c) => c.dedupeKey === `first_seen:${newId}`);
     expect(novel).toBeDefined();
-    expect(novel!.severity).toBe("warning"); // 3 sources: warning (critical requires >=4)
+    expect(novel!.severity).toBe("warning"); // 3 sources: warning (critical requires >=8)
     expect(novel!.evidence.sourceCount).toBe(3);
     expect((novel!.evidence.articleIds as number[]).sort()).toEqual([a1, a2, a3].sort());
   });
