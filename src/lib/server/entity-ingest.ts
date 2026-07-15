@@ -30,6 +30,7 @@ interface HeadArticle {
   title: string;
   summary: string;
   effectiveAt: Date;
+  arrivalAt: Date;
   sourceName: string;
 }
 
@@ -39,6 +40,7 @@ function parseHeadRow(row: SqlRow): HeadArticle {
     title: String(row.title),
     summary: row.summary != null ? String(row.summary) : "",
     effectiveAt: toDate(row.published_at ?? row.first_seen_at),
+    arrivalAt: toDate(row.first_seen_at),
     sourceName: String(row.source_name),
   };
 }
@@ -105,6 +107,7 @@ interface ResolvedMention {
   articleId: number;
   entityId: number;
   effectiveAt: Date;
+  arrivalAt: Date;
   sourceName: string;
   sentiment: number;
 }
@@ -112,6 +115,7 @@ interface ResolvedMention {
 interface PendingMention {
   articleId: number;
   effectiveAt: Date;
+  arrivalAt: Date;
   sourceName: string;
   sentiment: number;
 }
@@ -146,6 +150,7 @@ function classifyCandidate(
   const mention: PendingMention = {
     articleId: article.id,
     effectiveAt: article.effectiveAt,
+    arrivalAt: article.arrivalAt,
     sourceName: article.sourceName,
     sentiment,
   };
@@ -240,7 +245,10 @@ async function upsertNewEntities(
 ): Promise<InsertedEntity[]> {
   if (newEntities.size === 0) return [];
   const rows = Array.from(newEntities.values()).map((e) => {
-    const times = e.mentions.map((m) => m.effectiveAt.getTime());
+    // entities.first_seen_at/last_seen_at are watch-time (arrival), not
+    // news-time (publish date) — a feed pre-load's backdated published_at
+    // must never smear these earlier than the system actually observed them.
+    const times = e.mentions.map((m) => m.arrivalAt.getTime());
     return {
       canonicalName: e.canonicalName,
       type: e.type,
@@ -307,12 +315,14 @@ export function dedupeMentions(mentions: ResolvedMention[]): ResolvedMention[] {
 // never touches it again, so a tracked entity's last_seen_at freezes at
 // creation time even while it keeps being mentioned. Bump it here for every
 // resolved mention (a harmless no-op re-set for just-created entities, since
-// upsertNewEntities already set it to the same value).
+// upsertNewEntities already set it to the same value). Uses arrivalAt (when
+// the system observed the article), not effectiveAt (when it was
+// published) — last_seen_at tracks watch time, not news time.
 function maxSeenByEntity(mentions: ResolvedMention[]): Map<number, Date> {
   const maxSeen = new Map<number, Date>();
   for (const m of mentions) {
     const current = maxSeen.get(m.entityId);
-    if (!current || m.effectiveAt > current) maxSeen.set(m.entityId, m.effectiveAt);
+    if (!current || m.arrivalAt > current) maxSeen.set(m.entityId, m.arrivalAt);
   }
   return maxSeen;
 }
@@ -359,6 +369,11 @@ function hourBucket(date: Date): string {
   return truncated.toISOString();
 }
 
+// Buckets on effectiveAt (news time: publish date), NOT arrivalAt (watch
+// time) — publish-date spread is the correct shape for trend charts, even
+// though first/last_seen on entities/edges must use arrival time instead
+// (see groupMentionsByArticle/rollupEntityEdges below and upsertNewEntities
+// above).
 export function rollupHourlyMentions(mentions: ResolvedMention[]): HourlyRollupRow[] {
   const groups = new Map<string, { entityId: number; bucket: string; mentions: number; sources: Set<string>; sentimentSum: number }>();
   for (const m of mentions) {
@@ -413,12 +428,14 @@ export interface EdgeRollupRow {
   articleCount: number;
 }
 
-function groupMentionsByArticle(mentions: ResolvedMention[]): Map<number, { entityIds: Set<number>; effectiveAt: Date }> {
-  const byArticle = new Map<number, { entityIds: Set<number>; effectiveAt: Date }>();
+// entity_edges.first_seen_at/last_seen_at are watch-time (arrivalAt), the
+// deliberate opposite of rollupHourlyMentions' effectiveAt buckets above.
+function groupMentionsByArticle(mentions: ResolvedMention[]): Map<number, { entityIds: Set<number>; arrivalAt: Date }> {
+  const byArticle = new Map<number, { entityIds: Set<number>; arrivalAt: Date }>();
   for (const m of mentions) {
     const group = byArticle.get(m.articleId);
     if (group) group.entityIds.add(m.entityId);
-    else byArticle.set(m.articleId, { entityIds: new Set([m.entityId]), effectiveAt: m.effectiveAt });
+    else byArticle.set(m.articleId, { entityIds: new Set([m.entityId]), arrivalAt: m.arrivalAt });
   }
   return byArticle;
 }
@@ -427,7 +444,7 @@ export function rollupEntityEdges(mentions: ResolvedMention[]): EdgeRollupRow[] 
   const byArticle = groupMentionsByArticle(mentions);
   const groups = new Map<string, { entityA: number; entityB: number; articleCount: number; firstSeenAt: Date; lastSeenAt: Date }>();
 
-  for (const { entityIds, effectiveAt } of byArticle.values()) {
+  for (const { entityIds, arrivalAt } of byArticle.values()) {
     const ids = Array.from(entityIds).sort((a, b) => a - b);
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
@@ -435,10 +452,10 @@ export function rollupEntityEdges(mentions: ResolvedMention[]): EdgeRollupRow[] 
         const group = groups.get(key);
         if (group) {
           group.articleCount += 1;
-          if (effectiveAt < group.firstSeenAt) group.firstSeenAt = effectiveAt;
-          if (effectiveAt > group.lastSeenAt) group.lastSeenAt = effectiveAt;
+          if (arrivalAt < group.firstSeenAt) group.firstSeenAt = arrivalAt;
+          if (arrivalAt > group.lastSeenAt) group.lastSeenAt = arrivalAt;
         } else {
-          groups.set(key, { entityA: ids[i], entityB: ids[j], articleCount: 1, firstSeenAt: effectiveAt, lastSeenAt: effectiveAt });
+          groups.set(key, { entityA: ids[i], entityB: ids[j], articleCount: 1, firstSeenAt: arrivalAt, lastSeenAt: arrivalAt });
         }
       }
     }

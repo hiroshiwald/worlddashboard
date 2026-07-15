@@ -4,12 +4,14 @@ export interface Settings {
   surprise_k: number;
   dismiss_cooldown_hours: number;
   brief_max_blocks: number;
+  warmup_days: number;
 }
 
 export const DEFAULTS: Settings = {
   surprise_k: 3,
   dismiss_cooldown_hours: 72,
   brief_max_blocks: 10,
+  warmup_days: 7,
 };
 
 function isValidOverride(value: unknown): value is number {

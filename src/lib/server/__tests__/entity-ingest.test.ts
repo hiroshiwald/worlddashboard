@@ -80,10 +80,10 @@ describe("selectUnprocessedHeads (via processNewArticles)", () => {
 describe("rollupHourlyMentions", () => {
   it("aggregates mentions, distinct sources, and sentiment per entity+hour bucket", () => {
     const rows = rollupHourlyMentions([
-      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:12:00Z"), sourceName: "A", sentiment: 0.5 },
-      { articleId: 2, entityId: 10, effectiveAt: new Date("2026-07-15T09:47:00Z"), sourceName: "B", sentiment: -0.5 },
-      { articleId: 3, entityId: 10, effectiveAt: new Date("2026-07-15T09:59:00Z"), sourceName: "A", sentiment: 1 },
-      { articleId: 4, entityId: 20, effectiveAt: new Date("2026-07-15T10:05:00Z"), sourceName: "C", sentiment: 0 },
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:12:00Z"), arrivalAt: new Date("2026-07-15T09:12:00Z"), sourceName: "A", sentiment: 0.5 },
+      { articleId: 2, entityId: 10, effectiveAt: new Date("2026-07-15T09:47:00Z"), arrivalAt: new Date("2026-07-15T09:47:00Z"), sourceName: "B", sentiment: -0.5 },
+      { articleId: 3, entityId: 10, effectiveAt: new Date("2026-07-15T09:59:00Z"), arrivalAt: new Date("2026-07-15T09:59:00Z"), sourceName: "A", sentiment: 1 },
+      { articleId: 4, entityId: 20, effectiveAt: new Date("2026-07-15T10:05:00Z"), arrivalAt: new Date("2026-07-15T10:05:00Z"), sourceName: "C", sentiment: 0 },
     ]);
 
     const bucket10 = rows.find((r) => r.entityId === 10);
@@ -104,22 +104,31 @@ describe("rollupHourlyMentions", () => {
       sentimentSum: 0,
     });
   });
+
+  it("buckets on effectiveAt (publish date), ignoring arrivalAt entirely", () => {
+    // Published a week ago, but all arriving today (a feed pre-load) — the
+    // bucket must land on the publish date, not today.
+    const rows = rollupHourlyMentions([
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-08T09:00:00Z"), arrivalAt: new Date("2026-07-15T18:00:00Z"), sourceName: "A", sentiment: 0 },
+    ]);
+    expect(rows).toEqual([{ entityId: 10, bucket: "2026-07-08T09:00:00.000Z", mentions: 1, sourceCount: 1, sentimentSum: 0 }]);
+  });
 });
 
 describe("dedupeMentions", () => {
   it("collapses two mentions of the same entity from the same article into one", () => {
     const mentions = [
-      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0.5 },
-      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0.5 },
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0.5 },
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0.5 },
     ];
     expect(dedupeMentions(mentions)).toEqual([mentions[0]]);
   });
 
   it("keeps mentions of different entities, or the same entity from different articles", () => {
     const mentions = [
-      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
-      { articleId: 1, entityId: 20, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
-      { articleId: 2, entityId: 10, effectiveAt: new Date("2026-07-15T10:00:00Z"), sourceName: "B", sentiment: 0 },
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 1, entityId: 20, effectiveAt: new Date("2026-07-15T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 2, entityId: 10, effectiveAt: new Date("2026-07-15T10:00:00Z"), arrivalAt: new Date("2026-07-15T10:00:00Z"), sourceName: "B", sentiment: 0 },
     ];
     expect(dedupeMentions(mentions)).toHaveLength(3);
   });
@@ -128,8 +137,8 @@ describe("dedupeMentions", () => {
 describe("rollupEntityEdges", () => {
   it("orders every pair entityA < entityB regardless of mention order", () => {
     const rows = rollupEntityEdges([
-      { articleId: 1, entityId: 30, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
-      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 1, entityId: 30, effectiveAt: new Date("2026-07-15T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0].entityA).toBe(10);
@@ -138,10 +147,10 @@ describe("rollupEntityEdges", () => {
 
   it("aggregates article_count across articles and tracks first/last seen", () => {
     const rows = rollupEntityEdges([
-      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
-      { articleId: 1, entityId: 20, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
-      { articleId: 2, entityId: 10, effectiveAt: new Date("2026-07-15T12:00:00Z"), sourceName: "B", sentiment: 0 },
-      { articleId: 2, entityId: 20, effectiveAt: new Date("2026-07-15T12:00:00Z"), sourceName: "B", sentiment: 0 },
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 1, entityId: 20, effectiveAt: new Date("2026-07-15T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 2, entityId: 10, effectiveAt: new Date("2026-07-15T12:00:00Z"), arrivalAt: new Date("2026-07-15T12:00:00Z"), sourceName: "B", sentiment: 0 },
+      { articleId: 2, entityId: 20, effectiveAt: new Date("2026-07-15T12:00:00Z"), arrivalAt: new Date("2026-07-15T12:00:00Z"), sourceName: "B", sentiment: 0 },
     ]);
     expect(rows).toHaveLength(1);
     expect(rows[0].articleCount).toBe(2);
@@ -151,9 +160,23 @@ describe("rollupEntityEdges", () => {
 
   it("does not create an edge for an article with only one resolved entity", () => {
     const rows = rollupEntityEdges([
-      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-15T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "A", sentiment: 0 },
     ]);
     expect(rows).toHaveLength(0);
+  });
+
+  it("keys first/last seen on arrivalAt (watch time), ignoring effectiveAt (news time) entirely", () => {
+    // Both articles published on the same (backdated) day, but arriving on two different days —
+    // firstSeenAt/lastSeenAt must reflect the arrival spread, not collapse to the shared publish date.
+    const rows = rollupEntityEdges([
+      { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-01T09:00:00Z"), arrivalAt: new Date("2026-07-14T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 1, entityId: 20, effectiveAt: new Date("2026-07-01T09:00:00Z"), arrivalAt: new Date("2026-07-14T09:00:00Z"), sourceName: "A", sentiment: 0 },
+      { articleId: 2, entityId: 10, effectiveAt: new Date("2026-07-01T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "B", sentiment: 0 },
+      { articleId: 2, entityId: 20, effectiveAt: new Date("2026-07-01T09:00:00Z"), arrivalAt: new Date("2026-07-15T09:00:00Z"), sourceName: "B", sentiment: 0 },
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].firstSeenAt).toBe("2026-07-14T09:00:00.000Z");
+    expect(rows[0].lastSeenAt).toBe("2026-07-15T09:00:00.000Z");
   });
 });
 

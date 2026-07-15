@@ -1,5 +1,107 @@
 # World Dashboard Development Log
 
+## 2026-07-15 — Calibration fix-pack: news-time/watch-time conflation in the signal engine
+
+The signal engine shipped and immediately produced 140 signals, all
+critical, all 100% confidence. Root cause: `entity-ingest.ts` derived
+`entities`/`entity_edges` `first_seen_at` from `effectiveAt = published_at ??
+first_seen_at` — news time. Feeds pre-load ~7 days of publish-dated
+articles, so on day one every entity/edge looked like it had a week of
+history, defeating the 72h bootstrap guard (its `MIN(first_seen_at)` anchor
+landed pre-launch) and flooding `first_seen`/`novel_edge`. The surge
+detector's `baselineDaily = baselineSum / 14` (a fixed divisor) compounded
+it: `baselineDays >= 3` was satisfied by publish-date calendar spread
+rather than real operating days, so a genuinely brand-new system measured
+λ against a fabricated multi-day baseline — United States hit 56.2σ.
+
+**The invariant this violated**: NEWS TIME (when an article was published)
+and WATCH TIME (when this platform first observed it) are different clocks.
+Everything that measures "is this new/surprising *to us*" must use watch
+time; everything that shapes a trend chart's timeline must use news time.
+
+- `src/lib/server/settings.ts`: added `warmup_days: 7` to `DEFAULTS`.
+- `src/lib/server/detectors.ts`:
+  - `getSystemEpoch(sql)` — `MIN(articles.first_seen_at)`, deliberately
+    unscoped by `dup_group_id` (a dup member's arrival is still a real
+    observation). `computeWarmupState(epoch, warmupDays, now)`: active (and
+    `daysRemaining`) when there's no epoch yet or fewer than `warmup_days`
+    have elapsed since it.
+  - `runDetectors` computes the epoch once and skips `surge`/`first_seen`/
+    `novel_edge` entirely while warm-up is active, `console.warn`-ing the
+    days remaining (visible in Vercel's function logs; NOT in the
+    `ingest.yml` Actions curl output — see Deviations below).
+    `cross_category`/`sentiment` are pure 24h-window detectors with no
+    history dependence, so they keep running.
+  - `computeEffectiveBaselineDays(daysSinceEpoch) = clamp(daysSinceEpoch -
+    1, 1, 14)` replaces the fixed `/14` divisor; `scoreSurge` gained a
+    `daysSinceEpoch` param with a `>= 4` gate (defense-in-depth alongside
+    the existing `baselineDays >= 3` gate, redundant under the
+    `warmup_days=7` default but real if an operator tunes warm-up shorter).
+  - Recalibrated saturating scales that made everything critical @100%:
+    `scoreFirstSeenNovelty` critical now needs `>= 8` sources (was 4),
+    confidence `sources/8`; `scoreNovelEdge` critical now needs `>= 6`
+    articles (was 4), confidence `articles/6`.
+- `src/lib/server/entity-ingest.ts`: `HeadArticle`/`PendingMention`/
+  `ResolvedMention` gained `arrivalAt = toDate(row.first_seen_at)` alongside
+  the existing `effectiveAt`. `upsertNewEntities`, `bumpEntityLastSeen`, and
+  `rollupEntityEdges` (via `groupMentionsByArticle`) now key off `arrivalAt`
+  instead of `effectiveAt` — entities/edges `first_seen_at`/`last_seen_at`
+  are watch time. `rollupHourlyMentions` deliberately stays on `effectiveAt`
+  (publish-date spread is the correct shape for trend charts) and
+  `entity_candidates` timing is untouched (publish spread there is
+  legitimate recurrence evidence, per the original detector spec).
+- `migrations/003_time_semantics_repair.sql` (new, one-time, never edits
+  001/002): recomputes `entities.first_seen_at`/`last_seen_at` from
+  `MIN`/`MAX(articles.first_seen_at)` via `article_entities` (entities with
+  no surviving link keep their current values); clamps
+  `entity_edges.first_seen_at`/`last_seen_at` up to at least
+  `MIN(articles.first_seen_at)` (guarded so an empty `articles` table is a
+  no-op instead of `NULL`ing a `NOT NULL` column); `DELETE FROM signals` —
+  every pre-fix row is an artifact of the miscalibrated engine. Verified by
+  hand against a seeded schema: a no-op on empty, and correctly repairs/
+  clamps/preserves on seeded data (see conversation for the exact psql
+  session).
+- Tests: `src/lib/server/__tests__/integration/warmup-gate.integration.test.ts`
+  (new) — (a) a day-1-launch scenario (articles all arriving within the
+  last 24h, `published_at` spread across the prior week) asserts zero
+  surge/first_seen/novel_edge while cross_category still fires; (b) an old
+  system epoch (9 days) lets first_seen fire at warning (not critical) for
+  3 sources and a seeded 10x spike fires surge with a sane z (< 15σ, not
+  56σ). Unit coverage added to `detectors.test.ts`
+  (`computeWarmupState` boundary at epoch+6.9d/+7.1d, `computeEffectiveBaselineDays`
+  λ math, the `daysSinceEpoch` gate, recalibrated severity/confidence
+  tables) and `entity-ingest.test.ts` (hourly bucketing stays effectiveAt-only,
+  edges key off arrivalAt-only). Existing integration tests updated where
+  the fix changed observable behavior: `entity-ingest.integration.test.ts`'s
+  first/last_seen_at assertions now check "close to now" instead of a
+  hardcoded publish-date ISO string, and one test was rewritten to
+  deliberately backdate a later article's `published_at` to 2020 to prove
+  `last_seen_at` now tracks arrival, not publish date.
+  `signal-engine.integration.test.ts` gained a `beforeEach` `seedSystemEpoch()`
+  (one article dated 30 days ago, outside `getBrief`'s 48h top-stories
+  window) so its surge/first_seen/novel_edge tests — which never touched
+  `articles` before — aren't wrongly warm-up-gated.
+
+### Deviations from the fix-pack spec
+
+- FIX 1 asked to surface the warm-up boolean "in whatever stats object the
+  ingest route reports, so operators can see it in the Actions run log."
+  The allowed file list for this pack excludes `src/app/api/ingest/route.ts`
+  and `signal-store.ts`, and `route.ts`'s `counts.signals` is exactly
+  `persistSignals`'s return value — there's no path from `runDetectors` to
+  the HTTP response without touching one of those two files. Implemented
+  the computation and gating fully (`getSystemEpoch`/`computeWarmupState`
+  in `detectors.ts`, unit-tested) plus a `console.warn` with days-remaining
+  for operational visibility in Vercel's function logs — but that warning
+  does not reach `ingest.yml`'s GitHub Actions curl output today. Wiring
+  `warmup: {active, daysRemaining}` into the ingest response is a small,
+  isolated follow-up once `route.ts` is back in scope.
+- `settings.test.ts` isn't in the pack's explicit test-file allowlist, but
+  adding `warmup_days` to `DEFAULTS` (required by FIX 1) breaks its
+  hardcoded multi-override equality assertion. Updated it minimally (one
+  assertion, spread `...DEFAULTS` instead of a literal) so `npm test` stays
+  green per the pack's own finish criteria.
+
 ## 2026-07-15 — Server-side signal engine + Brief landing tab
 
 Signals become persistent database rows computed from real stored history at

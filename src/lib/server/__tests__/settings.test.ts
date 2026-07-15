@@ -29,7 +29,7 @@ describe("getSettings", () => {
         { key: "brief_max_blocks", value: 20 },
       ]),
     );
-    expect(settings).toEqual({ surprise_k: 4, dismiss_cooldown_hours: 48, brief_max_blocks: 20 });
+    expect(settings).toEqual({ ...DEFAULTS, surprise_k: 4, dismiss_cooldown_hours: 48, brief_max_blocks: 20 });
   });
 
   it("ignores unknown keys", async () => {

@@ -16,10 +16,13 @@ export interface CandidateSignal {
 
 const BASELINE_WINDOW_DAYS = 14;
 const MIN_BASELINE_DAYS = 3;
+const MIN_DAYS_SINCE_EPOCH = 4;
 const BOOTSTRAP_GUARD_HOURS = 72;
 const MAX_EVIDENCE_ARTICLES = 5;
 const MIN_FIRST_SEEN_SOURCES = 2;
+const CRITICAL_FIRST_SEEN_SOURCES = 8;
 const MIN_NOVEL_EDGE_ARTICLES = 2;
+const CRITICAL_NOVEL_EDGE_ARTICLES = 6;
 const MIN_CROSS_CATEGORY_COUNT = 3;
 const MIN_SENTIMENT_MENTIONS = 5;
 const SENTIMENT_THRESHOLD = -0.3;
@@ -34,15 +37,18 @@ function capArticleIds(ids: number[]): number[] {
 
 // ---- pure scoring functions (synthetic-panel testable) ----
 
-/** Skips (returns null) for entities with <3 days of baseline history — cold
+/** Skips (returns null) for entities with <3 days of baseline history, or
+ * when the system itself is under MIN_DAYS_SINCE_EPOCH days old — cold
  * start, not a real absence of surprise. Fires when z >= k. */
 export function scoreSurge(
   observed24h: number,
   baselineDaily: number,
   baselineDays: number,
   k: number,
+  daysSinceEpoch: number,
 ): { z: number; severity: SignalSeverity; confidence: number } | null {
   if (baselineDays < MIN_BASELINE_DAYS) return null;
+  if (daysSinceEpoch < MIN_DAYS_SINCE_EPOCH) return null;
   const z = (observed24h - baselineDaily) / Math.sqrt(baselineDaily + 1);
   if (z < k) return null;
   const severity: SignalSeverity = z >= 2 * k ? "critical" : z >= 1.5 * k ? "warning" : "advisory";
@@ -52,15 +58,15 @@ export function scoreSurge(
 
 export function scoreFirstSeenNovelty(sourceCount: number): { severity: SignalSeverity; confidence: number } | null {
   if (sourceCount < MIN_FIRST_SEEN_SOURCES) return null;
-  const severity: SignalSeverity = sourceCount >= 4 ? "critical" : "warning";
-  const confidence = Math.min(1, sourceCount / 4);
+  const severity: SignalSeverity = sourceCount >= CRITICAL_FIRST_SEEN_SOURCES ? "critical" : "warning";
+  const confidence = Math.min(1, sourceCount / CRITICAL_FIRST_SEEN_SOURCES);
   return { severity, confidence };
 }
 
 export function scoreNovelEdge(articleCount: number): { severity: SignalSeverity; confidence: number } | null {
   if (articleCount < MIN_NOVEL_EDGE_ARTICLES) return null;
-  const severity: SignalSeverity = articleCount >= 4 ? "critical" : "warning";
-  const confidence = Math.min(1, articleCount / 4);
+  const severity: SignalSeverity = articleCount >= CRITICAL_NOVEL_EDGE_ARTICLES ? "critical" : "warning";
+  const confidence = Math.min(1, articleCount / CRITICAL_NOVEL_EDGE_ARTICLES);
   return { severity, confidence };
 }
 
@@ -86,6 +92,35 @@ export function scoreSentimentDeterioration(
  * (every country seen on day one) that would otherwise flood the queue. */
 export function isBootstrapCohort(candidateFirstSeenAt: Date, globalMinFirstSeenAt: Date): boolean {
   return candidateFirstSeenAt.getTime() - globalMinFirstSeenAt.getTime() < BOOTSTRAP_GUARD_HOURS * 3600 * 1000;
+}
+
+export interface WarmupState {
+  active: boolean;
+  daysRemaining: number;
+}
+
+/** True (and history-dependent detectors stay silent) when the system has
+ * no observed articles yet, or hasn't been running long enough to have
+ * accumulated a real operating history — distinct from isBootstrapCohort,
+ * which guards individual entities/edges once the system itself is past
+ * warm-up. */
+export function computeWarmupState(epoch: Date | null, warmupDays: number, now: Date): WarmupState {
+  if (!epoch) return { active: true, daysRemaining: warmupDays };
+  const elapsedDays = (now.getTime() - epoch.getTime()) / (24 * 3600 * 1000);
+  return { active: elapsedDays < warmupDays, daysRemaining: Math.max(0, warmupDays - elapsedDays) };
+}
+
+function computeDaysSinceEpoch(now: Date, epoch: Date): number {
+  return Math.floor((now.getTime() - epoch.getTime()) / (24 * 3600 * 1000));
+}
+
+/** The surge baseline denominator: real elapsed operating days (excluding
+ * the most recent, still-accumulating day), clamped to at least 1 and to
+ * the BASELINE_WINDOW_DAYS ceiling. Replaces the old fixed 14-day divisor,
+ * which overstated the denominator (understating λ) for a system that
+ * hadn't actually been running that long. */
+export function computeEffectiveBaselineDays(daysSinceEpoch: number): number {
+  return Math.min(Math.max(daysSinceEpoch - 1, 1), BASELINE_WINDOW_DAYS);
 }
 
 // ---- panel queries (batched, tracked entities + cluster-head articles only) ----
@@ -163,9 +198,11 @@ function buildSurgeSignal(
   agg: HourlyAggRow,
   articleIds: number[],
   settings: Settings,
+  effectiveBaselineDays: number,
+  daysSinceEpoch: number,
 ): CandidateSignal | null {
-  const baselineDaily = agg.baselineSum / BASELINE_WINDOW_DAYS;
-  const scored = scoreSurge(agg.observed24h, baselineDaily, agg.baselineDays, settings.surprise_k);
+  const baselineDaily = agg.baselineSum / effectiveBaselineDays;
+  const scored = scoreSurge(agg.observed24h, baselineDaily, agg.baselineDays, settings.surprise_k, daysSinceEpoch);
   if (!scored) return null;
   return {
     dedupeKey: `surge:${entityId}`,
@@ -210,6 +247,8 @@ function buildSurgeAndSentiment(
   articleRows: ArticleRow[],
   settings: Settings,
   entityNames: Map<number, string>,
+  effectiveBaselineDays: number,
+  daysSinceEpoch: number,
 ): { surge: CandidateSignal[]; sentiment: CandidateSignal[] } {
   const articlesByEntity = groupArticlesByEntity(articleRows);
 
@@ -225,7 +264,7 @@ function buildSurgeAndSentiment(
     if (!name) continue;
     const articleIds = (articlesByEntity.get(agg.entityId) ?? []).map((a) => a.articleId);
 
-    const surgeSignal = buildSurgeSignal(agg.entityId, name, agg, articleIds, settings);
+    const surgeSignal = buildSurgeSignal(agg.entityId, name, agg, articleIds, settings, effectiveBaselineDays, daysSinceEpoch);
     if (surgeSignal) surge.push(surgeSignal);
 
     if (anySentimentSignal) {
@@ -429,22 +468,62 @@ async function detectNovelEdges(sql: Sql): Promise<CandidateSignal[]> {
 
 // ---- orchestrator ----
 
+/** The system's operating epoch — the earliest article ARRIVAL (not publish
+ * date) ever recorded. Deliberately unscoped by dup_group_id: a duplicate
+ * member's own first_seen_at still reflects a real observation, and the
+ * epoch answers "when did the platform start observing anything," not
+ * "when did it see a cluster head." Anchors the warm-up gate below. */
+async function getSystemEpoch(sql: Sql): Promise<Date | null> {
+  const rows = await sql`SELECT MIN(first_seen_at) AS min_first_seen FROM articles`;
+  const value = rows[0]?.min_first_seen;
+  return value == null ? null : toDate(value);
+}
+
 async function loadTrackedEntityNames(sql: Sql): Promise<Map<number, string>> {
   const rows = await sql`SELECT id, canonical_name FROM entities WHERE status = 'tracked'`;
   return new Map(rows.map((row) => [Number(row.id), String(row.canonical_name)]));
 }
 
+// Surge, first-seen novelty, and novel-edge detection all depend on the
+// system having a real operating history — during the first warmup_days
+// after launch, a feed pre-load smears publish-dated articles across the
+// prior week, faking exactly that history. cross_category and sentiment
+// are pure 24h-window detectors with no history dependence, so they keep
+// running through warm-up.
 export async function runDetectors(sql: Sql, settings: Settings): Promise<CandidateSignal[]> {
-  const [entityNames, aggRows, articleRows, firstSeen, novelEdge] = await Promise.all([
+  const [epoch, entityNames, aggRows, articleRows] = await Promise.all([
+    getSystemEpoch(sql),
     loadTrackedEntityNames(sql),
     loadHourlyAgg(sql),
     loadArticles24h(sql),
-    detectFirstSeenNovelty(sql),
-    detectNovelEdges(sql),
   ]);
 
-  const { surge, sentiment } = buildSurgeAndSentiment(aggRows, articleRows, settings, entityNames);
+  const now = new Date();
+  const warmup = computeWarmupState(epoch, settings.warmup_days, now);
+
+  let firstSeen: CandidateSignal[] = [];
+  let novelEdge: CandidateSignal[] = [];
+  if (warmup.active) {
+    console.warn(
+      `runDetectors: warm-up active (${warmup.daysRemaining.toFixed(1)}d remaining) — ` +
+        "skipping surge, first_seen, novel_edge",
+    );
+  } else {
+    [firstSeen, novelEdge] = await Promise.all([detectFirstSeenNovelty(sql), detectNovelEdges(sql)]);
+  }
+
+  const daysSinceEpoch = epoch ? computeDaysSinceEpoch(now, epoch) : 0;
+  const effectiveBaselineDays = computeEffectiveBaselineDays(daysSinceEpoch);
+  const { surge, sentiment } = buildSurgeAndSentiment(
+    aggRows,
+    articleRows,
+    settings,
+    entityNames,
+    effectiveBaselineDays,
+    daysSinceEpoch,
+  );
+  const activeSurge: CandidateSignal[] = warmup.active ? [] : surge;
   const crossCategory = detectCrossCategory(articleRows, entityNames);
 
-  return [...surge, ...firstSeen, ...novelEdge, ...crossCategory, ...sentiment];
+  return [...activeSurge, ...firstSeen, ...novelEdge, ...crossCategory, ...sentiment];
 }

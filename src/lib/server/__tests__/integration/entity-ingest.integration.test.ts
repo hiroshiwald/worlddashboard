@@ -103,8 +103,10 @@ describe.skipIf(!TEST_DATABASE_URL)("entity-ingest integration (real Postgres)",
     const nato = entities.find((e) => e.canonical_name === "NATO")!;
     expect(germany.type).toBe("country");
     expect(nato.type).toBe("organization");
-    expect(new Date(germany.first_seen_at as string).toISOString()).toBe("2026-07-10T09:00:00.000Z");
-    expect(new Date(germany.last_seen_at as string).toISOString()).toBe("2026-07-10T09:00:00.000Z");
+    // Watch-time (arrival), not news-time: the head article's published_at is
+    // 2026-07-10, but persistArticles stamps first_seen_at at insert time (now).
+    expect(Date.now() - new Date(germany.first_seen_at as string).getTime()).toBeLessThan(60_000);
+    expect(new Date(germany.first_seen_at as string).getTime()).toBe(new Date(germany.last_seen_at as string).getTime());
 
     // article_entities: cluster heads only — the duplicate member never gets a row.
     const articleEntities = await sql!`SELECT article_id, entity_id FROM article_entities ORDER BY article_id, entity_id`;
@@ -158,22 +160,27 @@ describe.skipIf(!TEST_DATABASE_URL)("entity-ingest integration (real Postgres)",
     expect(after).toEqual(before);
   });
 
-  it("advances entities.last_seen_at when a later article mentions an existing entity, leaving first_seen_at untouched", async () => {
+  it("advances entities.last_seen_at on a later ARRIVAL even with a backdated published_at, leaving first_seen_at untouched", async () => {
     await seedArticles();
     await processNewArticles(sql!);
+    const [before] = await sql!`SELECT first_seen_at, last_seen_at FROM entities WHERE canonical_name = 'Germany'`;
 
+    // published_at is deliberately backdated (2020) to prove last_seen_at
+    // tracks ARRIVAL, not publish date: under the old effectiveAt-based bump,
+    // GREATEST(last_seen_at, 2020) would leave last_seen_at unchanged.
     const laterArticle = makeItem({
       title: "Germany announces new export controls",
       sourceName: "Source E",
       link: "https://e.example.com/later",
-      published: "2026-07-14T09:00:00.000Z",
+      published: "2020-01-01T00:00:00.000Z",
     });
     await persistArticles(sql!, [laterArticle]);
     await processNewArticles(sql!);
 
-    const [germany] = await sql!`SELECT first_seen_at, last_seen_at FROM entities WHERE canonical_name = 'Germany'`;
-    expect(new Date(germany.first_seen_at as string).toISOString()).toBe("2026-07-10T09:00:00.000Z");
-    expect(new Date(germany.last_seen_at as string).toISOString()).toBe("2026-07-14T09:00:00.000Z");
+    const [after] = await sql!`SELECT first_seen_at, last_seen_at FROM entities WHERE canonical_name = 'Germany'`;
+    expect(new Date(after.first_seen_at as string).getTime()).toBe(new Date(before.first_seen_at as string).getTime());
+    expect(new Date(after.last_seen_at as string).getTime()).toBeGreaterThan(new Date(before.last_seen_at as string).getTime());
+    expect(Date.now() - new Date(after.last_seen_at as string).getTime()).toBeLessThan(60_000);
   });
 
   it("candidate accept flow at the SQL level: an accepted name resolves on the next article, and no candidate row reappears", async () => {
@@ -206,7 +213,8 @@ describe.skipIf(!TEST_DATABASE_URL)("entity-ingest integration (real Postgres)",
 
     expect(await sql!`SELECT 1 AS present FROM entity_candidates WHERE name_norm = 'jonas kestrel'`).toHaveLength(0);
 
+    // last_seen_at bumps to the follow-up's ARRIVAL (now), not its 2026-07-13 published_at.
     const [entityRow] = await sql!`SELECT last_seen_at FROM entities WHERE id = ${acceptedId}`;
-    expect(new Date(entityRow.last_seen_at as string).toISOString()).toBe("2026-07-13T09:00:00.000Z");
+    expect(Date.now() - new Date(entityRow.last_seen_at as string).getTime()).toBeLessThan(60_000);
   });
 });
