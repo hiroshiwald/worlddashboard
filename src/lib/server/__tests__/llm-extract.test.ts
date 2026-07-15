@@ -5,6 +5,7 @@ import {
   getLlmMonthStats,
   estimateCostUsd,
   MODEL,
+  REQUEST_TIMEOUT_MS,
 } from "../llm-extract";
 import type { Sql, SqlRow } from "../db";
 
@@ -76,6 +77,31 @@ describe("isLlmConfigured", () => {
   it("false when unset", () => {
     delete process.env.ANTHROPIC_API_KEY;
     expect(isLlmConfigured()).toBe(false);
+  });
+});
+
+describe("REQUEST_TIMEOUT_MS", () => {
+  it("is 12s, down from 25s, to fit the 60s Vercel function ceiling", () => {
+    expect(REQUEST_TIMEOUT_MS).toBe(12_000);
+  });
+
+  it("aborts a hung request once the timeout elapses, resolving to null", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(
+      (_url: string, init: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { sql } = emptyUsageSql();
+
+    const pending = extractEntitiesBatch(sql, 5, [{ index: 0, title: "A", summary: "" }]);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    const result = await pending;
+
+    expect(result).toBeNull();
+    vi.useRealTimers();
   });
 });
 

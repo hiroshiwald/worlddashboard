@@ -1,5 +1,42 @@
 # World Dashboard Development Log
 
+## 2026-07-15 — Hotfix: /api/ingest LLM-extraction timeout (60s ceiling)
+
+`/api/ingest` (Vercel `maxDuration=60`) was timing out in production: `entity-ingest.ts`
+sent article batches to `extractEntitiesBatch` sequentially with a 25s per-call timeout,
+so a catch-up backlog (feed-fetch ~15s + N×batch latency) blew past 60s and got killed
+mid-run — and since the run's articles never get their `entities_processed_at` marker
+set, the same backlog gets re-selected and re-times-out every hour.
+
+- **`src/lib/server/llm-extract.ts`**: `REQUEST_TIMEOUT_MS` 25_000 → 12_000 (exported).
+  A batch slower than 12s isn't worth waiting for under a 60s function ceiling; its
+  articles just fall back to heuristics this run. Budget-ledger semantics (the $5 cap
+  check inside `extractEntitiesBatch`) are unchanged.
+- **`src/lib/server/entity-ingest.ts`**: `extractAllWithLlm` now dispatches LLM batches
+  in waves of up to `LLM_WAVE_SIZE=3` concurrent Anthropic calls (`Promise.all`) instead
+  of strictly sequentially, and checks a wall-clock deadline (`LLM_TIME_BUDGET_MS=20_000`)
+  before each wave. Once the deadline has passed, no further API calls are made for that
+  run — every remaining article falls back to the existing (fast) heuristic stack via a
+  new `heuristicCandidatesForArticle`/`fallbackRemainingWaves` helper pair, and a
+  `console.warn` reports how many articles fell back. The deadline is an optional
+  parameter (`deadline` on `extractAllWithLlm`, threaded up through `extractAllCandidates`
+  and `processNewArticles` as `llmDeadline`) defaulting to `Date.now() + LLM_TIME_BUDGET_MS`
+  computed once per call, so tests can pin it without real timers and production callers
+  (`route.ts`) need no changes. `resolveArticleCandidates` factors the
+  LLM-merge-or-heuristic-fallback decision (with its try/catch) out of the old inline loop
+  body so both the wave path and the deadline-fallback path share it.
+- **Tests**: `llm-extract.test.ts` gained a `REQUEST_TIMEOUT_MS` value check and a
+  fake-timer abort test. `entity-ingest.test.ts` gained a concurrency test (asserts up to
+  3 `extractEntitiesBatch` calls are in flight at once, not sequential) and a deadline
+  test (76 articles → 4 batches → 2 waves; wave 1's 3 batches run against the LLM, wave 2
+  is skipped once the injected deadline has passed, and all 76 articles — including the
+  25 that fell back — still end up marked processed).
+- **Gotcha**: generating genuine multi-wave test data requires >75 articles (3 batches ×
+  25 = one full wave), since wave boundaries are batch-boundaries, not article counts.
+
+Baseline before this change: 392 tests. After: 396 (4 new). `npm test`, `tsc --noEmit`,
+and `npm run build` all pass.
+
 ## 2026-07-15 — LLM extraction layer (Haiku), precision fixes, lift ranking
 
 Added an optional LLM entity-extraction layer to catch what the heuristic

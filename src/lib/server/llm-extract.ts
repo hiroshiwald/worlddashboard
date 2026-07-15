@@ -8,7 +8,9 @@ const ANTHROPIC_VERSION = "2023-06-01";
 const MAX_BATCH_SIZE = 25;
 const MAX_SUMMARY_CHARS = 300;
 const MAX_TOKENS = 2000;
-const REQUEST_TIMEOUT_MS = 25_000;
+// A batch slower than this isn't worth waiting for under the 60s Vercel
+// function ceiling — its articles just fall back to heuristics this run.
+export const REQUEST_TIMEOUT_MS = 12_000;
 
 // Haiku 4.5 pricing as of writing, USD per million tokens — verify against
 // https://www.anthropic.com/pricing before changing either constant.
