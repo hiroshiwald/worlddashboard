@@ -107,7 +107,7 @@ describe("GET /api/entities/[id]", () => {
     expect(edgesCall!.values).toContain(10);
   });
 
-  it("returns the full shape: entity + series + articles + edges", async () => {
+  it("returns the full shape: entity + series + articles + edges + relations", async () => {
     const { sql } = makeMockSql((call) => {
       if (call.query.includes("FROM entities WHERE id")) {
         return [{ id: "1", canonical_name: "Russia", type: "country", status: "tracked", first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: "2026-07-15T00:00:00Z" }];
@@ -130,5 +130,34 @@ describe("GET /api/entities/[id]", () => {
     expect(body.series).toEqual([]);
     expect(body.articles).toEqual([]);
     expect(body.edges).toEqual([]);
+    expect(body.relations).toEqual({ incoming: [], outgoing: [] });
+  });
+
+  it("loads outgoing (source=id) and incoming (target=id) relations as one query each, correctly shaped", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM entities WHERE id")) {
+        return [{ id: "5", canonical_name: "Hyundai", type: "company", status: "tracked", first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: null }];
+      }
+      if (call.query.includes("er.source_id = ")) {
+        return [{ relation: "acquisition", other_id: "9", other_name: "Boston Dynamics", article_count: "3", last_seen_at: "2026-07-10T00:00:00Z" }];
+      }
+      if (call.query.includes("er.target_id = ")) {
+        return [{ relation: "investment", other_id: "12", other_name: "SoftBank", article_count: "2", last_seen_at: "2026-07-11T00:00:00Z" }];
+      }
+      return [];
+    });
+    currentSql = sql;
+    const res = await GET(req, { params: { id: "5" } });
+    const body = await res.json();
+
+    expect(body.relations.outgoing).toEqual([
+      { relation: "acquisition", id: 9, name: "Boston Dynamics", articleCount: 3, lastSeenAt: "2026-07-10T00:00:00.000Z" },
+    ]);
+    expect(body.relations.incoming).toEqual([
+      { relation: "investment", id: 12, name: "SoftBank", articleCount: 2, lastSeenAt: "2026-07-11T00:00:00.000Z" },
+    ]);
+
+    const relationsCalls = calls.filter((c) => c.query.includes("FROM entity_relations"));
+    expect(relationsCalls).toHaveLength(2);
   });
 });

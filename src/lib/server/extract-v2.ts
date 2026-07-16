@@ -2,8 +2,16 @@ import nlp from "compromise";
 import { PERSON_STOPWORDS } from "../entity-dictionaries";
 import { matchDictionaryEntries, isDictionaryTerm } from "../entity-extractor";
 
-export type TypeHint = "country" | "organization" | "region" | "person" | "other";
+export type TypeHint =
+  | "person" | "company" | "organization" | "government_body" | "armed_group"
+  | "political_party" | "country" | "region" | "city" | "product" | "technology"
+  | "financial_asset" | "disease" | "infrastructure" | "other";
 export type CandidateLayer = "dictionary" | "llm" | "compromise" | "acronym" | "person-regex" | "product-pattern";
+/** LLM's judgment of how widely known an entity is to a general news
+ * reader — a 'famous' candidate skips the review queue (see
+ * entity-ingest.ts's famous-entity auto-accept). Only the LLM layer ever
+ * sets this. */
+export type Prominence = "famous" | "known" | "obscure";
 
 export interface Candidate {
   display: string;
@@ -14,6 +22,8 @@ export interface Candidate {
    * commander"), carried through entity-ingest's rollup into
    * entity_candidates.contexts. Undefined for every heuristic layer. */
   roleContext?: string;
+  /** Undefined for every heuristic layer — see Prominence. */
+  prominence?: Prominence;
 }
 
 const CORPORATE_SUFFIXES = new Set(["inc", "ltd", "llc", "corp", "plc", "ag", "gmbh"]);
@@ -73,12 +83,17 @@ export function addCandidate(
   typeHint: TypeHint,
   layer: CandidateLayer,
   roleContext?: string,
+  prominence?: Prominence,
 ): void {
   const norm = normalizeName(display);
   if (!norm) return;
   const existing = map.get(norm);
   if (!existing) {
-    map.set(norm, roleContext ? { display, norm, typeHint, layer, roleContext } : { display, norm, typeHint, layer });
+    map.set(norm, {
+      display, norm, typeHint, layer,
+      ...(roleContext ? { roleContext } : {}),
+      ...(prominence ? { prominence } : {}),
+    });
     return;
   }
 
@@ -87,6 +102,7 @@ export function addCandidate(
   const winner = newRank > existingRank ? { typeHint, layer } : { typeHint: existing.typeHint, layer: existing.layer };
   const longestDisplay = newRank >= existingRank && display.length > existing.display.length ? display : existing.display;
   const winnerRoleContext = newRank > existingRank ? roleContext : existing.roleContext;
+  const winnerProminence = newRank > existingRank ? prominence : existing.prominence;
 
   map.set(norm, {
     display: longestDisplay,
@@ -94,6 +110,7 @@ export function addCandidate(
     typeHint: winner.typeHint,
     layer: winner.layer,
     ...(winnerRoleContext ? { roleContext: winnerRoleContext } : {}),
+    ...(winnerProminence ? { prominence: winnerProminence } : {}),
   });
 }
 

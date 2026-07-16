@@ -1,7 +1,7 @@
 import type { Sql, SqlRow } from "./db";
 import { extractCandidates, extractDictionaryOnlyCandidates, addCandidate, normalizeName, Candidate, TypeHint } from "./extract-v2";
 import { scoreSentiment } from "../entity-extractor";
-import { isLlmConfigured, extractEntitiesBatch, getLlmMonthStats } from "./llm-extract";
+import { isLlmConfigured, extractEntitiesBatch, getLlmMonthStats, ExtractedRelation, RelationType, LlmExtractionResult } from "./llm-extract";
 import { getSettings } from "./settings";
 
 const LOOKBACK_HOURS = 6;
@@ -25,6 +25,11 @@ export interface EntityIngestStats {
   newEntities: number;
   candidatesTouched: number;
   llm: { used: boolean; articles: number; monthCostUsd: number };
+  /** Famous-prominence LLM candidates inserted straight into entities
+   * (status 'tracked') instead of the review queue — see classifyCandidate.
+   * A subset of newEntities above, broken out for visibility. */
+  entities: { autoAccepted: number };
+  relations: { written: number };
 }
 
 // ---- shared row/date parsing ----
@@ -138,6 +143,9 @@ interface PendingNewEntity {
   canonicalName: string;
   type: TypeHint;
   mentions: PendingMention[];
+  /** True when this entity was created via the famous-prominence LLM
+   * auto-accept path rather than a dictionary first-hit. */
+  autoAccepted: boolean;
 }
 
 interface CandidateSighting {
@@ -157,9 +165,15 @@ interface CandidateSighting {
 
 type Classification =
   | { kind: "resolved"; mention: ResolvedMention; canonicalName: string }
-  | { kind: "new-entity"; canonicalName: string; type: TypeHint; mention: PendingMention }
+  | { kind: "new-entity"; canonicalName: string; type: TypeHint; mention: PendingMention; autoAccepted: boolean }
   | { kind: "candidate"; sighting: CandidateSighting };
 
+// A candidate with no registry hit is auto-tracked (skips entity_candidates
+// entirely) when either: the dictionary layer matched it (a known static
+// entity, unchanged pre-existing behavior), or the LLM judged it 'famous' —
+// a name every news reader already knows needs no human review. 'known' and
+// 'obscure' LLM candidates, and every candidate with no prominence at all
+// (the heuristic layers), fall through to the normal candidate queue.
 function classifyCandidate(
   candidate: Candidate,
   article: HeadArticle,
@@ -179,7 +193,10 @@ function classifyCandidate(
     return { kind: "resolved", mention: { ...mention, entityId: known.id }, canonicalName: known.canonicalName };
   }
   if (candidate.layer === "dictionary") {
-    return { kind: "new-entity", canonicalName: candidate.display, type: candidate.typeHint, mention };
+    return { kind: "new-entity", canonicalName: candidate.display, type: candidate.typeHint, mention, autoAccepted: false };
+  }
+  if (candidate.layer === "llm" && candidate.prominence === "famous") {
+    return { kind: "new-entity", canonicalName: candidate.display, type: candidate.typeHint, mention, autoAccepted: true };
   }
   return {
     kind: "candidate",
@@ -220,10 +237,11 @@ function addNewEntityMention(
   canonicalName: string,
   type: TypeHint,
   mention: PendingMention,
+  autoAccepted: boolean,
 ): void {
   const existing = newEntities.get(canonicalName);
   if (existing) existing.mentions.push(mention);
-  else newEntities.set(canonicalName, { canonicalName, type, mentions: [mention] });
+  else newEntities.set(canonicalName, { canonicalName, type, mentions: [mention], autoAccepted });
 }
 
 // Shared failure log for a single per-article extraction/classification
@@ -253,7 +271,7 @@ function processArticle(
     for (const result of classifications) {
       if (result.kind === "resolved") batch.resolved.push(result.mention);
       else if (result.kind === "new-entity") {
-        addNewEntityMention(batch.newEntities, result.canonicalName, result.type, result.mention);
+        addNewEntityMention(batch.newEntities, result.canonicalName, result.type, result.mention, result.autoAccepted);
       } else batch.candidateSightings.push({ ...result.sighting, coEntities: resolvedNames });
     }
     return true;
@@ -296,8 +314,8 @@ export function chunkArticles<T>(items: T[], size: number): T[][] {
 
 function mergeLlmWithDictionary(llmCandidates: Candidate[], title: string, summary: string): Candidate[] {
   const map = new Map<string, Candidate>();
-  for (const c of llmCandidates) addCandidate(map, c.display, c.typeHint, c.layer, c.roleContext);
-  for (const c of extractDictionaryOnlyCandidates(title, summary)) addCandidate(map, c.display, c.typeHint, c.layer, c.roleContext);
+  for (const c of llmCandidates) addCandidate(map, c.display, c.typeHint, c.layer, c.roleContext, c.prominence);
+  for (const c of extractDictionaryOnlyCandidates(title, summary)) addCandidate(map, c.display, c.typeHint, c.layer, c.roleContext, c.prominence);
   return Array.from(map.values());
 }
 
@@ -319,6 +337,7 @@ function extractAllHeuristic(heads: HeadArticle[]): Map<number, Candidate[] | nu
 interface CandidateExtractionResult {
   candidatesByArticle: Map<number, Candidate[] | null>;
   llmArticleCount: number;
+  relationsByArticle: Map<number, ExtractedRelation[]>;
 }
 
 // For an article whose batch returned an LLM result: LLM candidates UNION
@@ -358,12 +377,14 @@ function fallbackRemainingBatches(
   return count;
 }
 
-// Resolves one wave's settled batch results into candidatesByArticle.
-// Returns how many articles in this wave actually used the LLM.
+// Resolves one wave's settled batch results into candidatesByArticle (and,
+// for articles that actually used the LLM, relationsByArticle). Returns how
+// many articles in this wave actually used the LLM.
 function applyWaveResults(
   wave: HeadArticle[][],
-  waveResults: (Map<number, Candidate[]> | null)[],
+  waveResults: (LlmExtractionResult | null)[],
   candidatesByArticle: Map<number, Candidate[] | null>,
+  relationsByArticle: Map<number, ExtractedRelation[]>,
 ): number {
   let llmUsed = 0;
   for (let batchIndex = 0; batchIndex < wave.length; batchIndex++) {
@@ -371,9 +392,13 @@ function applyWaveResults(
     const llmResult = waveResults[batchIndex];
     for (let i = 0; i < batch.length; i++) {
       const article = batch[i];
-      const { candidates, usedLlm } = resolveArticleCandidates(article, llmResult?.get(i));
+      const { candidates, usedLlm } = resolveArticleCandidates(article, llmResult?.candidates.get(i));
       candidatesByArticle.set(article.id, candidates);
-      if (usedLlm) llmUsed += 1;
+      if (usedLlm) {
+        llmUsed += 1;
+        const relations = llmResult?.relations.get(i);
+        if (relations && relations.length > 0) relationsByArticle.set(article.id, relations);
+      }
     }
   }
   return llmUsed;
@@ -393,6 +418,7 @@ async function extractAllWithLlm(
   deadline: number = Date.now() + LLM_TIME_BUDGET_MS,
 ): Promise<CandidateExtractionResult> {
   const candidatesByArticle = new Map<number, Candidate[] | null>();
+  const relationsByArticle = new Map<number, ExtractedRelation[]>();
   const batches = chunkArticles(heads, LLM_BATCH_SIZE);
   let llmArticleCount = 0;
   let fallbackCount = 0;
@@ -409,13 +435,13 @@ async function extractAllWithLlm(
         extractEntitiesBatch(sql, budgetUsd, batch.map((article, j) => ({ index: j, title: article.title, summary: article.summary }))),
       ),
     );
-    llmArticleCount += applyWaveResults(wave, waveResults, candidatesByArticle);
+    llmArticleCount += applyWaveResults(wave, waveResults, candidatesByArticle, relationsByArticle);
   }
 
   if (fallbackCount > 0) {
     console.warn(`processNewArticles: LLM wall-clock deadline exceeded, ${fallbackCount} article(s) fell back to heuristic extraction`);
   }
-  return { candidatesByArticle, llmArticleCount };
+  return { candidatesByArticle, llmArticleCount, relationsByArticle };
 }
 
 // isLlmConfigured() gates whether this run touches llm_usage/settings at
@@ -424,7 +450,7 @@ async function extractAllWithLlm(
 // left undefined in production so it defaults to now + LLM_TIME_BUDGET_MS.
 async function extractAllCandidates(heads: HeadArticle[], sql: Sql, llmDeadline?: number): Promise<CandidateExtractionResult> {
   if (!isLlmConfigured()) {
-    return { candidatesByArticle: extractAllHeuristic(heads), llmArticleCount: 0 };
+    return { candidatesByArticle: extractAllHeuristic(heads), llmArticleCount: 0, relationsByArticle: new Map() };
   }
   const settings = await getSettings(sql);
   return extractAllWithLlm(heads, sql, settings.llm_monthly_budget_usd, llmDeadline);
@@ -699,6 +725,150 @@ async function upsertEntityEdges(sql: Sql, rows: EdgeRollupRow[]): Promise<void>
   `;
 }
 
+// ---- entity_relations rollup ----
+
+// registry (norm -> id, incl. every alias, all statuses — same resolution
+// rule mentions themselves use) overlaid with this run's freshly-inserted
+// entities (dictionary first-hits and famous-prominence auto-accepts alike),
+// so a relation whose endpoint was JUST auto-tracked this run still resolves.
+function buildRelationResolutionIndex(
+  registry: Map<string, EntityRecord>,
+  insertedEntities: InsertedEntity[],
+): Map<string, number> {
+  const index = new Map<string, number>();
+  for (const [norm, record] of registry) index.set(norm, record.id);
+  for (const entity of insertedEntities) {
+    const norm = normalizeName(entity.canonicalName);
+    if (norm) index.set(norm, entity.id);
+  }
+  return index;
+}
+
+interface RelationOccurrence {
+  sourceId: number;
+  targetId: number;
+  relation: RelationType;
+  articleId: number;
+  arrivalAt: Date;
+}
+
+// Relations only ever come from articles that used the LLM (heuristics
+// extract no relations at all) and only from articles that survived
+// classification this run (processedArticleIds) — an article dropped for a
+// poison-pill extraction failure drops its relations too, matching mentions.
+// A relation whose source/target don't BOTH resolve this run, or that
+// degenerates to a self-relation via alias overlap, is dropped: the DB CHECK
+// (source_id <> target_id) would otherwise fail the whole batched upsert.
+function resolveRelationsForRun(
+  processedArticleIds: number[],
+  relationsByArticle: Map<number, ExtractedRelation[]>,
+  headsById: Map<number, HeadArticle>,
+  resolutionIndex: Map<string, number>,
+): RelationOccurrence[] {
+  const occurrences: RelationOccurrence[] = [];
+  for (const articleId of processedArticleIds) {
+    const relations = relationsByArticle.get(articleId);
+    const article = headsById.get(articleId);
+    if (!relations || !article) continue;
+
+    for (const r of relations) {
+      const sourceId = resolutionIndex.get(normalizeName(r.source));
+      const targetId = resolutionIndex.get(normalizeName(r.target));
+      if (sourceId === undefined || targetId === undefined || sourceId === targetId) continue;
+      occurrences.push({ sourceId, targetId, relation: r.relation, articleId, arrivalAt: article.arrivalAt });
+    }
+  }
+  return occurrences;
+}
+
+export interface RelationRollupRow {
+  sourceId: number;
+  targetId: number;
+  relation: RelationType;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  articleCount: number;
+  evidenceArticleId: number;
+}
+
+// evidence_article_id tracks whichever occurrence has the latest arrival
+// (ARRIVAL time, like every first/last_seen semantic here) within this run's
+// batch — upsertRelations then unconditionally overwrites the stored
+// evidence with it, since a later run's articles always arrive after any
+// previously stored evidence in normal operation.
+export function rollupRelations(occurrences: RelationOccurrence[]): RelationRollupRow[] {
+  const groups = new Map<
+    string,
+    { sourceId: number; targetId: number; relation: RelationType; count: number; firstSeenAt: Date; lastSeenAt: Date; evidenceArticleId: number }
+  >();
+
+  for (const occ of occurrences) {
+    const key = `${occ.sourceId}:${occ.targetId}:${occ.relation}`;
+    const group = groups.get(key);
+    if (!group) {
+      groups.set(key, {
+        sourceId: occ.sourceId, targetId: occ.targetId, relation: occ.relation,
+        count: 1, firstSeenAt: occ.arrivalAt, lastSeenAt: occ.arrivalAt, evidenceArticleId: occ.articleId,
+      });
+      continue;
+    }
+    group.count += 1;
+    if (occ.arrivalAt < group.firstSeenAt) group.firstSeenAt = occ.arrivalAt;
+    if (occ.arrivalAt >= group.lastSeenAt) {
+      group.lastSeenAt = occ.arrivalAt;
+      group.evidenceArticleId = occ.articleId;
+    }
+  }
+
+  return Array.from(groups.values()).map((g) => ({
+    sourceId: g.sourceId,
+    targetId: g.targetId,
+    relation: g.relation,
+    firstSeenAt: g.firstSeenAt.toISOString(),
+    lastSeenAt: g.lastSeenAt.toISOString(),
+    articleCount: g.count,
+    evidenceArticleId: g.evidenceArticleId,
+  }));
+}
+
+async function upsertRelations(sql: Sql, rows: RelationRollupRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  await sql`
+    INSERT INTO entity_relations (source_id, target_id, relation, first_seen_at, last_seen_at, article_count, evidence_article_id)
+    SELECT * FROM UNNEST(
+      ${rows.map((r) => r.sourceId)}::bigint[],
+      ${rows.map((r) => r.targetId)}::bigint[],
+      ${rows.map((r) => r.relation)}::text[],
+      ${rows.map((r) => r.firstSeenAt)}::timestamptz[],
+      ${rows.map((r) => r.lastSeenAt)}::timestamptz[],
+      ${rows.map((r) => r.articleCount)}::int[],
+      ${rows.map((r) => r.evidenceArticleId)}::bigint[]
+    )
+    ON CONFLICT (source_id, target_id, relation) DO UPDATE SET
+      article_count = entity_relations.article_count + EXCLUDED.article_count,
+      last_seen_at = GREATEST(entity_relations.last_seen_at, EXCLUDED.last_seen_at),
+      evidence_article_id = EXCLUDED.evidence_article_id
+  `;
+}
+
+// Relations only resolve against entities known by the END of this run
+// (pre-existing registry + this run's fresh inserts, famous auto-accepts
+// included) — see buildRelationResolutionIndex/resolveRelationsForRun.
+async function persistRelations(
+  sql: Sql,
+  registry: Map<string, EntityRecord>,
+  insertedEntities: InsertedEntity[],
+  heads: HeadArticle[],
+  processedArticleIds: number[],
+  relationsByArticle: Map<number, ExtractedRelation[]>,
+): Promise<number> {
+  const resolutionIndex = buildRelationResolutionIndex(registry, insertedEntities);
+  const headsById = new Map(heads.map((h) => [h.id, h]));
+  const rows = rollupRelations(resolveRelationsForRun(processedArticleIds, relationsByArticle, headsById, resolutionIndex));
+  await upsertRelations(sql, rows);
+  return rows.length;
+}
+
 // ---- entity_candidates rollup (unresolved norms) ----
 
 interface CandidateRow {
@@ -871,11 +1041,13 @@ export async function processNewArticles(sql: Sql, llmDeadline?: number): Promis
       newEntities: 0,
       candidatesTouched: 0,
       llm: { used: false, articles: 0, monthCostUsd: 0 },
+      entities: { autoAccepted: 0 },
+      relations: { written: 0 },
     };
   }
 
   const registry = await loadEntityRegistry(sql);
-  const { candidatesByArticle, llmArticleCount } = await extractAllCandidates(heads, sql, llmDeadline);
+  const { candidatesByArticle, llmArticleCount, relationsByArticle } = await extractAllCandidates(heads, sql, llmDeadline);
   const classified = classifyAll(heads, candidatesByArticle, registry);
 
   const insertedEntities = await upsertNewEntities(sql, classified.newEntities);
@@ -887,7 +1059,7 @@ export async function processNewArticles(sql: Sql, llmDeadline?: number): Promis
   await upsertHourlyMentions(sql, rollupHourlyMentions(allMentions));
   await upsertEntityEdges(sql, rollupEntityEdges(allMentions));
   const candidatesTouched = await persistCandidates(sql, classified.candidateSightings);
-
+  const relationsWritten = await persistRelations(sql, registry, insertedEntities, heads, classified.processedArticleIds, relationsByArticle);
   // Marking processed is deliberately the LAST WRITE of a run: a crash
   // between the aggregate writes above and this UPDATE leaves this batch's
   // articles unmarked, so they retry next run — additive rollups (mentions,
@@ -898,6 +1070,7 @@ export async function processNewArticles(sql: Sql, llmDeadline?: number): Promis
   await markArticlesProcessed(sql, classified.processedArticleIds);
 
   const monthCostUsd = await safeLlmMonthCost(sql);
+  const autoAcceptedCount = Array.from(classified.newEntities.values()).filter((e) => e.autoAccepted).length;
 
   return {
     articlesProcessed: classified.processedArticleIds.length,
@@ -905,5 +1078,7 @@ export async function processNewArticles(sql: Sql, llmDeadline?: number): Promis
     newEntities: insertedEntities.length,
     candidatesTouched,
     llm: { used: llmArticleCount > 0, articles: llmArticleCount, monthCostUsd },
+    entities: { autoAccepted: autoAcceptedCount },
+    relations: { written: relationsWritten },
   };
 }

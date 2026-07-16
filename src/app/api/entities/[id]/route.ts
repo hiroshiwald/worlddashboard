@@ -58,6 +58,38 @@ async function loadRecentArticles(sql: Sql, id: number) {
   }));
 }
 
+function toRelationJson(row: SqlRow) {
+  return {
+    relation: String(row.relation),
+    id: Number(row.other_id),
+    name: String(row.other_name),
+    articleCount: Number(row.article_count),
+    lastSeenAt: toIsoString(row.last_seen_at),
+  };
+}
+
+async function loadOutgoingRelations(sql: Sql, id: number) {
+  const rows = await sql`
+    SELECT er.relation, er.target_id AS other_id, e.canonical_name AS other_name, er.article_count, er.last_seen_at
+    FROM entity_relations er
+    JOIN entities e ON e.id = er.target_id
+    WHERE er.source_id = ${id}
+    ORDER BY er.article_count DESC
+  `;
+  return rows.map(toRelationJson);
+}
+
+async function loadIncomingRelations(sql: Sql, id: number) {
+  const rows = await sql`
+    SELECT er.relation, er.source_id AS other_id, e.canonical_name AS other_name, er.article_count, er.last_seen_at
+    FROM entity_relations er
+    JOIN entities e ON e.id = er.source_id
+    WHERE er.target_id = ${id}
+    ORDER BY er.article_count DESC
+  `;
+  return rows.map(toRelationJson);
+}
+
 async function loadTopEdges(sql: Sql, id: number) {
   const rows = await sql`
     SELECT
@@ -96,11 +128,19 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: "Entity not found" }, { status: 404 });
   }
 
-  const [series, articles, edges] = await Promise.all([
+  const [series, articles, edges, outgoing, incoming] = await Promise.all([
     loadHourlySeries(sql, id),
     loadRecentArticles(sql, id),
     loadTopEdges(sql, id),
+    loadOutgoingRelations(sql, id),
+    loadIncomingRelations(sql, id),
   ]);
 
-  return NextResponse.json({ entity: toEntityJson(entityRows[0]), series, articles, edges });
+  return NextResponse.json({
+    entity: toEntityJson(entityRows[0]),
+    series,
+    articles,
+    edges,
+    relations: { incoming, outgoing },
+  });
 }

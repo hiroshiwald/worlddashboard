@@ -5,7 +5,11 @@ import type { Sql, SqlRow } from "@/lib/server/db";
 export const dynamic = "force-dynamic";
 
 const ACTIONS = new Set(["accept", "merge", "dismiss"]);
-const TYPES = new Set(["country", "organization", "region", "person", "other"]);
+const TYPES = new Set([
+  "person", "company", "organization", "government_body", "armed_group",
+  "political_party", "country", "region", "city", "product", "technology",
+  "financial_asset", "disease", "infrastructure", "other",
+]);
 const MAX_STRING_LEN = 200;
 
 // ---- GET: promotable candidates (>=3 distinct sources, >=2 distinct days, seen within 14d) ----

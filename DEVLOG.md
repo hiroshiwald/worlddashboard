@@ -1,5 +1,131 @@
 # World Dashboard Development Log
 
+## 2026-07-16 — Entity ontology upgrade: 15-type schema, directed typed relations, famous-entity auto-accept
+
+**What changed**: expanded `entities.type` from 5 coarse types to a 15-type working
+ontology, added a directed/typed `entity_relations` table (e.g. "Hyundai
+—acquisition→ Boston Dynamics"), upgraded the LLM extraction schema to request
+per-entity prominence and per-article relations alongside entities, and wired the
+pipeline so a "famous" LLM candidate with no registry match skips the Review queue
+entirely and is auto-tracked.
+
+**What it affected**:
+- `migrations/005_ontology_and_relations.sql` (new): drops/re-adds
+  `entities_type_check` with the full ontology (`person, company, organization,
+  government_body, armed_group, political_party, country, region, city, product,
+  technology, financial_asset, disease, infrastructure, other` — every existing
+  production value stays valid, no data migration needed); adds `entity_relations`
+  (`source_id, target_id, relation, first_seen_at, last_seen_at, article_count,
+  evidence_article_id`, PK `(source_id, target_id, relation)`, `CHECK (source_id <>
+  target_id)`, FK-cascade on both entity ids, `ON DELETE SET NULL` on the evidence
+  article) plus a `target_id` index. Confirmed to apply cleanly right after 001-004 on a
+  fresh schema (every integration test exercises this via `freshSchema`, plus a
+  dedicated canary test).
+- `src/lib/server/extract-v2.ts`: `TypeHint` now mirrors the full ontology; new
+  `Prominence` type (`"famous" | "known" | "obscure"`); `Candidate` gains an optional
+  `prominence` field; `addCandidate` carries it through the same layer-priority merge
+  `roleContext` already used (a norm collision keeps the highest-priority layer's
+  prominence, same rule as role context and type).
+- `src/lib/server/llm-extract.ts`: system prompt now asks for, per article,
+  `entities:[{name,type,role?,prominence}]` (type = the full ontology; prominence = how
+  widely known the entity is to a general news reader) and
+  `relations:[{source,target,relation}]` (relation = one of 13 relation types; source/
+  target must exactly match a name in that article's own entities list). Defensive
+  parsing: an unrecognized entity type is kept but downgraded to `'other'` (previously
+  the whole entity was dropped — losing a real candidate over a type the model phrased
+  oddly was worse than mislabeling it); an unrecognized relation type is dropped and
+  counted, with one `console.warn` per batch for the total; a relation whose source or
+  target isn't in that same article's entity list is dropped silently; missing/invalid
+  prominence defaults to `'known'` (the middle, no-auto-accept ground). `TYPE_MAP` is
+  identity for all 15 new types, plus a legacy `'place' → 'region'` fallback the prompt
+  no longer requests but the parser still tolerates. `extractEntitiesBatch` now returns
+  `{candidates, relations} | null` (both keyed by within-batch article index) instead of
+  a bare candidates map — a breaking return-shape change, all call sites updated.
+- `src/lib/server/entity-ingest.ts`: `classifyCandidate` gains a second auto-track path
+  — alongside the existing dictionary-first-hit rule, an LLM candidate with no registry
+  match and `prominence === 'famous'` is now also classified as a new entity (status
+  `tracked`) instead of accumulating in `entity_candidates`. Both paths flow through the
+  same `upsertNewEntities` batch insert; a new `autoAccepted` flag on `PendingNewEntity`
+  tracks which ones came from the famous-LLM path for the stats breakout. New
+  `entity_relations` rollup (`buildRelationResolutionIndex`, `resolveRelationsForRun`,
+  `rollupRelations`, `upsertRelations`): after mentions resolve, a relation is kept only
+  when BOTH its source and target resolve to a known entity id — the pre-run registry
+  (by norm, every alias, all statuses) overlaid with this run's fresh inserts, so a
+  same-run famous auto-accept is a valid relation endpoint. A relation that would
+  resolve to a self-loop (both names normalize to the same entity via alias overlap) is
+  dropped before the batch upsert, since one bad row would fail the whole UNNEST'd
+  `INSERT` under the `CHECK (source_id <> target_id)` constraint. Upsert on conflict
+  bumps `article_count`/`last_seen_at` and unconditionally replaces `evidence_article_id`
+  with this run's newest supporting article; `first_seen_at` is set once and never
+  revised. `EntityIngestStats` gains `entities: {autoAccepted}` and `relations:
+  {written}`, additive to the existing shape.
+- `src/app/api/candidates/route.ts`, `src/components/ReviewTab.tsx`: accept-type
+  whitelist and the review queue's type `<select>` both expanded to the full ontology
+  (select renders `government_body` etc. as "government body" — display only, the
+  submitted value stays the snake_case enum member the API expects).
+- `src/app/api/entities/[id]/route.ts`: response gains `relations: {incoming, outgoing}`
+  (one query each — `source_id = id` / `target_id = id`, joined to the other entity's
+  name, ordered by `article_count DESC`), no N+1. Rendering them in the panel/graph is
+  intentionally deferred to a later change.
+- Tests: 466 passing (437 baseline + 29 new — unit coverage for v2 parsing
+  (prominence defaulting, relation validity/endpoint-matching, TYPE_MAP passthrough
+  including the legacy fallback, the "unknown type kept as other" behavior change),
+  `rollupRelations` as a pure function (direction and relation-type both partition
+  rows, aggregation, newest-evidence selection), the famous-vs-known/obscure
+  auto-accept branch, self-relation dropping, and a real-Postgres "Hyundai acquires
+  stake in Boston Dynamics" scenario covering: the famous company auto-tracked, the
+  obscure company and a person (role "CEO") landing in `entity_candidates`, the
+  relation dropped while an endpoint is unresolved, the relation written with correct
+  direction once that endpoint is accepted and the story recurs, and re-run
+  idempotency (`entity_relations.article_count` unchanged on a no-op second run).
+
+**Cost estimate** (no `ANTHROPIC_API_KEY`/`DATABASE_URL` in this sandbox, so this is a
+worked estimate from the pricing constants and typical batch shape, not a read of real
+`llm_usage` rows — flagging that limitation rather than fabricating a production
+number): the system prompt itself grows from ~130 to ~390 tokens (input, $1/MTok) —
+negligible, +$0.00026/call. The real growth is output ($5/MTok): a "typical" 2-entity
+article's JSON grows from ~33 tokens (no prominence/relations) to roughly 49 tokens with
+`prominence` added, and to ~72 tokens on the fraction of articles that also carry a
+relation. Blended across a 25-article batch, that's roughly +70% output tokens per call
+(~$0.0043 → ~$0.0073). `MAX_TOKENS` was raised 2000 → 4000 so a rich 25-article batch's
+richer JSON doesn't risk truncating mid-object (a truncated response fails
+`parseModelOutput`'s JSON.parse and the whole batch falls back to heuristics — cheap
+insurance, and the ceiling is a cap on spend-per-call, not a floor, so it costs nothing
+when unused). Net effect: the same article volume now costs roughly 1.6-1.7x more against
+the monthly ledger, so the $5 cap gets reached in fewer batches — it remains the hard
+guard either way, and `extractEntitiesBatch` still checks it before every call.
+
+**Famous-auto-accept rationale**: the Review queue exists so a human judges names the
+system genuinely isn't sure about. A `'famous'` LLM candidate — a household name no news
+reader needs explained — was never actually an open question; routing it through the
+queue anyway just added review-queue noise and delayed the entity becoming trackable.
+`'known'` and `'obscure'` (and every heuristic-layer candidate, which never gets a
+prominence judgment at all) still queue normally — only the LLM's own top confidence
+tier skips it.
+
+**Known limitation (by design)**: a relation is evaluated once, in the run its source
+article was extracted, against entities resolved by the end of THAT run. If one endpoint
+is still an unresolved candidate, the relation is dropped, not queued — there's no
+"pending relations" table. It reappears automatically the next time the same story (or
+a follow-up) gets extracted after that endpoint becomes tracked (auto-accept, or a human
+accepting it from the Review queue), which is common for ongoing stories but not
+guaranteed for a one-off mention. Confirmed directly in the Hyundai/Boston Dynamics
+integration test.
+
+**Gotcha**: `mergeLlmWithDictionary` (the function that unions an article's LLM
+candidates with the dictionary-only heuristic layer) rebuilds each `Candidate` via
+`addCandidate`, and originally only forwarded `roleContext` — not the new `prominence`
+field — into that rebuild. Every LLM candidate silently lost its prominence the moment
+it passed through the merge, so famous auto-accept never fired. Caught immediately by
+the new auto-accept unit tests (three failures, all `expected +0 to be 1/2`), not by
+inspection — a reminder that a field added to a shared type needs to be re-checked at
+every place that reconstructs an object of that type, not just its constructor.
+
+**Deviations**: none from the task brief. All four tasks implemented as specified;
+`detectors.ts`, `signal-store.ts`, `brief.ts`, `tick`/`run-ingest`, `NetworkTab`, and
+migrations 001-004 untouched; no new dependencies; the Anthropic API key is never
+logged on any path (existing test for this still passes unmodified).
+
 ## 2026-07-16 — Self-healing tick endpoint for dead GitHub Actions cron
 
 **What changed**: added an unauthenticated, self-rate-limited `/api/tick` endpoint that

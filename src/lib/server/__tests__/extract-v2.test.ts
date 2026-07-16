@@ -220,4 +220,17 @@ describe("addCandidate layer priority", () => {
     addCandidate(map, "Jane Doe", "organization", "dictionary");
     expect(map.get("jane doe")!.roleContext).toBeUndefined();
   });
+
+  it("carries prominence through when the llm candidate wins priority", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Jane Doe", "person", "llm", undefined, "famous");
+    expect(map.get("jane doe")!.prominence).toBe("famous");
+  });
+
+  it("drops prominence when a higher-priority layer without one wins", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Jane Doe", "person", "llm", undefined, "famous");
+    addCandidate(map, "Jane Doe", "organization", "dictionary");
+    expect(map.get("jane doe")!.prominence).toBeUndefined();
+  });
 });
