@@ -1,5 +1,40 @@
 # World Dashboard Development Log
 
+## 2026-07-16 — Fix: Refresh button showed nothing for up to 40s before "Collecting…" appeared
+
+**What changed**: `useSources.ts`'s `refresh()` set `refreshState` from the parsed
+`/api/tick?manual=1` response, but that response only arrives after the server has
+already finished the whole collection run (15-40s) — so clicking Refresh looked dead
+for up to 40s, then flashed "Collecting…" for work that had already finished.
+`refreshState` now flips to `'collecting'` synchronously before the tick request is
+sent, on the click itself.
+
+**What it affected**:
+- `src/hooks/useSources.ts`: `refresh()`'s db-mode branch now sets `'collecting'`
+  before `fetch("/api/tick?manual=1")` instead of after the response resolves.
+  Response handling moved into a new `applyTickResult()` helper (kept `refresh()`
+  under the 50-line function limit). `triggered:true` now refetches `/api/articles`
+  immediately — the run is already done by the time this response arrives — and sets
+  `'idle'` right after that refetch resolves, with one ~30s backup refetch (was a
+  30s+90s pair) in case the immediate one raced the 60s CDN edge cache.
+  `reason:'locked'` is unchanged: another caller's run may still be in progress with
+  no completion guarantee, so it keeps the original 30s+90s wait-then-refetch
+  schedule. `reason:'fresh'` unchanged. Request failure / malformed response: still
+  warns and falls back to one plain refetch, now also explicitly resets to `'idle'`
+  (previously implicit, since `refreshState` was never touched before the response).
+- `src/hooks/__tests__/useSources.test.ts`: the `triggered:true` test rewritten with
+  a manually-resolved tick-fetch promise to assert `'collecting'` is set before the
+  response resolves, plus the immediate refetch and the revised single-backup-timer
+  schedule. `locked`/`fresh`/failure/non-ok/live-mode tests unaffected, left as-is.
+  486 → 486 (one test replaced in place, none added).
+- `HeaderBar.tsx`, `useDashboardTable.ts`, `DashboardTable.tsx`: no changes —
+  confirmed each only passes `refreshState`/`refresh` through opaquely, so the
+  `UseFeedReturn` contract didn't need to move.
+
+**Gotchas**: none new. This was exactly the "later task" flagged in the previous
+entry's gotchas section — `refreshState` was keyed off the parsed response instead
+of the in-flight request.
+
 ## 2026-07-16 — Honest Refresh button: manual tick mode + client refreshState
 
 **What changed**: the header Refresh button previously only re-read `/api/articles`

@@ -104,6 +104,45 @@ function validateTickResponse(data: unknown): TickResponse | null {
   };
 }
 
+// Applies the refreshState transition for a validated /api/tick response
+// and returns any follow-up refetch timeouts to track. Split out of
+// refresh() below to stay under the 50-line function limit.
+async function applyTickResult(
+  tick: TickResponse,
+  fetchFeed: () => Promise<void>,
+  setRefreshState: (state: "idle" | "collecting" | "fresh") => void,
+): Promise<ReturnType<typeof setTimeout>[]> {
+  if (tick.triggered) {
+    // This response only arrives after the server has finished the run,
+    // so the data is already fresh — refetch now. /api/articles still sits
+    // behind a 60s CDN edge cache, so one backup refetch follows in case
+    // this one raced a still-cached pre-collection response.
+    await fetchFeed();
+    setRefreshState("idle");
+    return [setTimeout(fetchFeed, MANUAL_TICK_FIRST_REFETCH_MS)];
+  }
+  if (tick.reason === "locked") {
+    // Another caller's run holds the lock, not this one — unlike
+    // `triggered`, there's no guarantee it has finished yet, so this keeps
+    // the original wait-then-refetch-twice schedule rather than refetching
+    // immediately.
+    const first = setTimeout(fetchFeed, MANUAL_TICK_FIRST_REFETCH_MS);
+    const second = setTimeout(() => {
+      fetchFeed();
+      setRefreshState("idle");
+    }, TICK_REFRESH_DELAY_MS);
+    return [first, second];
+  }
+  if (tick.reason === "fresh") {
+    await fetchFeed();
+    setRefreshState("fresh");
+    return [setTimeout(() => setRefreshState("idle"), FRESH_STATUS_DISPLAY_MS)];
+  }
+  await fetchFeed();
+  setRefreshState("idle");
+  return [];
+}
+
 interface UseFeedReturn {
   items: FeedItem[];
   loading: boolean;
@@ -244,37 +283,22 @@ export function useFeed(): UseFeedReturn {
 
     refreshTimeoutsRef.current.forEach(clearTimeout);
     refreshTimeoutsRef.current = [];
+    // Set before the request is sent: /api/tick?manual=1 only replies once
+    // the server has finished the whole collection run (15-40s), so waiting
+    // for the response to show "Collecting…" left the button looking dead
+    // on every click.
+    setRefreshState("collecting");
 
     try {
       const res = await fetch("/api/tick?manual=1", { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const tick = validateTickResponse(await res.json());
       if (!tick) throw new Error("malformed /api/tick response");
-
-      if (tick.triggered || tick.reason === "locked") {
-        // /api/articles sits behind a CDN edge cache (s-maxage=60), so a
-        // refetch at 30s can still return pre-collection data — the 90s
-        // refetch is the one guaranteed to land after the edge cache has
-        // rolled over. Same schedule whether this call started the run or
-        // another caller already held the lock: the user can't tell those
-        // apart, and both mean a run is in flight right now.
-        setRefreshState("collecting");
-        const first = setTimeout(fetchFeed, MANUAL_TICK_FIRST_REFETCH_MS);
-        const second = setTimeout(() => {
-          fetchFeed();
-          setRefreshState("idle");
-        }, TICK_REFRESH_DELAY_MS);
-        refreshTimeoutsRef.current = [first, second];
-      } else if (tick.reason === "fresh") {
-        await fetchFeed();
-        setRefreshState("fresh");
-        refreshTimeoutsRef.current = [setTimeout(() => setRefreshState("idle"), FRESH_STATUS_DISPLAY_MS)];
-      } else {
-        await fetchFeed();
-      }
+      refreshTimeoutsRef.current = await applyTickResult(tick, fetchFeed, setRefreshState);
     } catch (err) {
       console.warn("[useSources] /api/tick?manual=1 failed, falling back to a plain refetch", err);
       await fetchFeed();
+      setRefreshState("idle");
     }
   }, [mode, fetchFeed]);
 
