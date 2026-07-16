@@ -113,26 +113,39 @@ describe("useFeed refresh()", () => {
     vi.restoreAllMocks();
   });
 
-  it("db mode, triggered:true: sets refreshState 'collecting' and schedules refetches at ~30s and ~90s", async () => {
+  it("db mode, triggered:true: sets 'collecting' synchronously before the tick response resolves, then refetches immediately and schedules one ~30s backup", async () => {
     const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    let resolveTick!: (value: unknown) => void;
+    const tickPromise = new Promise<unknown>((resolve) => {
+      resolveTick = resolve;
+    });
     const fetchMock = stubFetchRouter({
       "/api/articles": () => mockArticlesResponse(freshIso),
-      "/api/tick?manual=1": () => mockTickResponse({ triggered: true, inserted: 2 }),
+      "/api/tick?manual=1": () => tickPromise,
     });
 
     const { result, unmount } = renderHook(() => useFeed());
     await waitFor(() => expect(result.current.mode).toBe("db"));
+    const articlesCallsBeforeClick = countCalls(fetchMock, "/api/articles");
     const setTimeoutSpy = vi.spyOn(global, "setTimeout");
 
-    await act(async () => {
-      await result.current.refresh();
+    act(() => {
+      result.current.refresh();
     });
 
+    // The tick request is in flight and still unresolved — 'collecting'
+    // must come from the click itself, not from the (pending) response.
     expect(result.current.refreshState).toBe("collecting");
     expect(countCalls(fetchMock, "/api/tick?manual=1")).toBe(1);
+    expect(countCalls(fetchMock, "/api/articles")).toBe(articlesCallsBeforeClick);
+
+    resolveTick({ ok: true, json: async () => ({ triggered: true, inserted: 2 }) });
+    await waitFor(() => expect(result.current.refreshState).toBe("idle"));
+
+    expect(countCalls(fetchMock, "/api/articles")).toBe(articlesCallsBeforeClick + 1);
     const delays = setTimeoutSpy.mock.calls.map(([, delay]) => delay);
     expect(delays).toContain(30_000);
-    expect(delays).toContain(90_000);
+    expect(delays).not.toContain(90_000);
 
     unmount();
   });
