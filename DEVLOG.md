@@ -1,5 +1,55 @@
 # World Dashboard Development Log
 
+## 2026-07-16 — Self-healing tick endpoint for dead GitHub Actions cron
+
+**What changed**: added an unauthenticated, self-rate-limited `/api/tick` endpoint that
+runs the ingest pipeline on-demand when data is stale, plus a client-side trigger and a
+stricter GitHub Actions schedule — GitHub Actions' schedule trigger had been going dark
+for hours at a stretch with no visible failure, and the Vercel daily cron alone wasn't
+enough of a backstop.
+
+**What it affected**:
+- `src/lib/server/run-ingest.ts` (new): `runIngest` extracted out of
+  `/api/ingest/route.ts` unchanged, now returning `{status, body}` instead of a
+  `NextResponse` so `/api/ingest` and the new `/api/tick` can each wrap it in their own
+  response/auth. `/api/ingest`'s existing route test passes unmodified — proof its
+  behavior, including auth, didn't move.
+- `src/lib/server/tick.ts` (new): `isRecent(timestamp, now, thresholdMs)` — one pure,
+  injectable-`now` function behind both the 2h freshness check and the 10min lock check —
+  plus `getLastIngestAt` and `tryAcquireLock` (atomic `settings.tick_lock` upsert; the
+  `ON CONFLICT ... DO UPDATE ... WHERE ... RETURNING` shape is what makes concurrent
+  callers safe, confirmed against real Postgres with a concurrent-caller integration
+  test).
+- `src/app/api/tick/route.ts` (new): POST/GET take no `req` at all, so there is nothing to
+  validate from the request by construction. 503 (no DB) → fresh short-circuit → lock
+  attempt → winner runs `runIngest` and returns `{triggered:true, ...stats}`; everyone
+  else gets `{triggered:false, reason:"fresh"|"locked"}`. `maxDuration = 60`, same as
+  `/api/ingest`. Unauthenticated by design: it can only ever do what the hourly cron
+  already does, is idempotent, rate-limited by the freshness check and the lock, and
+  exposes no secrets.
+- `src/hooks/useSources.ts`: a ref-guarded effect fires `POST /api/tick` fire-and-forget
+  (once per page load) when a DB-mode load's `lastIngestAt` is over 2h stale, then
+  schedules one `refresh()` ~90s later (cleared on unmount).
+- `.github/workflows/ingest.yml`: added a second `"37 * * * *"` schedule (two chances an
+  hour instead of one), and the job now fails (`exit 1`, response body printed) when the
+  ingest response's `feedsSucceeded` is 0 — a run that collects nothing was previously
+  green.
+- MANIFEST: two new modules, two updated modules, five new test files, new "the dashboard
+  self-heals staleness on view" invariant.
+
+**Gotchas**:
+- jsdom@29.0.1 (already the committed lockfile version — no hook/component test had ever
+  exercised the jsdom test environment before this task) crashes vitest on Node 22:
+  `require() cannot be used on an ESM graph with top-level await`, from jsdom's own
+  `css-values.js` requiring `@asamuzakjp/css-color` (pure ESM, no CJS export). A
+  `vitest.config.ts` `deps.inline` tweak did NOT fix it — the crash happens inside jsdom's
+  own internal `require()`, upstream of Vite's transform pipeline. Fix: pinned the `jsdom`
+  devDependency to `24.1.3`, the last version using `cssstyle@4.0.1` (no `css-color`
+  dependency at all). Dev-only — doesn't touch the production bundle.
+- Lock boundary convention: "younger than 10 minutes -> locked" means the SQL needs `<=`
+  (not `<`) in `WHERE stored <= now() - 10min`, so an exactly-10-minutes-old lock counts
+  as reclaimable — the precise logical complement of "younger than."
+
 ## 2026-07-15 — Deviation-based cross_category/sentiment detectors; retire Intel + Discovery tabs
 
 **Why**: in production, `cross_category` fired perpetually as "CROSS-CATEGORY: IRAN (7
