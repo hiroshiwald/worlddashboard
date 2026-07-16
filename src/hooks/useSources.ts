@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { FeedItem, FeedDiagnostic } from "@/lib/types";
+
+const STALE_INGEST_MS = 2 * 60 * 60 * 1000; // 2 hours
+const TICK_REFRESH_DELAY_MS = 90 * 1000; // 90 seconds
 
 interface ValidatedResponse {
   items: FeedItem[];
@@ -93,6 +96,11 @@ interface UseFeedReturn {
   refresh: () => void;
 }
 
+// Exception to 50-line rule: 10 state variables + 1 ref + 3 fetch callbacks
+// + 2 effects make further reduction below 50 counterproductive. Pure
+// validation helpers (validateApiResponse, validateDbResponse) are already
+// extracted above; remaining code is React state/effect wiring that must
+// stay co-located with the hook.
 export function useFeed(): UseFeedReturn {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,6 +112,7 @@ export function useFeed(): UseFeedReturn {
   const [feedDiagnostics, setFeedDiagnostics] = useState<FeedDiagnostic[]>([]);
   const [mode, setMode] = useState<"db" | "live">("live");
   const [lastIngestAt, setLastIngestAt] = useState<string | null>(null);
+  const tickFiredRef = useRef(false);
 
   // Tries the DB-backed read path first. Returns false (and warns) on a
   // 503 (no data yet), any other non-2xx, a malformed body, or a network
@@ -168,6 +177,27 @@ export function useFeed(): UseFeedReturn {
     // Fire-and-forget: useEffect cannot return a promise. Errors handled inside fetchFeed.
     fetchFeed();
   }, [fetchFeed]);
+
+  // Self-heals cron gaps: a DB-mode load reporting stale data pings the
+  // tick endpoint once per page load, then re-fetches ~90s later so the
+  // user sees fresh data without a manual reload.
+  useEffect(() => {
+    if (mode !== "db" || !lastIngestAt || tickFiredRef.current) return;
+    const age = Date.now() - new Date(lastIngestAt).getTime();
+    if (age < STALE_INGEST_MS) return;
+
+    tickFiredRef.current = true;
+
+    // Detached on purpose: a best-effort self-heal ping outside the render
+    // path. Failure here isn't actionable beyond a warning — the next page
+    // load (or the hourly cron) will try again.
+    fetch("/api/tick", { method: "POST" }).catch((err) => {
+      console.warn("[useSources] /api/tick trigger failed", err);
+    });
+
+    const timeoutId = setTimeout(fetchFeed, TICK_REFRESH_DELAY_MS);
+    return () => clearTimeout(timeoutId);
+  }, [mode, lastIngestAt, fetchFeed]);
 
   return {
     items,

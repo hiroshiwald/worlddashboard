@@ -3,6 +3,7 @@ name: Hourly ingest
 on:
   schedule:
     - cron: "7 * * * *"
+    - cron: "37 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -11,5 +12,11 @@ jobs:
     steps:
       - name: Trigger ingest endpoint
         run: |
-          curl -fsS -X POST -H "x-ingest-key: ${{ secrets.INGEST_SECRET }}" \
-            https://worlddashboard.vercel.app/api/ingest
+          body=$(curl -fsS -X POST -H "x-ingest-key: ${{ secrets.INGEST_SECRET }}" \
+            https://worlddashboard.vercel.app/api/ingest)
+          echo "$body"
+          feeds_succeeded=$(echo "$body" | jq -r '.feedsSucceeded // 0')
+          if [ "$feeds_succeeded" -eq 0 ]; then
+            echo "::error::ingest collected nothing (feedsSucceeded=0)"
+            exit 1
+          fi
