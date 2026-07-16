@@ -5,6 +5,8 @@ import { FeedItem, FeedDiagnostic } from "@/lib/types";
 
 const STALE_INGEST_MS = 2 * 60 * 60 * 1000; // 2 hours
 const TICK_REFRESH_DELAY_MS = 90 * 1000; // 90 seconds
+const MANUAL_TICK_FIRST_REFETCH_MS = 30 * 1000; // 30 seconds
+const FRESH_STATUS_DISPLAY_MS = 4 * 1000; // 4 seconds
 
 interface ValidatedResponse {
   items: FeedItem[];
@@ -82,6 +84,26 @@ function validateDbResponse(data: unknown): ValidatedDbResponse | null {
   };
 }
 
+interface TickResponse {
+  triggered: boolean;
+  reason: string | null;
+}
+
+// /api/tick's only two `reason` values are "fresh" and "locked" (see
+// tick/route.ts), kept as a loose string here rather than re-encoding the
+// server's contract as a union — same style as validateDbResponse above.
+function validateTickResponse(data: unknown): TickResponse | null {
+  const obj = (data && typeof data === "object" ? data : {}) as Record<
+    string,
+    unknown
+  >;
+  if (typeof obj.triggered !== "boolean") return null;
+  return {
+    triggered: obj.triggered,
+    reason: typeof obj.reason === "string" ? obj.reason : null,
+  };
+}
+
 interface UseFeedReturn {
   items: FeedItem[];
   loading: boolean;
@@ -94,13 +116,14 @@ interface UseFeedReturn {
   mode: "db" | "live";
   lastIngestAt: string | null;
   refresh: () => void;
+  refreshState: "idle" | "collecting" | "fresh";
 }
 
-// Exception to 50-line rule: 10 state variables + 1 ref + 3 fetch callbacks
-// + 2 effects make further reduction below 50 counterproductive. Pure
-// validation helpers (validateApiResponse, validateDbResponse) are already
-// extracted above; remaining code is React state/effect wiring that must
-// stay co-located with the hook.
+// Exception to 50-line rule: 11 state variables + 2 refs + 4 callbacks + 3
+// effects make further reduction below 50 counterproductive. Pure
+// validation helpers (validateApiResponse, validateDbResponse,
+// validateTickResponse) are already extracted above; remaining code is
+// React state/effect wiring that must stay co-located with the hook.
 export function useFeed(): UseFeedReturn {
   const [items, setItems] = useState<FeedItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,7 +135,9 @@ export function useFeed(): UseFeedReturn {
   const [feedDiagnostics, setFeedDiagnostics] = useState<FeedDiagnostic[]>([]);
   const [mode, setMode] = useState<"db" | "live">("live");
   const [lastIngestAt, setLastIngestAt] = useState<string | null>(null);
+  const [refreshState, setRefreshState] = useState<"idle" | "collecting" | "fresh">("idle");
   const tickFiredRef = useRef(false);
+  const refreshTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Tries the DB-backed read path first. Returns false (and warns) on a
   // 503 (no data yet), any other non-2xx, a malformed body, or a network
@@ -199,6 +224,60 @@ export function useFeed(): UseFeedReturn {
     return () => clearTimeout(timeoutId);
   }, [mode, lastIngestAt, fetchFeed]);
 
+  // Clears any refetches scheduled by refresh() below on unmount — those
+  // timers are set from a click handler, not an effect, so there's no
+  // effect-return cleanup already covering them.
+  useEffect(() => {
+    return () => refreshTimeoutsRef.current.forEach(clearTimeout);
+  }, []);
+
+  // Fire-and-forget from the caller's perspective (a UI click handler can't
+  // await); every path below handles its own errors, so there's nothing
+  // left for a caller to catch. Live mode just re-fetches, unchanged from
+  // before. Db mode makes the click actually trigger collection instead of
+  // re-reading whatever the last cron run left behind.
+  const refresh = useCallback(async () => {
+    if (mode !== "db") {
+      await fetchFeed();
+      return;
+    }
+
+    refreshTimeoutsRef.current.forEach(clearTimeout);
+    refreshTimeoutsRef.current = [];
+
+    try {
+      const res = await fetch("/api/tick?manual=1", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const tick = validateTickResponse(await res.json());
+      if (!tick) throw new Error("malformed /api/tick response");
+
+      if (tick.triggered || tick.reason === "locked") {
+        // /api/articles sits behind a CDN edge cache (s-maxage=60), so a
+        // refetch at 30s can still return pre-collection data — the 90s
+        // refetch is the one guaranteed to land after the edge cache has
+        // rolled over. Same schedule whether this call started the run or
+        // another caller already held the lock: the user can't tell those
+        // apart, and both mean a run is in flight right now.
+        setRefreshState("collecting");
+        const first = setTimeout(fetchFeed, MANUAL_TICK_FIRST_REFETCH_MS);
+        const second = setTimeout(() => {
+          fetchFeed();
+          setRefreshState("idle");
+        }, TICK_REFRESH_DELAY_MS);
+        refreshTimeoutsRef.current = [first, second];
+      } else if (tick.reason === "fresh") {
+        await fetchFeed();
+        setRefreshState("fresh");
+        refreshTimeoutsRef.current = [setTimeout(() => setRefreshState("idle"), FRESH_STATUS_DISPLAY_MS)];
+      } else {
+        await fetchFeed();
+      }
+    } catch (err) {
+      console.warn("[useSources] /api/tick?manual=1 failed, falling back to a plain refetch", err);
+      await fetchFeed();
+    }
+  }, [mode, fetchFeed]);
+
   return {
     items,
     loading,
@@ -210,6 +289,7 @@ export function useFeed(): UseFeedReturn {
     feedDiagnostics,
     mode,
     lastIngestAt,
-    refresh: fetchFeed,
+    refresh,
+    refreshState,
   };
 }

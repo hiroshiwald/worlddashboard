@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   isRecent,
   tryAcquireLock,
+  selectFreshnessThreshold,
   FRESHNESS_THRESHOLD_MS,
   LOCK_THRESHOLD_MS,
+  MANUAL_FRESHNESS_THRESHOLD_MS,
 } from "../tick";
 import type { Sql, SqlRow } from "../db";
 
@@ -52,6 +54,27 @@ describe("isRecent", () => {
 describe("threshold constants", () => {
   it("LOCK_THRESHOLD_MS is a whole number of minutes (the SQL interval divides it exactly)", () => {
     expect(LOCK_THRESHOLD_MS % 60_000).toBe(0);
+  });
+
+  it("MANUAL_FRESHNESS_THRESHOLD_MS matches LOCK_THRESHOLD_MS (the lock is the real abuse ceiling)", () => {
+    expect(MANUAL_FRESHNESS_THRESHOLD_MS).toBe(LOCK_THRESHOLD_MS);
+  });
+});
+
+describe("selectFreshnessThreshold", () => {
+  it("selects the 2h passive threshold when manual is false", () => {
+    expect(selectFreshnessThreshold(false)).toBe(FRESHNESS_THRESHOLD_MS);
+  });
+
+  it("selects the 10min manual threshold when manual is true", () => {
+    expect(selectFreshnessThreshold(true)).toBe(MANUAL_FRESHNESS_THRESHOLD_MS);
+  });
+
+  it("a timestamp stale under the manual threshold but fresh under the passive one resolves differently per mode", () => {
+    const now = NOW;
+    const timestamp = minutesBefore(now, 15);
+    expect(isRecent(timestamp, now, selectFreshnessThreshold(true))).toBe(false);
+    expect(isRecent(timestamp, now, selectFreshnessThreshold(false))).toBe(true);
   });
 });
 

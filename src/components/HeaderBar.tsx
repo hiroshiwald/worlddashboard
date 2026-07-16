@@ -25,6 +25,7 @@ interface HeaderBarProps {
   t: ThemeClasses;
   mode?: "db" | "live";
   lastIngestAt?: string | null;
+  refreshState?: "idle" | "collecting" | "fresh";
   candidateCount: number;
 }
 
@@ -32,6 +33,12 @@ const STALE_INGEST_MS = 3 * 60 * 60 * 1000;
 
 function isStaleIngest(lastIngestAt: string): boolean {
   return Date.now() - new Date(lastIngestAt).getTime() > STALE_INGEST_MS;
+}
+
+function refreshLabel(refreshState?: "idle" | "collecting" | "fresh"): string {
+  if (refreshState === "collecting") return "Collecting… ~1 min";
+  if (refreshState === "fresh") return "Up to date";
+  return "Refresh";
 }
 
 // Single freshness badge: "LIVE MODE" when serving the live feed fetch,
@@ -131,6 +138,7 @@ export default function HeaderBar({
   t,
   mode,
   lastIngestAt,
+  refreshState,
   candidateCount,
 }: HeaderBarProps) {
   return (
@@ -197,7 +205,7 @@ export default function HeaderBar({
 
           <button
             onClick={refresh}
-            disabled={loading}
+            disabled={loading || refreshState === "collecting"}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-40 ${t.btnBg}`}
           >
             <svg
@@ -213,7 +221,7 @@ export default function HeaderBar({
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
               />
             </svg>
-            <span className="hidden sm:inline">Refresh</span>
+            <span className="hidden sm:inline">{refreshLabel(refreshState)}</span>
           </button>
         </div>
       </div>

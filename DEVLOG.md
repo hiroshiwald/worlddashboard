@@ -1,5 +1,83 @@
 # World Dashboard Development Log
 
+## 2026-07-16 — Honest Refresh button: manual tick mode + client refreshState
+
+**What changed**: the header Refresh button previously only re-read `/api/articles`
+in db mode — a database read, not a collection trigger — so clicking it changed
+nothing unless the hourly cron happened to have already run. `/api/tick` now
+accepts an optional `?manual=1` query flag that lowers its freshness threshold from
+2h to 10 minutes (matching the anti-stampede lock, which stays the real rate
+limit), and `useSources.ts`'s `refresh()` uses it in db mode to actually trigger
+collection, surfacing progress through a new `refreshState`.
+
+**What it affected**:
+- `src/lib/server/tick.ts`: `MANUAL_FRESHNESS_THRESHOLD_MS` (an alias for
+  `LOCK_THRESHOLD_MS`, so the two can't drift apart) and
+  `selectFreshnessThreshold(manual)` — a pure function picking the 2h passive
+  window or the 10min manual one.
+- `src/app/api/tick/route.ts`: POST/GET now take a `NextRequest` (previously
+  neither read anything from the request at all) solely to check `?manual=1`
+  (exact string match; any other value, param, or no query at all falls back
+  to the passive threshold). No body is read, still. `isManualRequest`
+  extracts the flag; `tick(manual: boolean)` picks the threshold via
+  `selectFreshnessThreshold` instead of the hardcoded constant.
+- `src/hooks/useSources.ts`: `refresh()` now branches on `mode`. Live mode is
+  byte-for-byte the same call it always was (`fetchFeed`). Db mode POSTs
+  `/api/tick?manual=1`, validates the JSON body (`validateTickResponse`, same
+  style as the existing `validateDbResponse`), and maps `{triggered, reason}`
+  onto a new exported `refreshState: 'idle' | 'collecting' | 'fresh'`:
+  `triggered` or `reason:"locked"` (another caller's run is already in
+  flight — indistinguishable to this user, handled the same) both mean
+  `'collecting'` plus two scheduled `/api/articles` refetches (~30s, ~90s —
+  two because `/api/articles` sits behind a 60s CDN edge cache, so the first
+  can still race it); `reason:"fresh"` means one immediate refetch and a
+  brief `'fresh'` badge; a failed fetch, non-ok response, or malformed body
+  all warn and fall back to exactly one plain refetch, matching the old
+  behavior. Scheduled timeouts live in a ref, cleared at the start of each
+  new `refresh()` call and on unmount (a new tiny effect — these timers are
+  set from a click handler, not an effect, so nothing else was clearing
+  them).
+- `src/components/HeaderBar.tsx`: new optional `refreshState` prop; the
+  Refresh button is now also disabled while `'collecting'`, and its label
+  reads "Collecting… ~1 min" / "Up to date" / "Refresh" via a small pure
+  `refreshLabel` helper. No other styling changed.
+- `src/hooks/useDashboardTable.ts`, `src/components/DashboardTable.tsx`:
+  plumb `refreshState` through from `useFeed()` to `HeaderBar`.
+- Tests: `tick.test.ts` (+4), `tick/route.test.ts` (+10, plus the 6
+  pre-existing tests updated to pass a `NextRequest` now that POST/GET take
+  one), `useSources.test.ts` (+6). 466 → 486, all green.
+- MANIFEST: updated the `tick.ts`/`route.ts`/`useSources.ts`/`HeaderBar.tsx`
+  rows, the three touched test-file rows, and extended the "dashboard
+  self-heals staleness on view" invariant with a new bullet for the manual
+  path.
+
+**Gotchas**:
+- `getSql()` (`db.ts`) uses `@neondatabase/serverless`'s HTTP-only driver,
+  which cannot reach a plain local Postgres (only the integration tests'
+  separate `pg`-based `pg-sql.ts` adapter can) — so a real DB-backed `next
+  dev` session isn't possible in this sandbox. Verified the actual browser
+  behavior anyway by running the real dev server and a real Chromium
+  (Playwright) against it, intercepting only `/api/articles` and
+  `/api/tick*` at the network layer so the real component tree, real click
+  handling, and real `setTimeout`s all still ran. Confirmed: the button
+  goes disabled + "Collecting… ~1 min" immediately on a `triggered`/`locked`
+  response and stays that way until the 90s refetch (a second `/api/articles`
+  landed at +30.0s, a third at +90.0s, then the button re-enabled as
+  "Refresh" — both within ~10ms of target); the disabled state is real, not
+  just visual (Playwright's own actionability check refused to click it); a
+  `reason:"fresh"` response refetches once immediately, shows "Up to date"
+  (not disabled), and reverts after ~5s; an aborted tick request hit the
+  exact expected `console.warn` and fell back to one plain refetch.
+- Noticed but left alone (matches the spec as given): `refreshState` only
+  changes once the `/api/tick` response arrives, and that response doesn't
+  return until `runIngest` has already finished server-side (the route
+  awaits it fully before replying) — so on a slow real ingest, the button
+  shows nothing different from idle for the whole call and only flips to
+  "Collecting…" right as the work is actually wrapping up. Tasks 2/3 both
+  key `refreshState` off the parsed response, not the in-flight request, so
+  this is the specified behavior, not a bug — flagging in case a later task
+  wants an in-flight indicator too.
+
 ## 2026-07-16 — Entity ontology upgrade: 15-type schema, directed typed relations, famous-entity auto-accept
 
 **What changed**: expanded `entities.type` from 5 coarse types to a 15-type working
