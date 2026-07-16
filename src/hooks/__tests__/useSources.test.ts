@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import { useFeed } from "../useSources";
 
 function mockArticlesResponse(lastIngestAt: string | null) {
@@ -8,6 +8,10 @@ function mockArticlesResponse(lastIngestAt: string | null) {
     ok: true,
     json: async () => ({ items: [], lastIngestAt, count: 0 }),
   });
+}
+
+function mockTickResponse(body: unknown) {
+  return Promise.resolve({ ok: true, json: async () => body });
 }
 
 function stubFetchRouter(handlers: Record<string, () => Promise<unknown>>) {
@@ -18,6 +22,10 @@ function stubFetchRouter(handlers: Record<string, () => Promise<unknown>>) {
   });
   vi.stubGlobal("fetch", fn);
   return fn;
+}
+
+function countCalls(fetchMock: ReturnType<typeof stubFetchRouter>, url: string): number {
+  return fetchMock.mock.calls.filter(([calledUrl]) => calledUrl === url).length;
 }
 
 describe("useFeed tick trigger", () => {
@@ -86,6 +94,164 @@ describe("useFeed tick trigger", () => {
     expect(result.current.mode).toBe("db");
     const tickCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/tick");
     expect(tickCalls).toHaveLength(1);
+
+    unmount();
+  });
+});
+
+// A 30-minute-old lastIngestAt is deliberately used throughout: fresh enough
+// (< 2h) that the passive self-heal effect in the "tick trigger" suite above
+// never fires, so every /api/tick?manual=1 call below comes solely from the
+// explicit refresh() under test.
+describe("useFeed refresh()", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("db mode, triggered:true: sets refreshState 'collecting' and schedules refetches at ~30s and ~90s", async () => {
+    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const fetchMock = stubFetchRouter({
+      "/api/articles": () => mockArticlesResponse(freshIso),
+      "/api/tick?manual=1": () => mockTickResponse({ triggered: true, inserted: 2 }),
+    });
+
+    const { result, unmount } = renderHook(() => useFeed());
+    await waitFor(() => expect(result.current.mode).toBe("db"));
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.refreshState).toBe("collecting");
+    expect(countCalls(fetchMock, "/api/tick?manual=1")).toBe(1);
+    const delays = setTimeoutSpy.mock.calls.map(([, delay]) => delay);
+    expect(delays).toContain(30_000);
+    expect(delays).toContain(90_000);
+
+    unmount();
+  });
+
+  it("db mode, reason:'locked': treated like collecting (same delayed-refetch schedule)", async () => {
+    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const fetchMock = stubFetchRouter({
+      "/api/articles": () => mockArticlesResponse(freshIso),
+      "/api/tick?manual=1": () => mockTickResponse({ triggered: false, reason: "locked" }),
+    });
+
+    const { result, unmount } = renderHook(() => useFeed());
+    await waitFor(() => expect(result.current.mode).toBe("db"));
+    const setTimeoutSpy = vi.spyOn(global, "setTimeout");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.refreshState).toBe("collecting");
+    const delays = setTimeoutSpy.mock.calls.map(([, delay]) => delay);
+    expect(delays).toContain(30_000);
+    expect(delays).toContain(90_000);
+
+    unmount();
+  });
+
+  it("db mode, reason:'fresh': refetches /api/articles once immediately and shows refreshState 'fresh'", async () => {
+    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const fetchMock = stubFetchRouter({
+      "/api/articles": () => mockArticlesResponse(freshIso),
+      "/api/tick?manual=1": () => mockTickResponse({ triggered: false, reason: "fresh" }),
+    });
+
+    const { result, unmount } = renderHook(() => useFeed());
+    await waitFor(() => expect(result.current.mode).toBe("db"));
+    const articlesCallsBefore = countCalls(fetchMock, "/api/articles");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(countCalls(fetchMock, "/api/articles")).toBe(articlesCallsBefore + 1);
+    expect(result.current.refreshState).toBe("fresh");
+    expect(countCalls(fetchMock, "/api/tick?manual=1")).toBe(1);
+
+    unmount();
+  });
+
+  it("db mode: a failed tick request warns and falls back to a single plain refetch", async () => {
+    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const fetchMock = stubFetchRouter({
+      "/api/articles": () => mockArticlesResponse(freshIso),
+      "/api/tick?manual=1": () => Promise.reject(new Error("network down")),
+    });
+
+    const { result, unmount } = renderHook(() => useFeed());
+    await waitFor(() => expect(result.current.mode).toBe("db"));
+    const articlesCallsBefore = countCalls(fetchMock, "/api/articles");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(countCalls(fetchMock, "/api/articles")).toBe(articlesCallsBefore + 1);
+    expect(result.current.refreshState).toBe("idle");
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("/api/tick?manual=1 failed"),
+      expect.anything(),
+    );
+
+    unmount();
+  });
+
+  it("db mode: a non-ok tick response also warns and falls back to a single plain refetch", async () => {
+    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const fetchMock = stubFetchRouter({
+      "/api/articles": () => mockArticlesResponse(freshIso),
+      "/api/tick?manual=1": () => Promise.resolve({ ok: false, status: 500, json: async () => ({}) }),
+    });
+
+    const { result, unmount } = renderHook(() => useFeed());
+    await waitFor(() => expect(result.current.mode).toBe("db"));
+    const articlesCallsBefore = countCalls(fetchMock, "/api/articles");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(countCalls(fetchMock, "/api/articles")).toBe(articlesCallsBefore + 1);
+    expect(result.current.refreshState).toBe("idle");
+
+    unmount();
+  });
+
+  it("live mode: refresh() re-fetches /api/sources directly and never touches /api/tick", async () => {
+    const fetchMock = stubFetchRouter({
+      "/api/articles": () => Promise.resolve({ ok: false, status: 503, json: async () => ({}) }),
+      "/api/sources": () =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: [], fetchedAt: new Date().toISOString(),
+            feedsAttempted: 5, feedsSucceeded: 5, count: 0, feedDiagnostics: [],
+          }),
+        }),
+    });
+
+    const { result, unmount } = renderHook(() => useFeed());
+    await waitFor(() => expect(result.current.mode).toBe("live"));
+    const sourcesCallsBefore = countCalls(fetchMock, "/api/sources");
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(countCalls(fetchMock, "/api/sources")).toBe(sourcesCallsBefore + 1);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/tick"))).toBe(false);
+    expect(result.current.refreshState).toBe("idle");
 
     unmount();
   });

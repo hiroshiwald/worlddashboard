@@ -3,6 +3,16 @@ import type { Sql } from "./db";
 export const FRESHNESS_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
 export const LOCK_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 
+// An explicit user click (?manual=1 on /api/tick) uses the lock window
+// itself as its freshness threshold, not the 2h passive one — so a click
+// almost always triggers a real collection attempt. This is safe because
+// the lock, not the freshness check, is the actual abuse ceiling: at most
+// one ingest run can start per LOCK_THRESHOLD_MS no matter which threshold
+// let it past the freshness gate. Extra attempts are cheap too —
+// persistArticles dedupes by content hash, so a run that finds nothing new
+// does no entity/LLM work.
+export const MANUAL_FRESHNESS_THRESHOLD_MS = LOCK_THRESHOLD_MS;
+
 /** True when `timestamp` is younger than `thresholdMs` relative to `now`.
  * `null` (no data yet) is never recent. Shared by the freshness check (is
  * ingest data stale?) and the lock check (is another tick still running?) —
@@ -10,6 +20,13 @@ export const LOCK_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 export function isRecent(timestamp: Date | null, now: Date, thresholdMs: number): boolean {
   if (timestamp === null) return false;
   return now.getTime() - timestamp.getTime() < thresholdMs;
+}
+
+/** Which freshness threshold governs a tick request: the 10-minute manual
+ * window for an explicit user click, or the 2-hour passive window for the
+ * background page-load self-heal. */
+export function selectFreshnessThreshold(manual: boolean): number {
+  return manual ? MANUAL_FRESHNESS_THRESHOLD_MS : FRESHNESS_THRESHOLD_MS;
 }
 
 function toDate(value: unknown): Date | null {

@@ -19,6 +19,7 @@ interface UseDashboardTableReturn {
   mode: "db" | "live";
   lastIngestAt: string | null;
   refresh: () => void;
+  refreshState: "idle" | "collecting" | "fresh";
   sort: SortConfig;
   categoryFilter: string;
   searchQuery: string;
@@ -129,6 +130,7 @@ export function useDashboardTable(): UseDashboardTableReturn {
   const {
     items, loading, error, fetchedAt,
     feedsAttempted, feedsSucceeded, totalItems, mode, lastIngestAt, refresh,
+    refreshState,
   } = useFeed();
 
   const [sort, setSort] = useState<SortConfig>({ key: "published", direction: "desc" });
@@ -213,6 +215,7 @@ export function useDashboardTable(): UseDashboardTableReturn {
   return {
     items, loading, error, fetchedAt,
     feedsAttempted, feedsSucceeded, totalItems, mode, lastIngestAt, refresh,
+    refreshState,
     sort, categoryFilter, searchQuery, entityFilter, dark, activeTab,
     setSearchQuery, setCategoryFilter, setEntityFilter, setActiveTab,
     categories, filteredItems, sortedItems, t,

@@ -16,7 +16,7 @@ function isItemsDependentTab(activeTab: TabKey): boolean {
 export default function DashboardTable() {
   const {
     items, loading, error, fetchedAt, feedsAttempted, feedsSucceeded, totalItems,
-    mode, lastIngestAt, refresh,
+    mode, lastIngestAt, refresh, refreshState,
     categoryFilter, searchQuery, entityFilter, dark, activeTab,
     setSearchQuery, setCategoryFilter, setEntityFilter, setActiveTab,
     categories, filteredItems, sortedItems, t,
@@ -37,7 +37,7 @@ export default function DashboardTable() {
         totalItems={totalItems} filteredItemCount={filteredItems.length}
         fetchedAt={fetchedAt} loading={loading} refresh={refresh}
         t={t}
-        mode={mode} lastIngestAt={lastIngestAt}
+        mode={mode} lastIngestAt={lastIngestAt} refreshState={refreshState}
         candidateCount={candidateCount}
       />
 
