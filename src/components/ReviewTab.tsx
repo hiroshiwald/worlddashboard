@@ -17,7 +17,11 @@ interface Candidate {
   coEntities: string[];
 }
 
-const TYPE_OPTIONS = ["country", "organization", "region", "person", "other"];
+const TYPE_OPTIONS = [
+  "person", "company", "organization", "government_body", "armed_group",
+  "political_party", "country", "region", "city", "product", "technology",
+  "financial_asset", "disease", "infrastructure", "other",
+];
 
 // Distinguishes "no database configured yet" (a normal, expected state for
 // this app) from a genuine fetch/shape failure, so the UI can show a
@@ -105,7 +109,7 @@ function CandidateCard({ candidate, dark, busy, onAccept, onMerge, onDismiss }: 
           className={`text-xs px-2 py-1.5 border rounded-lg ${inputBg}`}
         >
           {TYPE_OPTIONS.map((opt) => (
-            <option key={opt} value={opt}>{opt}</option>
+            <option key={opt} value={opt}>{opt.replace(/_/g, " ")}</option>
           ))}
         </select>
         <button

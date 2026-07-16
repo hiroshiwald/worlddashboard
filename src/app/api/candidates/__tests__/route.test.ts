@@ -133,6 +133,22 @@ describe("POST /api/candidates", () => {
     expect(res.status).toBe(400);
   });
 
+  it("accepts a new-ontology type (e.g. government_body) rejected by the old 5-type whitelist", async () => {
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("SELECT name_norm, display_name, type_hint")) {
+        return [{
+          name_norm: "kestrel basin", display_name: "Kestrel Basin", type_hint: "government_body",
+          first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: "2026-07-10T00:00:00Z",
+        }];
+      }
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "1" }];
+      return [];
+    });
+    currentSql = sql;
+    const res = await POST(postRequest({ nameNorm: "kestrel basin", action: "accept", type: "government_body" }));
+    expect(res.status).toBe(200);
+  });
+
   it("400s merge without mergeInto", async () => {
     const res = await POST(postRequest({ nameNorm: "kestrel basin", action: "merge" }));
     expect(res.status).toBe(400);

@@ -3,6 +3,7 @@ import {
   processNewArticles,
   rollupHourlyMentions,
   rollupEntityEdges,
+  rollupRelations,
   rollupCandidate,
   dedupeMentions,
   chunkArticles,
@@ -90,6 +91,8 @@ describe("selectUnprocessedHeads (via processNewArticles)", () => {
       newEntities: 0,
       candidatesTouched: 0,
       llm: { used: false, articles: 0, monthCostUsd: 0 },
+      entities: { autoAccepted: 0 },
+      relations: { written: 0 },
     });
     expect(calls).toHaveLength(1);
   });
@@ -195,6 +198,70 @@ describe("rollupEntityEdges", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].firstSeenAt).toBe("2026-07-14T09:00:00.000Z");
     expect(rows[0].lastSeenAt).toBe("2026-07-15T09:00:00.000Z");
+  });
+});
+
+describe("rollupRelations", () => {
+  type Relation = "acquisition" | "investment";
+  function occurrence(overrides: Partial<{ sourceId: number; targetId: number; relation: Relation; articleId: number; arrivalAt: Date }>) {
+    return {
+      sourceId: 10,
+      targetId: 20,
+      relation: "acquisition" as Relation,
+      articleId: 1,
+      arrivalAt: new Date("2026-07-15T09:00:00Z"),
+      ...overrides,
+    };
+  }
+
+  it("rolls up a single occurrence into one row with article_count 1", () => {
+    const rows = rollupRelations([occurrence({})]);
+    expect(rows).toEqual([{
+      sourceId: 10, targetId: 20, relation: "acquisition",
+      firstSeenAt: "2026-07-15T09:00:00.000Z", lastSeenAt: "2026-07-15T09:00:00.000Z",
+      articleCount: 1, evidenceArticleId: 1,
+    }]);
+  });
+
+  it("keeps direction distinct: A->B and B->A never merge even for the same relation type", () => {
+    const rows = rollupRelations([
+      occurrence({ sourceId: 10, targetId: 20 }),
+      occurrence({ sourceId: 20, targetId: 10 }),
+    ]);
+    expect(rows).toHaveLength(2);
+  });
+
+  it("keeps distinct relation types between the same pair as separate rows", () => {
+    const rows = rollupRelations([
+      occurrence({ relation: "acquisition" }),
+      occurrence({ relation: "investment" }),
+    ]);
+    expect(rows).toHaveLength(2);
+  });
+
+  it("aggregates article_count and tracks first/last seen across multiple occurrences", () => {
+    const rows = rollupRelations([
+      occurrence({ articleId: 1, arrivalAt: new Date("2026-07-15T09:00:00Z") }),
+      occurrence({ articleId: 2, arrivalAt: new Date("2026-07-16T09:00:00Z") }),
+      occurrence({ articleId: 3, arrivalAt: new Date("2026-07-14T09:00:00Z") }),
+    ]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].articleCount).toBe(3);
+    expect(rows[0].firstSeenAt).toBe("2026-07-14T09:00:00.000Z");
+    expect(rows[0].lastSeenAt).toBe("2026-07-16T09:00:00.000Z");
+  });
+
+  it("picks the latest-arriving article as evidence, regardless of input order", () => {
+    const rows = rollupRelations([
+      occurrence({ articleId: 1, arrivalAt: new Date("2026-07-16T09:00:00Z") }),
+      occurrence({ articleId: 2, arrivalAt: new Date("2026-07-17T09:00:00Z") }), // latest
+      occurrence({ articleId: 3, arrivalAt: new Date("2026-07-15T09:00:00Z") }),
+    ]);
+    expect(rows[0].evidenceArticleId).toBe(2);
+  });
+
+  it("returns an empty array for no occurrences", () => {
+    expect(rollupRelations([])).toEqual([]);
   });
 });
 
@@ -490,8 +557,8 @@ describe("LLM extraction path (entity-ingest wiring)", () => {
   });
 
   it("unions a successful LLM result with the dictionary layer only, threading roleContext into contexts and same-article resolutions into co_entities", async () => {
-    vi.mocked(extractEntitiesBatch).mockResolvedValue(
-      new Map([
+    vi.mocked(extractEntitiesBatch).mockResolvedValue({
+      candidates: new Map([
         [
           0,
           [
@@ -501,11 +568,13 @@ describe("LLM extraction path (entity-ingest wiring)", () => {
               typeHint: "person" as const,
               layer: "llm" as const,
               roleContext: "former IRGC commander",
+              prominence: "known" as const,
             },
           ],
         ],
       ]),
-    );
+      relations: new Map(),
+    });
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("FROM articles a")) return [headRow];
       if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
@@ -568,6 +637,159 @@ describe("LLM extraction path (entity-ingest wiring)", () => {
   });
 });
 
+describe("famous-entity auto-accept and relations persistence (entity-ingest wiring)", () => {
+  const headRow = {
+    id: "1",
+    title: "Hyundai announces new plans today.",
+    summary: "",
+    published_at: "2026-07-15T09:00:00Z",
+    first_seen_at: "2026-07-15T09:00:00Z",
+    source_name: "Source A",
+  };
+
+  beforeEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    vi.mocked(extractEntitiesBatch).mockReset();
+  });
+
+  it("auto-accepts an unresolved 'famous' LLM candidate straight into entities as tracked, skipping entity_candidates", async () => {
+    vi.mocked(extractEntitiesBatch).mockResolvedValue({
+      candidates: new Map([
+        [0, [{ display: "Hyundai", norm: "hyundai", typeHint: "company" as const, layer: "llm" as const, prominence: "famous" as const }]],
+      ]),
+      relations: new Map(),
+    });
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [headRow];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "9", canonical_name: "Hyundai" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.newEntities).toBe(1);
+    expect(stats.entities.autoAccepted).toBe(1);
+    expect(stats.candidatesTouched).toBe(0);
+
+    const insertCall = findCall(calls, "INSERT INTO entities");
+    expect(insertCall!.values[0]).toEqual(["Hyundai"]);
+    expect(insertCall!.values[1]).toEqual(["company"]);
+    expect(findCall(calls, "INSERT INTO entity_candidates")).toBeUndefined();
+  });
+
+  it("keeps a 'known' or 'obscure' LLM candidate in the review queue instead of auto-accepting it", async () => {
+    vi.mocked(extractEntitiesBatch).mockResolvedValue({
+      candidates: new Map([
+        [0, [{ display: "Someone Regional", norm: "someone regional", typeHint: "person" as const, layer: "llm" as const, prominence: "obscure" as const }]],
+      ]),
+      relations: new Map(),
+    });
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [headRow];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.entities.autoAccepted).toBe(0);
+    expect(stats.newEntities).toBe(0);
+    expect(stats.candidatesTouched).toBe(1);
+    const payload = JSON.parse(findCall(calls, "INSERT INTO entity_candidates")!.values[0] as string);
+    expect(payload.some((p: { name_norm: string }) => p.name_norm === "someone regional")).toBe(true);
+  });
+
+  it("persists a relation once both endpoints resolve in the same run, including same-run famous auto-accepts", async () => {
+    vi.mocked(extractEntitiesBatch).mockResolvedValue({
+      candidates: new Map([
+        [0, [
+          { display: "Hyundai", norm: "hyundai", typeHint: "company" as const, layer: "llm" as const, prominence: "famous" as const },
+          { display: "Boston Dynamics", norm: "boston dynamics", typeHint: "company" as const, layer: "llm" as const, prominence: "famous" as const },
+        ]],
+      ]),
+      relations: new Map([[0, [{ source: "Hyundai", target: "Boston Dynamics", relation: "acquisition" as const }]]]),
+    });
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [headRow];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) {
+        return [{ id: "9", canonical_name: "Hyundai" }, { id: "10", canonical_name: "Boston Dynamics" }];
+      }
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.entities.autoAccepted).toBe(2);
+    expect(stats.relations.written).toBe(1);
+    const relationsInsertCall = findCall(calls, "INSERT INTO entity_relations");
+    expect(relationsInsertCall).toBeDefined();
+    expect(relationsInsertCall!.values[0]).toEqual([9]);
+    expect(relationsInsertCall!.values[1]).toEqual([10]);
+    expect(relationsInsertCall!.values[2]).toEqual(["acquisition"]);
+  });
+
+  it("drops a relation this run when one endpoint doesn't resolve, but still auto-accepts the resolved endpoint", async () => {
+    vi.mocked(extractEntitiesBatch).mockResolvedValue({
+      candidates: new Map([
+        [0, [
+          { display: "Hyundai", norm: "hyundai", typeHint: "company" as const, layer: "llm" as const, prominence: "famous" as const },
+          { display: "Boston Dynamics", norm: "boston dynamics", typeHint: "company" as const, layer: "llm" as const, prominence: "obscure" as const },
+        ]],
+      ]),
+      relations: new Map([[0, [{ source: "Hyundai", target: "Boston Dynamics", relation: "acquisition" as const }]]]),
+    });
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [headRow];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "9", canonical_name: "Hyundai" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.entities.autoAccepted).toBe(1);
+    expect(stats.relations.written).toBe(0);
+    expect(findCall(calls, "INSERT INTO entity_relations")).toBeUndefined();
+  });
+
+  it("drops a degenerate self-relation when both endpoints resolve to the same entity via alias overlap", async () => {
+    vi.mocked(extractEntitiesBatch).mockResolvedValue({
+      candidates: new Map([
+        [0, [
+          { display: "Hyundai", norm: "hyundai", typeHint: "company" as const, layer: "llm" as const, prominence: "known" as const },
+          { display: "Hyundai Motor Group", norm: "hyundai motor group", typeHint: "company" as const, layer: "llm" as const, prominence: "known" as const },
+        ]],
+      ]),
+      relations: new Map([[0, [{ source: "Hyundai", target: "Hyundai Motor Group", relation: "partnership" as const }]]]),
+    });
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles a")) return [headRow];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) {
+        return [{ id: "50", canonical_name: "Hyundai Motor Group", type: "company", aliases: ["Hyundai"] }];
+      }
+      if (call.query.includes("INSERT INTO entities")) return [];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.relations.written).toBe(0);
+    expect(findCall(calls, "INSERT INTO entity_relations")).toBeUndefined();
+  });
+});
+
 describe("LLM wave concurrency and wall-clock deadline (entity-ingest wiring)", () => {
   function makeHeads(count: number) {
     return Array.from({ length: count }, (_, i) => ({
@@ -610,7 +832,7 @@ describe("LLM wave concurrency and wall-clock deadline (entity-ingest wiring)", 
       maxInFlight = Math.max(maxInFlight, inFlight);
       await Promise.resolve();
       inFlight -= 1;
-      return new Map(articles.map((a) => [a.index, []]));
+      return { candidates: new Map(articles.map((a) => [a.index, []])), relations: new Map() };
     });
 
     await processNewArticles(sql);
@@ -631,7 +853,7 @@ describe("LLM wave concurrency and wall-clock deadline (entity-ingest wiring)", 
     vi.mocked(extractEntitiesBatch).mockImplementation(async (_sql, _budget, articles) => {
       // Simulate a wave slow enough to blow the wall-clock budget.
       vi.advanceTimersByTime(25_000);
-      return new Map(articles.map((a) => [a.index, []]));
+      return { candidates: new Map(articles.map((a) => [a.index, []])), relations: new Map() };
     });
 
     const stats = await processNewArticles(sql, deadline);
