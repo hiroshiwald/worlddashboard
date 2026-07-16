@@ -1,6 +1,5 @@
 import dynamic from "next/dynamic";
 import { FeedItem } from "@/lib/types";
-import IntelTab from "../IntelTab";
 
 const BriefTab = dynamic(() => import("../BriefTab"), {
   ssr: false,
@@ -38,15 +37,6 @@ const SignalsTab = dynamic(() => import("../SignalsTab"), {
   ),
 });
 
-const DiscoveryTab = dynamic(() => import("../DiscoveryTab"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center h-full">
-      <p className="text-sm text-gray-400">Loading discovery view...</p>
-    </div>
-  ),
-});
-
 const ReviewTab = dynamic(() => import("../ReviewTab"), {
   ssr: false,
   loading: () => (
@@ -78,12 +68,8 @@ export default function TabContent({ activeTab, items, filteredItems, dark, onEn
       return <MapTab items={filteredItems} dark={dark} onEntityClick={onEntityClick} />;
     case "network":
       return <NetworkTab items={items} dark={dark} onEntityClick={onEntityClick} />;
-    case "intel":
-      return <IntelTab items={items} dark={dark} onEntityClick={onEntityClick} />;
     case "signals":
       return <SignalsTab items={items} dark={dark} onEntityClick={onEntityClick} />;
-    case "discovery":
-      return <DiscoveryTab items={items} dark={dark} onEntityClick={onEntityClick} />;
     default:
       return null;
   }

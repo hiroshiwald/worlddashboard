@@ -115,32 +115,6 @@ export interface NoveltyReason {
   score: number;
 }
 
-export interface Situation {
-  id: string;
-  title: string;
-  entities: string[];
-  articleCount: number;
-  sourceCount: number;
-  articles: SituationArticle[];
-  urgency: UrgencyLevel;
-  tempo: "accelerating" | "steady" | "fading" | "new";
-  noveltyScore: number;
-  noveltyReasons: NoveltyReason[];
-  sentiment: number;
-  firstSeen: string;
-  latestArticle: SituationArticle;
-  categorySpread: number;
-}
-
-export interface SituationArticle {
-  id: string;
-  title: string;
-  sourceName: string;
-  published: string;
-  link: string;
-  sourceCategory: string;
-}
-
 export interface EdgeHistoryEntry {
   firstSeen: string;
   lastSeen: string;

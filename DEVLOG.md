@@ -1,5 +1,163 @@
 # World Dashboard Development Log
 
+## 2026-07-15 — Deviation-based cross_category/sentiment detectors; retire Intel + Discovery tabs
+
+**Why**: in production, `cross_category` fired perpetually as "CROSS-CATEGORY: IRAN (7
+CATEGORIES)" and `sentiment` as "NEGATIVE COVERAGE: BLACK SEA" — not because anything had
+changed, but because a prominent entity ALWAYS spans many categories and active-war
+coverage is ALWAYS negative. An absolute level is never a signal; only a deviation from
+an entity's own baseline is. Both detectors also ran unconditionally during system
+warm-up (an exemption that was itself a design error — their new baselines need real
+history exactly as much as surge/first_seen/novel_edge do).
+
+- **`src/lib/server/detectors.ts`**:
+  - `scoreCrossCategory(categoryCount)` → `scoreCategorySpread(categoryCount24h,
+    baselineAvgCategories, baselineActiveDays)`. Baseline = each tracked entity's average
+    distinct article category count per ACTIVE day (a day with ≥1 mention) over the
+    trailing 14 days excluding the last 24h, from `article_entities` × cluster-head
+    `articles` (new `loadCategoryBaseline` query, a day-then-entity two-level GROUP BY).
+    Requires ≥3 active baseline days else the entity is skipped entirely. Fires when
+    `categoryCount24h >= 4` AND `excess = categoryCount24h - baselineAvgCategories >= 2`;
+    severity advisory/warning/critical at excess 2/3/4+; `confidence = min(1, excess/4)`.
+    Evidence now carries `categoryCount24h`, `baselineAvgCategories`, `excess` (was just
+    `categoryCount`). Title: `"Category spread: {name} ({count} categories, usually
+    ~{avg})"` (was `"Cross-category: {name} ({count} categories)"`).
+  - `scoreSentimentDeterioration(mentions, avgSentiment)` → `scoreSentimentDelta(
+    mentions24h, avg24h, baselineAvg, baselineDays, baselineMentions)`. Baseline = avg
+    sentiment (`sentiment_sum/mentions`) over the same trailing-14-day-excluding-last-24h
+    window from `entity_mentions_hourly` (extended `loadHourlyAgg` with a
+    `baseline_sentiment_sum` column alongside the existing `baseline_sum`/`baseline_days`).
+    Requires ≥3 baseline days with mentions AND ≥10 baseline mentions else skipped. Fires
+    when `mentions24h >= 5` AND `delta = avg24h - baselineAvg <= -0.3` — a DROP from the
+    entity's own norm, not an absolute negative level. Critical at `delta <= -0.5` AND
+    `mentions24h >= 10`, else warning; `confidence = min(1, |delta|*2)`. Evidence now
+    carries `avg24h`, `baselineAvg`, `delta`, `mentions24h` (was `mentions`,
+    `avgSentiment`). Title: `"Tone shift: {name}"` (was `"Negative coverage: {name}"`).
+  - `buildSurgeAndSentiment`'s `anySentimentSignal` guard (skip the whole sentiment pass
+    when every tracked entity's 24h `sentiment_sum` is exactly zero) is kept, unchanged in
+    shape — still needed under the new delta formula, in fact more load-bearing than
+    before (see the post-implementation-review entry below; an earlier pass at this task
+    removed it on the mistaken belief it was now dead code, which the review caught).
+  - `runDetectors` orchestrator simplified: fetches `getSystemEpoch` alone first, and if
+    warm-up is active returns `[]` immediately without running ANY other query (previously
+    every panel query ran regardless, then surge/first_seen/novel_edge results were
+    discarded if warm-up was active). All five detector types are now behind this one
+    gate; the `activeSurge` special-casing is gone since warm-up already short-circuits
+    before surge is ever built. Per-detector minimum-history guards (`baselineDays < 3`,
+    `baselineActiveDays < 3`, `baselineMentions < 10`) stay as defense in depth.
+- **`src/lib/server/__tests__/detectors.test.ts`**: replaced the `scoreCrossCategory`/
+  `scoreSentimentDeterioration` blocks with tests for `scoreCategorySpread`/
+  `scoreSentimentDelta` (threshold/severity/confidence boundaries, cold-start skip, and
+  two named regression cases matching the failure mode above: a steady 6-category entity
+  at zero excess doesn't fire, and a stable-but-always-negative entity at delta≈0 doesn't
+  fire). Added a `runDetectors` test asserting warm-up returns `[]` while every non-epoch
+  query throws if called — proves no history-dependent computation runs during warm-up,
+  not just that the result happens to be empty.
+- **`src/lib/server/__tests__/integration/signal-engine.integration.test.ts`**: replaced
+  the old absolute-count cross-category test (3 categories in 24h, no baseline) with
+  three real-Postgres cases: an ambient entity with a steady 6-category spread across 15
+  days produces NO signal; an entity going from a steady 1-category baseline to 5
+  categories in the last 24h fires critical with `excess=4`; a tone-shift case (stable
+  neutral baseline, sharp 24h drop) fires critical with the correct `delta`.
+- **`src/lib/server/__tests__/integration/warmup-gate.integration.test.ts`**: the day-1-
+  launch test previously asserted `cross_category` fired DURING warm-up (a passing test
+  for what is now known-wrong behavior) — rewritten to assert `runDetectors` returns `[]`
+  during warm-up regardless of a fabricated cross-category-shaped backlog.
+- **Retired the Intel and Discovery tabs** (user-approved: both ran the old in-browser
+  detector engine and are pure noise now). Deleted: `src/components/IntelTab.tsx`,
+  `src/components/intel/` (`IntelSummary.tsx`, `KnownSituationsSection.tsx`,
+  `NovelSection.tsx`, `SituationCard.tsx`, `EntityCard.tsx`, `utils.ts`, `index.ts`),
+  `src/hooks/useIntelTab.ts`, `src/components/DiscoveryTab.tsx`, `src/components/discovery/`
+  (`DiscoveryControls.tsx`, `ScatterPlot.tsx`, `DiscoveryLegend.tsx`, `utils.ts`,
+  `index.ts`), `src/hooks/useDiscoveryTab.ts`. No dedicated test files existed for any of
+  these (`src/components` has no `__tests__` tree), so the test count didn't drop from
+  this half of the task. Removed both tabs from `HeaderBar.tsx`'s `tabs` array and
+  `TabKey` union, the lazy import + switch case in `TabContent.tsx`, and the `TabKey`
+  union in `useDashboardTable.ts`. Remaining tabs: Brief, Feeds, Network, Map, Signals,
+  Review. Also removed the now-dead `setEntityFilter` prop from `HeaderBarProps` (its
+  only call site was the intel-tab-specific `if (tab.key === "intel")` click handler,
+  which is gone with the tab) and its pass-through in `DashboardTable.tsx` — the
+  `entityFilter` state itself is untouched, still used by `EntityFilterBanner`.
+  - **Orphan-module sweep** (situation-builder.ts, novelty-scorer.ts,
+    useEnrichedEntities.ts, signal-storage.ts): only `src/lib/situation-builder.ts`
+    (`buildSituations`) was truly orphaned — its sole importer was `useIntelTab.ts`, gone
+    with the tab. Deleted, no test file existed for it. The other three all survive:
+    `useSignalsTab.ts` → `useEnrichedEntities.ts` → (`novelty-scorer.ts` +
+    `signal-storage.ts`) is the client-side extraction pipeline the surviving Signals
+    tab's watchlist still depends on (`useEnrichedEntities` loads analysis stores,
+    enriches entities via `enrichEntities`/`computeCurrentEdges`, then persists edge
+    history/baselines back through `signal-storage.ts`). Confirmed via grep of every
+    export name from both `@/lib/...` and relative import forms, not just filenames.
+- **MANIFEST.md**: updated the `detectors.ts` row (new function names, deviation-based
+  description); removed all 16 rows for deleted Intel/Discovery/situation-builder files;
+  updated `TabContent.tsx`'s row to the new tab list; added a missing `useEnrichedEntities.ts`
+  row (pre-existing documentation gap, now load-bearing for explaining why the other 3
+  orphan candidates survive); rewrote the "News time vs. watch time, and the system
+  warm-up gate" invariant to state all five detectors share the warm-up gate (was: only
+  three); added a new "Deviation-based cross_category and sentiment" invariant spelling
+  out both baselines and thresholds; added the required invariant verbatim: "No detector
+  fires on an absolute level. Every signal is a deviation from the entity's own baseline,
+  and no history-dependent computation runs during warm-up."; updated Internal Module
+  Dependencies (removed `IntelTab`/`DiscoveryTab`/`useIntelTab`/`useDiscoveryTab` lines,
+  corrected `useSignalsTab`'s dependency line to route through `useEnrichedEntities`).
+- Tests: baseline before this task was 398 (368 unit + 30 integration, `TEST_DATABASE_URL`
+  set) — not the 392 assumed going in; measured directly by stashing this task's changes
+  and running both configurations before restoring. After this task: 410 (30 test files,
+  all passing). Net +12: detectors.test.ts unit tests went from 6 (`scoreCrossCategory`
+  ×2, `scoreSentimentDeterioration` ×4) to 15 (`scoreCategorySpread` ×6,
+  `scoreSentimentDelta` ×9) plus 1 new all-silent-during-warmup test (+10); the two
+  integration test rewrites were roughly 1-for-1 (cross-category test ×1 → ×2 new cases,
+  1 sentiment case added, warmup-gate test count unchanged at ×1) (+2); zero component
+  tests existed for Intel/Discovery to remove, so the tab retirement contributed no
+  reduction. `npx tsc --noEmit` clean, `npm run build` clean.
+- **Gotcha**: local Postgres 16 was installed but stopped and had no password set for
+  `postgres`; matched CI's service container exactly (`ALTER USER postgres WITH PASSWORD
+  'test'`, `test` database, `TEST_DATABASE_URL=postgresql://postgres:test@localhost:5432/test`)
+  before running integration tests, per the established pattern from the 2026-07-15 CI
+  workflow entry below.
+- **Post-implementation review** (5-angle adversarial pass over the full diff before
+  commit): most-severe finding was a real regression in a first draft of this task — that
+  draft had removed `buildSurgeAndSentiment`'s `anySentimentSignal` guard on the reasoning
+  that the new delta formula made it dead code (an unpopulated-sentiment entity computes
+  `delta ≈ 0` and never fires). That reasoning only holds when BOTH the 24h window and the
+  baseline are zero. If a sentiment-pipeline outage zeroes only the current 24h window
+  while an entity's 14-day baseline is genuinely positive (`baselineAvg > 0.3`, ordinary
+  for upbeat-leaning coverage), `delta = 0 - baselineAvg` crosses the fire threshold on
+  every affected entity simultaneously — a signal storm caused by a data gap, arguably
+  worse than the single-entity absolute-level false positives this whole task exists to
+  fix, and exactly the class of bug integration tests seeded with a single entity's data
+  wouldn't surface (the guard triggers on cross-entity panel shape). Restored the guard
+  unchanged, and added a real-Postgres regression test (`signal-engine.integration.test.ts`,
+  "skips the whole sentiment pass when every tracked entity's 24h sentiment_sum is zero")
+  that seeds exactly this baseline-positive/24h-zero shape and asserts silence.
+  The review also surfaced two more orphans one level deeper than the task's 4 named candidates
+  — `isKnownSituation` (`src/lib/novelty-scorer.ts`) and the `Situation`/`SituationArticle`
+  interfaces (`src/lib/types.ts`) had zero remaining callers/references anywhere in `src/`
+  once `useIntelTab.ts` (their only consumer) was gone; deleted both, along with the now-
+  stale MANIFEST.md "Situation clustering threshold" invariant that described the deleted
+  `situation-builder.ts`'s behavior. Also fixed: `detectors.ts` was calling
+  `groupArticlesByEntity` on the identical 24h `articleRows` twice (once in
+  `buildSurgeAndSentiment`, once in `detectCrossCategory`) — `runDetectors` now groups
+  once and passes the map to both; a `signal-store.test.ts` fixture still used the
+  pre-rename evidence field name `categoryCount` (harmless — `loadSignals` treats evidence
+  as opaque — but misleading to a reader), updated to `categoryCount24h`. Two other
+  findings (SQL baseline-window literals duplicated between `loadHourlyAgg` and
+  `loadCategoryBaseline` rather than sharing a constant; day-vs-hour `INTERVAL` DST
+  handling in the same queries) were left as-is: both pre-date this diff's pattern
+  (`loadHourlyAgg` already hardcoded its window disconnected from `BASELINE_WINDOW_DAYS`;
+  every existing detector query already mixes hour/day intervals the same way) and fixing
+  them would mean introducing a SQL-fragment-sharing convention this codebase doesn't use
+  anywhere else, for a boundary case with no reproduction evidence.
+- Also from the review: `runDetectors`'s `const daysSinceEpoch = epoch ? ... : 0` fallback
+  was flagged as provably-dead-but-silent — `computeWarmupState` only returns
+  `active:false` when `epoch` is non-null, so by the time that line runs (past the
+  `warmup.active` early return) the `: 0` branch can never execute; TypeScript just can't
+  see that across the function-call boundary. Replaced with an explicit
+  `if (!epoch) throw new Error(...)` invariant check right after the warm-up gate, per
+  CLAUDE.md's "fail fast and loud, no silent fallbacks masking broken state" — a future
+  change to `computeWarmupState`'s contract now breaks loudly here instead of quietly
+  feeding a fabricated `daysSinceEpoch=0` into the surge baseline math.
+
 ## 2026-07-15 — Hotfix: /api/ingest LLM-extraction timeout (60s ceiling)
 
 `/api/ingest` (Vercel `maxDuration=60`) was timing out in production: `entity-ingest.ts`

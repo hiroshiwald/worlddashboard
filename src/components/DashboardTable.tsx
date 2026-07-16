@@ -36,7 +36,7 @@ export default function DashboardTable() {
         feedsSucceeded={feedsSucceeded} feedsAttempted={feedsAttempted}
         totalItems={totalItems} filteredItemCount={filteredItems.length}
         fetchedAt={fetchedAt} loading={loading} refresh={refresh}
-        setEntityFilter={setEntityFilter} t={t}
+        t={t}
         mode={mode} lastIngestAt={lastIngestAt}
         candidateCount={candidateCount}
       />
