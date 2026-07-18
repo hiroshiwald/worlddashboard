@@ -1,5 +1,136 @@
 # World Dashboard Development Log
 
+## 2026-07-18 — DESIGN.md + "honest time" compliance: cluster updatedAt, two-fact Feeds timestamps, signals warm-up honesty, animated collecting state
+
+**What changed**: added `DESIGN.md` (the product's design philosophy — Jobs'
+"design is how it works," and the four-decision spine: surface the
+non-obvious, evidence one click away, zero configuration, honest time) and
+brought the product into compliance with its own "honest time" spine:
+publish time and arrival time are now shown as two separate facts everywhere
+they matter, warm-up is explained in plain language instead of left as an
+unexplained empty screen, and the Refresh button's "Collecting" state now
+visibly progresses instead of sitting static.
+
+**What it affected**:
+- `DESIGN.md` (new): verbatim per spec.
+- `README.md`: one-line "Documentation" section pointing to `DESIGN.md`.
+- `CLAUDE.md`: added "UI or UX work: read DESIGN.md first."
+- `src/app/api/articles/route.ts`: each served cluster head now carries
+  `updatedAt` = `MAX(first_seen_at)` across the whole cluster (head + dup
+  members), computed via a `cluster_updates` CTE (`GROUP BY
+  COALESCE(dup_group_id, id)`) joined back to the already-filtered heads —
+  the days-window filter and 500-item cap are unchanged, only what's
+  SELECTed/ORDERed changed. Sort flipped from `COALESCE(published_at,
+  first_seen_at) DESC` to `cu.updated_at DESC`. Learned the hard way that a
+  `` sql`${SOME_SQL_STRING}...` `` interpolation binds as a query
+  PARAMETER, not raw SQL — the CTE text had to be duplicated literally in
+  both the category/no-category branches (matching this file's existing
+  column-list duplication, for the same reason).
+- `src/lib/types.ts`: `FeedItem.updatedAt?: string` — optional, additive.
+  Checked every consumer (`story-cluster.ts`, `entity-extractor.ts`, every
+  hook/component touching `FeedItem`): none read the new field, so live
+  mode (which never sets it) needed no changes anywhere.
+- `src/components/dashboard/FeedTable.tsx`, `FeedCardList.tsx`: new
+  `FeedTimestamp` helper in each — `updatedAt` present renders "updated Xm
+  ago" (primary) stacked over the existing `formatDate(published)`
+  (secondary, muted); absent renders exactly the old single string. No
+  badges, no new color — the secondary line reuses the existing `tierText`
+  muted class already used elsewhere in both files.
+- `src/components/HeaderBar.tsx`: the Refresh button's "Collecting" label
+  now has three always-rendered, fixed-width dots that pulse via a CSS
+  `opacity` keyframe animation (`wd-collecting-blink`), so the animation
+  can never reflow the button. `prefers-reduced-motion: reduce` holds them
+  fully visible instead. The animated dots are visually inside an
+  `aria-hidden` span; the button's own `aria-label` carries the plain,
+  stable "Collecting… ~1 min" string so screen readers get one honest
+  phrase instead of a flickering one. Inline `<style>` (scoped by class
+  name), since `globals.css` was outside this task's allowed file list.
+- `src/app/api/signals/route.ts`: GET response gains `warmup: {active,
+  daysRemaining}`. Reuses `computeWarmupState` (import only) from
+  `detectors.ts` and `getSettings` (import only) from `settings.ts`;
+  duplicates the tiny `SELECT MIN(first_seen_at) ... FROM articles` epoch
+  query locally rather than exporting `getSystemEpoch` from `detectors.ts`
+  — `detectors.ts` wasn't in this task's allowed-file list, and `brief.ts`
+  (plus `/api/ingest`'s own compute-warmup stage) already duplicate this
+  exact query for the same reason, so this follows an established
+  precedent instead of inventing a new one.
+- `src/hooks/useSignalsTab.ts`: `fetchSignals()` now returns
+  `{signals, warmup}`; new `SignalsWarmup` type, defensively parsed
+  (malformed or missing `warmup` → `null`, never thrown). New `warmup`
+  state, returned from the hook.
+- `src/components/SignalsTab.tsx`: new `WarmupEmptyState` — when
+  `warmup.active` and zero signals of any state exist yet, it replaces
+  (not stacks with) the generic "No signals in this view." with a
+  plain-language explanation (detectors compare each entity to its own
+  baseline; baselines are still forming; check back in ~N days) — no
+  jargon, "detector" is the only technical-ish word used, per spec.
+- `src/lib/entity-dictionaries.ts`: added 49 US states + DC to
+  `REGION_DICT`, full names only, `aliases: []`. Wrote a throwaway Node
+  script to check every new name against the existing 211 country/org/
+  region names+aliases before touching anything, rather than eyeballing it
+  (see Gotchas).
+- Tests: `src/app/api/articles/__tests__/route.test.ts` (new, unit),
+  `route.integration.test.ts` (new, real Postgres — dup-group-member case,
+  solo-head case, updatedAt-drives-sort-order case); `src/app/api/signals/
+  __tests__/route.test.ts` (+2, warmup active/inactive shape);
+  `src/hooks/__tests__/useSignalsTab.test.ts` (new — warmup parses,
+  defaults to null when absent, rejects malformed shapes);
+  `src/lib/__tests__/entity-dictionaries.test.ts` (new — all 50 present,
+  no 2-char forms, Georgia deliberately absent, Washington renamed, zero
+  *new* cross-dictionary collisions, end-to-end resolution via
+  `matchDictionaryEntries`). 486 → 507 (unit+integration combined).
+- Verified the Feeds and Signals tabs by driving a real `next dev` + real
+  Chromium (Playwright, globally installed in this sandbox, not added as a
+  project dependency) with `/api/articles`/`/api/signals`/`/api/sources`
+  route interception: two-fact time renders correctly in both modes and
+  both themes, the warm-up empty state renders the right copy and
+  correctly yields to the generic empty state once warm-up clears, the
+  collecting button is genuinely `disabled` (not just styled), its three
+  dots hold a stable bounding box across the animation, and
+  `prefers-reduced-motion` actually zeroes the animation out. See Gotchas
+  for why component-level (`.tsx`) unit tests weren't an option here.
+
+**Gotchas**:
+- This sandbox had neither `node_modules` nor a running local Postgres at
+  task start — `npm ci` and starting the already-installed-but-stopped
+  Postgres 16 cluster (`ALTER USER postgres WITH PASSWORD 'test'`,
+  `TEST_DATABASE_URL=postgresql://postgres:test@localhost:5432/test`) were
+  both needed before any test could run, matching the pattern already
+  noted in earlier entries below.
+- `.tsx` test files don't work in this repo's `vitest.config.ts` as
+  configured today (no `@vitejs/plugin-react`, no esbuild JSX option) — a
+  probe file failed at parse time ("Unexpected JSX expression"), not at
+  runtime, so it wasn't fixable by importing React. `vitest.config.ts`
+  wasn't in this task's allowed-file list and adding a plugin would be a
+  new dependency, so component-level rendering assertions for
+  FeedTable/FeedCardList/HeaderBar/SignalsTab were verified via Playwright
+  against the real dev server instead — consistent with the zero
+  pre-existing `.tsx` test files anywhere in this repo, and with
+  DESIGN.md's own "UI behavior is verified by driving it" line (written in
+  this same change).
+- Playwright's route-mocked Signals-tab checks initially found nothing
+  (not even "Loading signals...") because of a pre-existing, unrelated
+  gate: `TabContent.tsx` returns `null` for every items-dependent tab
+  (signals included) when the live `items` array is empty — independent of
+  and unrelated to `/api/signals`, which is what this task's warm-up field
+  actually lives behind. Fixed by mocking a non-empty `/api/articles`
+  response in those checks; flagging here since it cost real debugging
+  time and isn't obvious from the Signals tab's own code.
+- `entity-dictionaries.ts`: adding all 50 states literally would have
+  silently broken two existing, working resolutions — "Georgia" (state)
+  exactly collides with the existing country Georgia, and "Washington"
+  (state) exactly collides with the existing `United States` alias —
+  because `entity-extractor.ts`'s `LOOKUP_MAP.set` is last-registration-
+  wins with no collision detection. Confirmed programmatically (not by
+  eye) before writing the entries. Resolution: state Georgia is omitted
+  (the country is overwhelmingly the intended match in a world-news
+  corpus); state Washington is listed as "Washington State" (a real,
+  non-abbreviated disambiguating name). Both are called out explicitly in
+  the dictionary file's own comment and covered by a regression test,
+  since this is the exact bug class PR #53 already fixed once
+  (abbreviation/word collisions) one level up (full-name/alias
+  collisions).
+
 ## 2026-07-16 — Fix: Refresh button showed nothing for up to 40s before "Collecting…" appeared
 
 **What changed**: `useSources.ts`'s `refresh()` set `refreshState` from the parsed

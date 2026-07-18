@@ -1,13 +1,26 @@
 import { FeedItem } from "@/lib/types";
 import { ThemeClasses } from "@/lib/theme";
 import { getUrgencyLevel, getRowClasses, getUrgencyBadgeClasses } from "@/lib/urgency";
-import { formatDate } from "@/lib/date-utils";
+import { formatDate, timeAgo } from "@/lib/date-utils";
 import FeedItemImage from "../FeedItemImage";
 
 interface FeedCardListProps {
   sortedItems: FeedItem[];
   dark: boolean;
   t: ThemeClasses;
+}
+
+// Honest time, two facts: when db mode supplies updatedAt (the cluster's
+// latest arrival), it's primary and the story's own publish-relative time
+// is secondary. Live mode has no updatedAt — renders exactly as before.
+function FeedTimestamp({ item, t }: { item: FeedItem; t: ThemeClasses }) {
+  if (!item.updatedAt) return <span className={`text-xs ${t.dtgText}`}>{formatDate(item.published)}</span>;
+  return (
+    <div className="flex flex-col items-end leading-tight">
+      <span className={`text-xs ${t.dtgText}`}>updated {timeAgo(item.updatedAt)} ago</span>
+      <span className={`text-xs ${t.tierText}`}>{formatDate(item.published)}</span>
+    </div>
+  );
 }
 
 function FeedCard({ item, dark, t }: { item: FeedItem; dark: boolean; t: ThemeClasses }) {
@@ -18,7 +31,7 @@ function FeedCard({ item, dark, t }: { item: FeedItem; dark: boolean; t: ThemeCl
     <div className={`${rowColor} ${level === "neutral" ? t.cardBg : ""} border ${t.cardBorder} rounded-xl px-4 py-3`}>
       <div className="flex items-center justify-between mb-2">
         <span className={`text-xs font-semibold ${t.sourceText}`}>{item.sourceName}</span>
-        <span className={`text-xs ${t.dtgText}`}>{formatDate(item.published)}</span>
+        <FeedTimestamp item={item} t={t} />
       </div>
 
       <div className="flex items-start gap-3 mb-2">

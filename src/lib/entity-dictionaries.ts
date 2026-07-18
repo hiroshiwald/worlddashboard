@@ -224,6 +224,70 @@ export const REGION_DICT: DictEntry[] = [
   { name: "Persian Gulf", aliases: ["Arabian Gulf"], type: "region" },
   { name: "East China Sea", aliases: [], type: "region" },
   { name: "Sea of Japan", aliases: ["East Sea"], type: "region" },
+
+  // US states + DC, full names only — no two-letter abbreviations: IN, OR,
+  // ME, OK, HI etc. collide with common English words in all-caps headlines
+  // (the same class of bug already fixed once for WHO/ICE, see PR #53).
+  // Two deliberate omissions/renames to avoid silently overriding an
+  // existing, working dictionary entry (same collision class, one level up:
+  // a full name colliding with another full name/alias instead of an
+  // abbreviation colliding with a word):
+  //   - Georgia (state) is omitted entirely: "Georgia" is already the
+  //     COUNTRY_DICT entry for the Caucasus nation, which is overwhelmingly
+  //     the intended match in this dashboard's world-news corpus.
+  //   - Washington (state) is listed as "Washington State" (a real,
+  //     commonly used disambiguating name, not an abbreviation): bare
+  //     "Washington" is already a COUNTRY_DICT alias for United States.
+  { name: "Alabama", aliases: [], type: "region" },
+  { name: "Alaska", aliases: [], type: "region" },
+  { name: "Arizona", aliases: [], type: "region" },
+  { name: "Arkansas", aliases: [], type: "region" },
+  { name: "California", aliases: [], type: "region" },
+  { name: "Colorado", aliases: [], type: "region" },
+  { name: "Connecticut", aliases: [], type: "region" },
+  { name: "Delaware", aliases: [], type: "region" },
+  { name: "Florida", aliases: [], type: "region" },
+  { name: "Hawaii", aliases: [], type: "region" },
+  { name: "Idaho", aliases: [], type: "region" },
+  { name: "Illinois", aliases: [], type: "region" },
+  { name: "Indiana", aliases: [], type: "region" },
+  { name: "Iowa", aliases: [], type: "region" },
+  { name: "Kansas", aliases: [], type: "region" },
+  { name: "Kentucky", aliases: [], type: "region" },
+  { name: "Louisiana", aliases: [], type: "region" },
+  { name: "Maine", aliases: [], type: "region" },
+  { name: "Maryland", aliases: [], type: "region" },
+  { name: "Massachusetts", aliases: [], type: "region" },
+  { name: "Michigan", aliases: [], type: "region" },
+  { name: "Minnesota", aliases: [], type: "region" },
+  { name: "Mississippi", aliases: [], type: "region" },
+  { name: "Missouri", aliases: [], type: "region" },
+  { name: "Montana", aliases: [], type: "region" },
+  { name: "Nebraska", aliases: [], type: "region" },
+  { name: "Nevada", aliases: [], type: "region" },
+  { name: "New Hampshire", aliases: [], type: "region" },
+  { name: "New Jersey", aliases: [], type: "region" },
+  { name: "New Mexico", aliases: [], type: "region" },
+  { name: "New York", aliases: [], type: "region" },
+  { name: "North Carolina", aliases: [], type: "region" },
+  { name: "North Dakota", aliases: [], type: "region" },
+  { name: "Ohio", aliases: [], type: "region" },
+  { name: "Oklahoma", aliases: [], type: "region" },
+  { name: "Oregon", aliases: [], type: "region" },
+  { name: "Pennsylvania", aliases: [], type: "region" },
+  { name: "Rhode Island", aliases: [], type: "region" },
+  { name: "South Carolina", aliases: [], type: "region" },
+  { name: "South Dakota", aliases: [], type: "region" },
+  { name: "Tennessee", aliases: [], type: "region" },
+  { name: "Texas", aliases: [], type: "region" },
+  { name: "Utah", aliases: [], type: "region" },
+  { name: "Vermont", aliases: [], type: "region" },
+  { name: "Virginia", aliases: [], type: "region" },
+  { name: "Washington State", aliases: [], type: "region" },
+  { name: "West Virginia", aliases: [], type: "region" },
+  { name: "Wisconsin", aliases: [], type: "region" },
+  { name: "Wyoming", aliases: [], type: "region" },
+  { name: "District of Columbia", aliases: [], type: "region" },
 ];
 
 // Words that look like person names but aren't — prevents false positives

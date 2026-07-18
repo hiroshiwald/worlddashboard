@@ -69,6 +69,35 @@ describe("GET /api/signals", () => {
     const res = await GET(getRequest("http://localhost/api/signals?state=bogus"));
     expect(res.status).toBe(400);
   });
+
+  it("includes a warmup field computed from the system epoch and settings.warmup_days", async () => {
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("FROM signals s")) return [];
+      if (call.query.includes("FROM settings")) return [{ key: "warmup_days", value: 7 }];
+      if (call.query.includes("min_first_seen")) return [{ min_first_seen: null }];
+      return [];
+    });
+    currentSql = sql;
+    const res = await GET(getRequest("http://localhost/api/signals"));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.warmup).toEqual({ active: true, daysRemaining: 7 });
+  });
+
+  it("reports warmup inactive once enough days have elapsed since the system epoch", async () => {
+    const oldEpoch = new Date(Date.now() - 10 * 24 * 3600 * 1000);
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("FROM signals s")) return [];
+      if (call.query.includes("FROM settings")) return [{ key: "warmup_days", value: 7 }];
+      if (call.query.includes("min_first_seen")) return [{ min_first_seen: oldEpoch }];
+      return [];
+    });
+    currentSql = sql;
+    const res = await GET(getRequest("http://localhost/api/signals"));
+    const body = await res.json();
+    expect(body.warmup.active).toBe(false);
+    expect(body.warmup.daysRemaining).toBe(0);
+  });
 });
 
 describe("POST /api/signals", () => {

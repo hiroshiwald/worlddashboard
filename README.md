@@ -4,6 +4,10 @@ A live intelligence dashboard that aggregates RSS/Atom feeds from 147+ global da
 
 **Live**: [worlddashboard.vercel.app](https://worlddashboard.vercel.app/)
 
+## Documentation
+
+- **DESIGN.md** — design philosophy and the product spine; read before any UI work
+
 ## Features
 
 - **Feed Aggregation** — Fetches 147+ RSS/Atom feeds in parallel with 3-phase fallback (direct, relay, alt URL)

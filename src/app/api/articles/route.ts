@@ -26,6 +26,7 @@ function toFeedItem(row: SqlRow): FeedItem {
     title: String(row.title),
     link: String(row.link),
     published: toIsoString(row.published_at ?? row.first_seen_at),
+    updatedAt: toIsoString(row.updated_at),
     summary: row.summary != null ? String(row.summary) : "",
     sourceName: String(row.source_name),
     sourceCategory: String(row.source_category),
@@ -34,26 +35,50 @@ function toFeedItem(row: SqlRow): FeedItem {
   };
 }
 
+// cluster_updates aggregates MAX(first_seen_at) over the WHOLE articles
+// table grouped by COALESCE(dup_group_id, id) — a dup member's arrival
+// counts toward its head's updatedAt even though the member itself is
+// never served. Deliberately unfiltered by the days window: the window
+// below still gates which heads are eligible, not which arrivals count
+// toward a cluster's own updatedAt. The CTE text is duplicated in both
+// branches below rather than shared as a variable: the `sql` tag binds
+// every `${...}` interpolation as a query parameter, not raw SQL, so a
+// fragment can't be spliced in that way (same reason the column list
+// below is already duplicated instead of shared).
 async function queryClusterHeads(
   sql: Sql,
   days: number,
   category: string | null,
 ): Promise<FeedItem[]> {
   const rows = category
-    ? await sql`SELECT id, title, link, published_at, first_seen_at,
-        source_name, source_category, source_tier, summary, image_url
+    ? await sql`WITH cluster_updates AS (
+        SELECT COALESCE(dup_group_id, id) AS cluster_id, MAX(first_seen_at) AS updated_at
         FROM articles
-        WHERE dup_group_id IS NULL
-          AND first_seen_at >= now() - make_interval(days => ${days}::int)
-          AND source_category = ${category}
-        ORDER BY COALESCE(published_at, first_seen_at) DESC
+        GROUP BY COALESCE(dup_group_id, id)
+      )
+        SELECT h.id, h.title, h.link, h.published_at, h.first_seen_at,
+        h.source_name, h.source_category, h.source_tier, h.summary, h.image_url,
+        cu.updated_at
+        FROM articles h
+        JOIN cluster_updates cu ON cu.cluster_id = h.id
+        WHERE h.dup_group_id IS NULL
+          AND h.first_seen_at >= now() - make_interval(days => ${days}::int)
+          AND h.source_category = ${category}
+        ORDER BY cu.updated_at DESC
         LIMIT ${MAX_ITEMS}`
-    : await sql`SELECT id, title, link, published_at, first_seen_at,
-        source_name, source_category, source_tier, summary, image_url
+    : await sql`WITH cluster_updates AS (
+        SELECT COALESCE(dup_group_id, id) AS cluster_id, MAX(first_seen_at) AS updated_at
         FROM articles
-        WHERE dup_group_id IS NULL
-          AND first_seen_at >= now() - make_interval(days => ${days}::int)
-        ORDER BY COALESCE(published_at, first_seen_at) DESC
+        GROUP BY COALESCE(dup_group_id, id)
+      )
+        SELECT h.id, h.title, h.link, h.published_at, h.first_seen_at,
+        h.source_name, h.source_category, h.source_tier, h.summary, h.image_url,
+        cu.updated_at
+        FROM articles h
+        JOIN cluster_updates cu ON cu.cluster_id = h.id
+        WHERE h.dup_group_id IS NULL
+          AND h.first_seen_at >= now() - make_interval(days => ${days}::int)
+        ORDER BY cu.updated_at DESC
         LIMIT ${MAX_ITEMS}`;
   return rows.map(toFeedItem);
 }

@@ -1,7 +1,7 @@
 import { FeedItem } from "@/lib/types";
 import { ThemeClasses } from "@/lib/theme";
 import { getUrgencyLevel, getRowClasses, getUrgencyBadgeClasses } from "@/lib/urgency";
-import { formatDate } from "@/lib/date-utils";
+import { formatDate, timeAgo } from "@/lib/date-utils";
 import FeedItemImage from "../FeedItemImage";
 import { ColumnKey } from "@/hooks/useDashboardTable";
 
@@ -31,6 +31,19 @@ function TableHeader({ onSort, getSortArrow, t }: Pick<FeedTableProps, "onSort" 
   );
 }
 
+// Honest time, two facts: when db mode supplies updatedAt (the cluster's
+// latest arrival), it's primary and the story's own publish-relative time
+// is secondary. Live mode has no updatedAt — renders exactly as before.
+function FeedTimestamp({ item, t }: { item: FeedItem; t: ThemeClasses }) {
+  if (!item.updatedAt) return formatDate(item.published);
+  return (
+    <div className="flex flex-col leading-tight">
+      <span>updated {timeAgo(item.updatedAt)} ago</span>
+      <span className={t.tierText}>{formatDate(item.published)}</span>
+    </div>
+  );
+}
+
 function TableRow({ item, idx, dark, t }: { item: FeedItem; idx: number; dark: boolean; t: ThemeClasses }) {
   const level = getUrgencyLevel(item.sourceCategory);
   const rowColor = getRowClasses(level, dark);
@@ -42,7 +55,7 @@ function TableRow({ item, idx, dark, t }: { item: FeedItem; idx: number; dark: b
         level === "neutral" ? (idx % 2 === 0 ? t.rowAltA : t.rowAltB) : ""
       } ${t.rowHover} transition-colors ${t.rowBorder}`}
     >
-      <td className={`px-4 py-3 text-xs whitespace-nowrap ${t.dtgText}`}>{formatDate(item.published)}</td>
+      <td className={`px-4 py-3 text-xs whitespace-nowrap ${t.dtgText}`}><FeedTimestamp item={item} t={t} /></td>
       <td className={`px-4 py-3 text-sm font-medium whitespace-nowrap ${t.sourceText}`}>{item.sourceName}</td>
       <td className="px-4 py-3">
         <span className={getUrgencyBadgeClasses(level, dark)}>{item.sourceCategory.toUpperCase()}</span>

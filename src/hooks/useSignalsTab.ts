@@ -77,14 +77,34 @@ function countByState(signals: SignalCardData[]): Record<StateFilter, number> {
   return counts;
 }
 
+export interface SignalsWarmup {
+  active: boolean;
+  daysRemaining: number;
+}
+
+interface FetchSignalsResult {
+  signals: SignalCardData[];
+  warmup: SignalsWarmup | null;
+}
+
 class DatabaseNotConfiguredError extends Error {}
 
-async function fetchSignals(): Promise<SignalCardData[]> {
+function parseWarmup(raw: unknown): SignalsWarmup | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const w = raw as Record<string, unknown>;
+  if (typeof w.active !== "boolean" || typeof w.daysRemaining !== "number") return null;
+  return { active: w.active, daysRemaining: w.daysRemaining };
+}
+
+async function fetchSignals(): Promise<FetchSignalsResult> {
   const res = await fetch(`/api/signals?state=${FETCH_STATES.join(",")}`, { cache: "no-store" });
   if (res.status === 503) throw new DatabaseNotConfiguredError();
   if (!res.ok) throw new Error(`Failed to load signals (${res.status})`);
   const data = await res.json();
-  return Array.isArray(data.signals) ? data.signals : [];
+  return {
+    signals: Array.isArray(data.signals) ? data.signals : [],
+    warmup: parseWarmup(data.warmup),
+  };
 }
 
 async function postSignalAction(id: number, action: SignalAction): Promise<void> {
@@ -124,6 +144,7 @@ export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParam
   const sparklineData = useMemo(() => computeSparklineData(topEntities, itemMap), [topEntities, itemMap]);
 
   const [signals, setSignals] = useState<SignalCardData[]>([]);
+  const [warmup, setWarmup] = useState<SignalsWarmup | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dbUnconfigured, setDbUnconfigured] = useState(false);
@@ -147,7 +168,8 @@ export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParam
     try {
       const result = await fetchSignals();
       if (seq !== loadSeq.current) return;
-      setSignals(result);
+      setSignals(result.signals);
+      setWarmup(result.warmup);
     } catch (e) {
       if (seq !== loadSeq.current) return;
       if (e instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
@@ -188,6 +210,7 @@ export function useSignalsTab({ items, dark, onEntityClick }: UseSignalsTabParam
     topEntities,
     sparklineData,
     signals,
+    warmup,
     visibleSignals,
     stateCounts,
     stateFilter,

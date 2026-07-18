@@ -41,6 +41,47 @@ function refreshLabel(refreshState?: "idle" | "collecting" | "fresh"): string {
   return "Refresh";
 }
 
+// CSS-only animated ellipsis for the Refresh button's "Collecting" label.
+// All three dots are always rendered at fixed width and only pulse via
+// opacity, so the animation never reflows the button (no layout shift).
+// prefers-reduced-motion holds them fully visible instead of animating.
+// globals.css is out of scope for this change, hence the inline <style>.
+function CollectingDots() {
+  return (
+    <span className="wd-collecting-dots">
+      <style>{`
+        .wd-collecting-dots span {
+          display: inline-block;
+          animation: wd-collecting-blink 1.4s infinite both;
+        }
+        .wd-collecting-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .wd-collecting-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes wd-collecting-blink {
+          0%, 80%, 100% { opacity: 0.2; }
+          40% { opacity: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .wd-collecting-dots span { animation: none; opacity: 1; }
+        }
+      `}</style>
+      <span>.</span><span>.</span><span>.</span>
+    </span>
+  );
+}
+
+// The animated dots are aria-hidden (decorative); refreshLabel's plain
+// string is the button's actual accessible name in every refreshState, so
+// screen readers get one stable, honest phrase instead of a flickering one.
+function RefreshLabelText({ refreshState }: { refreshState?: "idle" | "collecting" | "fresh" }) {
+  if (refreshState !== "collecting") return <>{refreshLabel(refreshState)}</>;
+  return (
+    <>
+      Collecting
+      <CollectingDots /> ~1 min
+    </>
+  );
+}
+
 // Single freshness badge: "LIVE MODE" when serving the live feed fetch,
 // otherwise ingest age (warning color once older than 3 hours).
 function IngestBadge({
@@ -206,6 +247,7 @@ export default function HeaderBar({
           <button
             onClick={refresh}
             disabled={loading || refreshState === "collecting"}
+            aria-label={refreshLabel(refreshState)}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border rounded-lg transition-colors disabled:opacity-40 ${t.btnBg}`}
           >
             <svg
@@ -221,7 +263,9 @@ export default function HeaderBar({
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
               />
             </svg>
-            <span className="hidden sm:inline">{refreshLabel(refreshState)}</span>
+            <span className="hidden sm:inline" aria-hidden="true">
+              <RefreshLabelText refreshState={refreshState} />
+            </span>
           </button>
         </div>
       </div>
