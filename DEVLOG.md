@@ -131,6 +131,50 @@ visibly progresses instead of sitting static.
   (abbreviation/word collisions) one level up (full-name/alias
   collisions).
 
+**Review fix**: PR review caught a real defect this entry's own testing
+missed — `/api/articles` sorts by `updatedAt DESC` server-side, but
+`useDashboardTable.ts`'s `sortItems` re-sorts client-side with a default
+`{key: "published", direction: "desc"}` that compared `published` alone,
+silently discarding the server's ordering. The "updated Xm ago" labels
+rendered correctly; the rows just didn't move to reflect them — the entire
+point of the change was defeated in the default view, and neither the unit
+tests (which never rendered a table with disagreeing publish/updated order)
+nor the Playwright drive (which never asserted row order, only that the
+label text was present) caught it.
+
+- `src/hooks/useDashboardTable.ts`: `sortItems`, when `sort.key ===
+  "published"`, now compares `new Date(a.updatedAt ?? a.published)` instead
+  of `a.published` alone — the Time column sorts by the same primary fact
+  its cell displays. Live-mode items have no `updatedAt`, so this is a
+  no-op there; direction toggling and every other column are untouched.
+- `src/hooks/__tests__/useDashboardTable.test.ts` (new): default sort
+  yields updated-order when publish/updated order disagree (via
+  `renderHook`, matching `useSources.test.ts`'s established convention —
+  the pure `sortItems` helper stays unexported, tested through the public
+  hook); falls back to publish order when `updatedAt` is absent.
+- Re-ran the Playwright drive, this time asserting actual row order (not
+  just label text) against a mocked `/api/articles` payload with publish
+  order deliberately reversed from updated order: the top row is the most
+  recently *updated* story, and toggling the Time column header still
+  flips direction correctly.
+- `MANIFEST.md`: added the `DESIGN.md` row and rows for every new test file
+  from this task (`articles` route unit + integration,
+  `useSignalsTab.test.ts`, `entity-dictionaries.test.ts`,
+  `useDashboardTable.test.ts`) — an omission from the original task's
+  allowed-file list, corrected by the reviewer, not left for a future PR.
+- Tests: 507 → 509 (both new `useDashboardTable` tests). `tsc --noEmit`,
+  full `vitest` suite (unit + real-Postgres integration), and `npm run
+  build` all clean after the fix.
+
+**Gotcha**: this is a straightforward instance of a boundary contract
+change (server sort order) not being honored by every consumer — the
+allowlist's own "check all consumers before modifying" rule applied to
+`FeedItem.updatedAt`, and `useDashboardTable.ts` (which sorts, not just
+displays, `FeedItem[]`) was a consumer this task's first pass didn't trace
+far enough to catch. Verifying a field *renders* isn't the same as
+verifying every place that *orders by* the field it's replacing has been
+updated too.
+
 ## 2026-07-16 — Fix: Refresh button showed nothing for up to 40s before "Collecting…" appeared
 
 **What changed**: `useSources.ts`'s `refresh()` set `refreshState` from the parsed
