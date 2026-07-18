@@ -108,13 +108,17 @@ function filterItems(
 function sortItems(items: FeedItem[], sort: SortConfig): FeedItem[] {
   const arr = [...items];
   arr.sort((a, b) => {
-    const aVal = a[sort.key];
-    const bVal = b[sort.key];
     let cmp: number;
     if (sort.key === "published") {
-      cmp = new Date(aVal as string).getTime() - new Date(bVal as string).getTime();
+      // The Time column sorts by the same primary fact its cell displays:
+      // updatedAt (the cluster's latest arrival) when present, publish time
+      // otherwise. Live-mode items never have updatedAt, so this is a no-op
+      // there — sorting still falls back to plain publish time.
+      const aTime = new Date(a.updatedAt ?? a.published).getTime();
+      const bTime = new Date(b.updatedAt ?? b.published).getTime();
+      cmp = aTime - bTime;
     } else {
-      cmp = String(aVal).localeCompare(String(bVal));
+      cmp = String(a[sort.key]).localeCompare(String(b[sort.key]));
     }
     return sort.direction === "asc" ? cmp : -cmp;
   });

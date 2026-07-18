@@ -1,6 +1,8 @@
 ## Prime Directive
 Every line of code is a liability. Prefer deletion over addition, modification over creation, simplicity over capability. Readable and concise — never verbose, never clever.
 
+UI or UX work: read DESIGN.md first.
+
 ## Before Writing or Modifying Code
 1. State what you are changing, which files are touched, and what assumptions those files depend on.
 2. If touching >2 files, re-read each one first. Do not work from memory of file contents.

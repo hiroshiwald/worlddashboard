@@ -4,6 +4,11 @@ export interface FeedItem {
   link: string;
   published: string;
   publishedEstimated?: true;
+  /** Latest first_seen_at across this story's whole cluster (head + dup
+   * members) — DB (cluster) mode only. Absent in live mode: there is no
+   * cluster to aggregate over, so consumers must render unchanged when
+   * this is undefined rather than inferring one from `published`. */
+  updatedAt?: string;
   summary: string;
   sourceName: string;
   sourceCategory: string;
