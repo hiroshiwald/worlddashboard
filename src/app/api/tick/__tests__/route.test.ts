@@ -47,7 +47,7 @@ describe("POST/GET /api/tick", () => {
     expect(getLastIngestAt).not.toHaveBeenCalled();
   });
 
-  it("returns triggered:false reason:fresh when the newest article is under 2h old, without touching the lock", async () => {
+  it("returns triggered:false reason:fresh when the newest article is under 15min old, without touching the lock", async () => {
     getLastIngestAt.mockResolvedValue(new Date());
     const res = await POST(tickRequest());
     const body = await res.json();
@@ -134,8 +134,8 @@ describe("manual mode (?manual=1)", () => {
     expect(tryAcquireLock).toHaveBeenCalledTimes(1);
   });
 
-  it("the same 15-minute-old ingest is fresh under the passive (no query) 2h threshold", async () => {
-    getLastIngestAt.mockResolvedValue(new Date(Date.now() - 15 * 60 * 1000));
+  it("a 12-minute-old ingest is fresh under the passive (no query) 15-min threshold", async () => {
+    getLastIngestAt.mockResolvedValue(new Date(Date.now() - 12 * 60 * 1000));
 
     const res = await POST(tickRequest());
     const body = await res.json();
@@ -153,7 +153,7 @@ describe("manual mode (?manual=1)", () => {
   });
 
   it.each(["true", "0", "2", "yes", ""])("ignores manual=%s and falls back to the passive threshold", async (value) => {
-    getLastIngestAt.mockResolvedValue(new Date(Date.now() - 15 * 60 * 1000));
+    getLastIngestAt.mockResolvedValue(new Date(Date.now() - 5 * 60 * 1000));
 
     const res = await POST(tickRequest(`manual=${value}`));
     const body = await res.json();

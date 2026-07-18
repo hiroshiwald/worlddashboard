@@ -3,9 +3,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { FeedItem, FeedDiagnostic } from "@/lib/types";
 
-const STALE_INGEST_MS = 2 * 60 * 60 * 1000; // 2 hours
-const TICK_REFRESH_DELAY_MS = 90 * 1000; // 90 seconds
-const MANUAL_TICK_FIRST_REFETCH_MS = 30 * 1000; // 30 seconds
+const STALE_INGEST_MS = 15 * 60 * 1000; // 15 minutes — mirrors FRESHNESS_THRESHOLD_MS in tick.ts
+const PASSIVE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // ~5 minutes, while the tab is visible
+const TICK_REFRESH_DELAY_MS = 90 * 1000; // 90 seconds (manual refresh's "locked" backup)
+const TICK_FIRST_REFETCH_MS = 30 * 1000; // 30 seconds — shared by manual refresh and passive top-ups
 const FRESH_STATUS_DISPLAY_MS = 4 * 1000; // 4 seconds
 
 interface ValidatedResponse {
@@ -119,14 +120,14 @@ async function applyTickResult(
     // this one raced a still-cached pre-collection response.
     await fetchFeed();
     setRefreshState("idle");
-    return [setTimeout(fetchFeed, MANUAL_TICK_FIRST_REFETCH_MS)];
+    return [setTimeout(fetchFeed, TICK_FIRST_REFETCH_MS)];
   }
   if (tick.reason === "locked") {
     // Another caller's run holds the lock, not this one — unlike
     // `triggered`, there's no guarantee it has finished yet, so this keeps
     // the original wait-then-refetch-twice schedule rather than refetching
     // immediately.
-    const first = setTimeout(fetchFeed, MANUAL_TICK_FIRST_REFETCH_MS);
+    const first = setTimeout(fetchFeed, TICK_FIRST_REFETCH_MS);
     const second = setTimeout(() => {
       fetchFeed();
       setRefreshState("idle");
@@ -141,6 +142,41 @@ async function applyTickResult(
   await fetchFeed();
   setRefreshState("idle");
   return [];
+}
+
+// The attention-driven counterpart to applyTickResult: only `triggered:true`
+// gets a refetch (same immediate + TICK_FIRST_REFETCH_MS schedule as the
+// manual path's own `triggered` branch). `reason: "fresh"` or `"locked"`
+// are left for the next periodic/visibility check to re-evaluate — one is
+// always due within PASSIVE_CHECK_INTERVAL_MS, well inside the lock window.
+// Never touches refreshState: that's reserved for the user's own click.
+async function applyPassiveTickResult(
+  tick: TickResponse,
+  fetchFeed: () => Promise<void>,
+): Promise<ReturnType<typeof setTimeout>[]> {
+  if (!tick.triggered) return [];
+  await fetchFeed();
+  return [setTimeout(fetchFeed, TICK_FIRST_REFETCH_MS)];
+}
+
+// The passive-check payload: no-ops (silently) when hidden, in flight, or
+// not actually stale; otherwise pings /api/tick — passive, no ?manual=1 —
+// and hands a validated response to applyPassiveTickResult. Throws on a
+// non-ok response or a malformed body, same convention refresh() uses, so
+// the caller's single catch block can warn once for every failure mode.
+async function checkPassiveFreshness(
+  lastIngestAt: string | null,
+  fetchFeed: () => Promise<void>,
+): Promise<ReturnType<typeof setTimeout>[]> {
+  if (document.hidden || !lastIngestAt) return [];
+  const age = Date.now() - new Date(lastIngestAt).getTime();
+  if (age < STALE_INGEST_MS) return [];
+
+  const res = await fetch("/api/tick", { method: "POST" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const tick = validateTickResponse(await res.json());
+  if (!tick) throw new Error("malformed /api/tick response");
+  return applyPassiveTickResult(tick, fetchFeed);
 }
 
 interface UseFeedReturn {
@@ -158,7 +194,7 @@ interface UseFeedReturn {
   refreshState: "idle" | "collecting" | "fresh";
 }
 
-// Exception to 50-line rule: 11 state variables + 2 refs + 4 callbacks + 3
+// Exception to 50-line rule: 11 state variables + 4 refs + 4 callbacks + 3
 // effects make further reduction below 50 counterproductive. Pure
 // validation helpers (validateApiResponse, validateDbResponse,
 // validateTickResponse) are already extracted above; remaining code is
@@ -175,7 +211,9 @@ export function useFeed(): UseFeedReturn {
   const [mode, setMode] = useState<"db" | "live">("live");
   const [lastIngestAt, setLastIngestAt] = useState<string | null>(null);
   const [refreshState, setRefreshState] = useState<"idle" | "collecting" | "fresh">("idle");
-  const tickFiredRef = useRef(false);
+  const lastIngestAtRef = useRef<string | null>(null);
+  const passiveTickInFlightRef = useRef(false);
+  const passiveTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const refreshTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Tries the DB-backed read path first. Returns false (and warns) on a
@@ -242,26 +280,46 @@ export function useFeed(): UseFeedReturn {
     fetchFeed();
   }, [fetchFeed]);
 
-  // Self-heals cron gaps: a DB-mode load reporting stale data pings the
-  // tick endpoint once per page load, then re-fetches ~90s later so the
-  // user sees fresh data without a manual reload.
+  // Keeps a ref mirror of lastIngestAt so the effect below can read the
+  // current value from its interval/visibilitychange closures without
+  // tearing those down (and losing "cleared on mode change" semantics)
+  // every time a fetch updates the state.
   useEffect(() => {
-    if (mode !== "db" || !lastIngestAt || tickFiredRef.current) return;
-    const age = Date.now() - new Date(lastIngestAt).getTime();
-    if (age < STALE_INGEST_MS) return;
+    lastIngestAtRef.current = lastIngestAt;
+  }, [lastIngestAt]);
 
-    tickFiredRef.current = true;
+  // Attention-driven self-heal, no external pinger: checked on load, on
+  // visibilitychange, and on a PASSIVE_CHECK_INTERVAL_MS interval while the
+  // tab is visible — fresh whenever someone is actually looking. Always
+  // silent: unlike refresh() below, this never touches refreshState, which
+  // is reserved for the user's own explicit Refresh click.
+  useEffect(() => {
+    if (mode !== "db") return;
 
-    // Detached on purpose: a best-effort self-heal ping outside the render
-    // path. Failure here isn't actionable beyond a warning — the next page
-    // load (or the hourly cron) will try again.
-    fetch("/api/tick", { method: "POST" }).catch((err) => {
-      console.warn("[useSources] /api/tick trigger failed", err);
-    });
+    const runCheck = async () => {
+      if (passiveTickInFlightRef.current) return;
+      passiveTickInFlightRef.current = true;
+      try {
+        const timeouts = await checkPassiveFreshness(lastIngestAtRef.current, fetchFeed);
+        passiveTimeoutsRef.current.push(...timeouts);
+      } catch (err) {
+        console.warn("[useSources] passive /api/tick check failed", err);
+      } finally {
+        passiveTickInFlightRef.current = false;
+      }
+    };
 
-    const timeoutId = setTimeout(fetchFeed, TICK_REFRESH_DELAY_MS);
-    return () => clearTimeout(timeoutId);
-  }, [mode, lastIngestAt, fetchFeed]);
+    runCheck();
+    document.addEventListener("visibilitychange", runCheck);
+    const intervalId = setInterval(runCheck, PASSIVE_CHECK_INTERVAL_MS);
+
+    return () => {
+      document.removeEventListener("visibilitychange", runCheck);
+      clearInterval(intervalId);
+      passiveTimeoutsRef.current.forEach(clearTimeout);
+      passiveTimeoutsRef.current = [];
+    };
+  }, [mode, fetchFeed]);
 
   // Clears any refetches scheduled by refresh() below on unmount — those
   // timers are set from a click handler, not an effect, so there's no

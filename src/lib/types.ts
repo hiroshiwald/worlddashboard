@@ -9,6 +9,11 @@ export interface FeedItem {
    * cluster to aggregate over, so consumers must render unchanged when
    * this is undefined rather than inferring one from `published`. */
   updatedAt?: string;
+  /** Article count across this story's whole cluster (head + dup members),
+   * from the same cluster_updates aggregation as updatedAt — DB (cluster)
+   * mode only. Absent in live mode: there is no cluster to count, so
+   * consumers must render unchanged (no "+K" chip) when this is undefined. */
+  clusterSize?: number;
   summary: string;
   sourceName: string;
   sourceCategory: string;

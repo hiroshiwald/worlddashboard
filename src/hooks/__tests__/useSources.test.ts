@@ -28,7 +28,26 @@ function countCalls(fetchMock: ReturnType<typeof stubFetchRouter>, url: string):
   return fetchMock.mock.calls.filter(([calledUrl]) => calledUrl === url).length;
 }
 
-describe("useFeed tick trigger", () => {
+// jsdom hardcodes visible/not-hidden; these tests override both properties
+// to simulate backgrounding a tab, matching how a real browser flips them.
+function setVisibility(state: "visible" | "hidden") {
+  Object.defineProperty(document, "visibilityState", {
+    value: state,
+    writable: true,
+    configurable: true,
+  });
+  Object.defineProperty(document, "hidden", {
+    value: state === "hidden",
+    writable: true,
+    configurable: true,
+  });
+}
+
+beforeEach(() => {
+  setVisibility("visible");
+});
+
+describe("useFeed passive freshness check", () => {
   beforeEach(() => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
@@ -38,8 +57,8 @@ describe("useFeed tick trigger", () => {
     vi.restoreAllMocks();
   });
 
-  it("fires POST /api/tick exactly once when lastIngestAt is older than 2 hours", async () => {
-    const staleIso = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  it("fires a plain POST /api/tick when lastIngestAt is stale (>15min) and the document is visible", async () => {
+    const staleIso = new Date(Date.now() - 20 * 60 * 1000).toISOString();
     const fetchMock = stubFetchRouter({
       "/api/articles": () => mockArticlesResponse(staleIso),
       "/api/tick": () => Promise.resolve({ ok: true, json: async () => ({ triggered: true }) }),
@@ -59,8 +78,8 @@ describe("useFeed tick trigger", () => {
     unmount();
   });
 
-  it("does not fire /api/tick when lastIngestAt is under 2 hours old", async () => {
-    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  it("does not fire when lastIngestAt is under 15 minutes old", async () => {
+    const freshIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const fetchMock = stubFetchRouter({
       "/api/articles": () => mockArticlesResponse(freshIso),
     });
@@ -76,33 +95,96 @@ describe("useFeed tick trigger", () => {
     unmount();
   });
 
-  it("does not fire /api/tick a second time on a later re-render past the threshold", async () => {
-    const staleIso = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  it("does not fire while the document is hidden, even when stale", async () => {
+    setVisibility("hidden");
+    const staleIso = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    const fetchMock = stubFetchRouter({
+      "/api/articles": () => mockArticlesResponse(staleIso),
+    });
+
+    const { result, unmount } = renderHook(() => useFeed());
+
+    await waitFor(() => expect(result.current.mode).toBe("db"));
+    await waitFor(() => expect(result.current.lastIngestAt).toBe(staleIso));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const tickCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/tick");
+    expect(tickCalls).toHaveLength(0);
+
+    unmount();
+  });
+
+  it("a visibilitychange to visible triggers an immediate check", async () => {
+    setVisibility("hidden");
+    const staleIso = new Date(Date.now() - 20 * 60 * 1000).toISOString();
     const fetchMock = stubFetchRouter({
       "/api/articles": () => mockArticlesResponse(staleIso),
       "/api/tick": () => Promise.resolve({ ok: true, json: async () => ({ triggered: true }) }),
     });
 
-    const { result, rerender, unmount } = renderHook(() => useFeed());
+    const { result, unmount } = renderHook(() => useFeed());
+    await waitFor(() => expect(result.current.lastIngestAt).toBe(staleIso));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/tick")).toHaveLength(0);
+
+    setVisibility("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
 
     await waitFor(() => {
       const tickCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/tick");
       expect(tickCalls).toHaveLength(1);
     });
 
-    rerender();
-    expect(result.current.mode).toBe("db");
-    const tickCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/tick");
-    expect(tickCalls).toHaveLength(1);
+    unmount();
+  });
+
+  it("never touches refreshState, even when the response is triggered:true", async () => {
+    const staleIso = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    const fetchMock = stubFetchRouter({
+      "/api/articles": () => mockArticlesResponse(staleIso),
+      "/api/tick": () => Promise.resolve({ ok: true, json: async () => ({ triggered: true }) }),
+    });
+
+    const { result, unmount } = renderHook(() => useFeed());
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) => url === "/api/tick")).toHaveLength(1);
+    });
+    // Let the triggered:true follow-up refetch (immediate + 30s backup
+    // schedule) run its immediate leg too.
+    await waitFor(() => expect(countCalls(fetchMock, "/api/articles")).toBeGreaterThanOrEqual(2));
+
+    expect(result.current.refreshState).toBe("idle");
 
     unmount();
   });
+
+  it("clears the passive interval and visibilitychange listener on unmount", async () => {
+    const staleIso = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    stubFetchRouter({
+      "/api/articles": () => mockArticlesResponse(staleIso),
+      "/api/tick": () => Promise.resolve({ ok: true, json: async () => ({ triggered: true }) }),
+    });
+
+    const { result, unmount } = renderHook(() => useFeed());
+    await waitFor(() => expect(result.current.mode).toBe("db"));
+
+    const clearIntervalSpy = vi.spyOn(global, "clearInterval");
+    const removeEventListenerSpy = vi.spyOn(document, "removeEventListener");
+
+    unmount();
+
+    expect(clearIntervalSpy).toHaveBeenCalled();
+    expect(removeEventListenerSpy).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+  });
 });
 
-// A 30-minute-old lastIngestAt is deliberately used throughout: fresh enough
-// (< 2h) that the passive self-heal effect in the "tick trigger" suite above
-// never fires, so every /api/tick?manual=1 call below comes solely from the
-// explicit refresh() under test.
+// A 5-minute-old lastIngestAt is deliberately used throughout: fresh enough
+// (< 15min) that the passive check in the suite above never fires, so every
+// /api/tick?manual=1 call below comes solely from the explicit refresh()
+// under test.
 describe("useFeed refresh()", () => {
   beforeEach(() => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -114,7 +196,7 @@ describe("useFeed refresh()", () => {
   });
 
   it("db mode, triggered:true: sets 'collecting' synchronously before the tick response resolves, then refetches immediately and schedules one ~30s backup", async () => {
-    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const freshIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     let resolveTick!: (value: unknown) => void;
     const tickPromise = new Promise<unknown>((resolve) => {
       resolveTick = resolve;
@@ -151,7 +233,7 @@ describe("useFeed refresh()", () => {
   });
 
   it("db mode, reason:'locked': treated like collecting (same delayed-refetch schedule)", async () => {
-    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const freshIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const fetchMock = stubFetchRouter({
       "/api/articles": () => mockArticlesResponse(freshIso),
       "/api/tick?manual=1": () => mockTickResponse({ triggered: false, reason: "locked" }),
@@ -174,7 +256,7 @@ describe("useFeed refresh()", () => {
   });
 
   it("db mode, reason:'fresh': refetches /api/articles once immediately and shows refreshState 'fresh'", async () => {
-    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const freshIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const fetchMock = stubFetchRouter({
       "/api/articles": () => mockArticlesResponse(freshIso),
       "/api/tick?manual=1": () => mockTickResponse({ triggered: false, reason: "fresh" }),
@@ -196,7 +278,7 @@ describe("useFeed refresh()", () => {
   });
 
   it("db mode: a failed tick request warns and falls back to a single plain refetch", async () => {
-    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const freshIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const fetchMock = stubFetchRouter({
       "/api/articles": () => mockArticlesResponse(freshIso),
       "/api/tick?manual=1": () => Promise.reject(new Error("network down")),
@@ -221,7 +303,7 @@ describe("useFeed refresh()", () => {
   });
 
   it("db mode: a non-ok tick response also warns and falls back to a single plain refetch", async () => {
-    const freshIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    const freshIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const fetchMock = stubFetchRouter({
       "/api/articles": () => mockArticlesResponse(freshIso),
       "/api/tick?manual=1": () => Promise.resolve({ ok: false, status: 500, json: async () => ({}) }),

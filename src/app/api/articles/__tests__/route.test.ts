@@ -45,7 +45,7 @@ describe("GET /api/articles", () => {
 
   it("returns 503 when no articles have been ingested yet", async () => {
     const { sql } = makeMockSql((call) => {
-      if (call.query.includes("COUNT(*)")) return [{ count: 0, last_ingest_at: null }];
+      if (call.query.includes("last_ingest_at")) return [{ count: 0, last_ingest_at: null }];
       return [];
     });
     currentSql = sql;
@@ -53,11 +53,11 @@ describe("GET /api/articles", () => {
     expect(res.status).toBe(503);
   });
 
-  it("includes updatedAt on each item, sourced from the cluster_updates CTE", async () => {
+  it("includes updatedAt and clusterSize on each item, sourced from the cluster_updates CTE", async () => {
     const now = new Date();
     const clusterUpdatedAt = new Date(now.getTime() - 60_000);
     const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("COUNT(*)")) return [{ count: 2, last_ingest_at: now }];
+      if (call.query.includes("last_ingest_at")) return [{ count: 2, last_ingest_at: now }];
       if (call.query.includes("cluster_updates")) {
         return [
           {
@@ -72,6 +72,7 @@ describe("GET /api/articles", () => {
             summary: "",
             image_url: "",
             updated_at: clusterUpdatedAt,
+            cluster_size: 3,
           },
         ];
       }
@@ -84,13 +85,15 @@ describe("GET /api/articles", () => {
 
     expect(res.status).toBe(200);
     expect(body.items[0].updatedAt).toBe(clusterUpdatedAt.toISOString());
+    expect(body.items[0].clusterSize).toBe(3);
     expect(calls.some((c) => c.query.includes("WITH cluster_updates"))).toBe(true);
+    expect(calls.some((c) => c.query.includes("cluster_size"))).toBe(true);
   });
 
   it("sorts by cu.updated_at DESC, not by publish time", async () => {
     const now = new Date();
     const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("COUNT(*)")) return [{ count: 1, last_ingest_at: now }];
+      if (call.query.includes("last_ingest_at")) return [{ count: 1, last_ingest_at: now }];
       return [];
     });
     currentSql = sql;
@@ -105,7 +108,7 @@ describe("GET /api/articles", () => {
   it("routes to the category-filtered branch and binds the category value when ?category= is present", async () => {
     const now = new Date();
     const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("COUNT(*)")) return [{ count: 1, last_ingest_at: now }];
+      if (call.query.includes("last_ingest_at")) return [{ count: 1, last_ingest_at: now }];
       return [];
     });
     currentSql = sql;

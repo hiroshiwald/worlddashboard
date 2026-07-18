@@ -1,5 +1,140 @@
 # World Dashboard Development Log
 
+## 2026-07-18 — Attention-driven freshness (15min passive tick) + honest Feeds rows + cluster-weight chip
+
+**What changed**: freshness now follows attention instead of a slow fixed
+clock — the passive self-heal threshold dropped from 2h to 15min, and
+`useSources.ts` checks on load, on `visibilitychange`, and on a 5min
+interval instead of firing once per page load, so an open, visible
+dashboard keeps itself fresh with no external pinger. Feeds rows no longer
+wear severity colors/badges derived from a hardcoded category mapping —
+that alarm styling is now exclusively the Signals tab's, earned by actual
+deviation. `/api/articles` now also reports each story cluster's size,
+surfaced as a quiet "+K" chip next to the source name (weight of coverage,
+not alarm).
+
+**What it affected**:
+- `src/lib/server/tick.ts`: `FRESHNESS_THRESHOLD_MS` 2h → 15min;
+  `MANUAL_FRESHNESS_THRESHOLD_MS`/`LOCK_THRESHOLD_MS` (10min) unchanged —
+  the lock stays the real abuse ceiling. Comment updated to explain the
+  passive threshold exists so an open, visible dashboard self-heals.
+- `src/lib/server/__tests__/tick.test.ts`,
+  `src/app/api/tick/__tests__/route.test.ts`: boundary tests moved from
+  119/120/121min to 14/15/16min; the "differs by mode" demonstration moved
+  from a 15min-old timestamp (now ambiguous — exactly at the new passive
+  boundary) to 12min-old (stale under the 10min manual threshold, fresh
+  under the 15min passive one); the `it.each` "ignores non-1 manual
+  values" test moved from a 15min-old to a 5min-old ingest for the same
+  boundary reason.
+- `src/hooks/useSources.ts`: replaced the fire-once-per-page-load
+  `tickFiredRef` with a recurring passive check (`checkPassiveFreshness`)
+  — run on load, on `visibilitychange` to visible, and on a `setInterval`
+  every ~5min while the tab is visible; guarded by `document.hidden` and
+  an in-flight ref so nothing fires while backgrounded or overlapping.
+  Only a `triggered:true` response refetches (`applyPassiveTickResult`:
+  immediate + one ~30s backup, mirroring the manual path's own
+  `triggered` schedule); `"fresh"`/`"locked"` are left for the next check,
+  due within 5min — well inside the 10min lock window. This path never
+  calls `setRefreshState`: shared the `TickResponse` type,
+  `validateTickResponse`, and the renamed `TICK_FIRST_REFETCH_MS` constant
+  (was `MANUAL_TICK_FIRST_REFETCH_MS`, now used by both paths) with the
+  existing manual `refresh()`, but kept a separate, minimal
+  `applyPassiveTickResult` rather than reusing `applyTickResult` itself,
+  since every one of that function's branches calls `setRefreshState` —
+  correct by coincidence for `'idle'` but not something to depend on.
+  `lastIngestAtRef` (synced by a small effect keyed on `[lastIngestAt]`,
+  declared before the check effect so effect-run ordering keeps it fresh
+  on the very first "on load" check) lets the interval/listener closures
+  read the current value without tearing down on every fetch.
+- `src/hooks/__tests__/useSources.test.ts`: rewrote the former "tick
+  trigger" suite (fire-once semantics no longer exist) into 6 tests: fires
+  when stale (>15min) and visible; doesn't fire when fresh; doesn't fire
+  while `document.hidden` (via an overridden `visibilityState`/`hidden`);
+  a `visibilitychange` to visible triggers an immediate check;
+  `refreshState` stays `'idle'` throughout a `triggered:true` passive
+  tick; the interval and listener are cleared on unmount (spied
+  `clearInterval`/`removeEventListener`). The `refresh()` suite's shared
+  "definitely fresh" baseline moved from 30min-old to 5min-old, since
+  30min is now well past the new 15min passive threshold and would have
+  made the passive check fire mid-test, racing the manual-path
+  assertions.
+- `src/components/dashboard/FeedTable.tsx`, `FeedCardList.tsx`: removed
+  `getUrgencyLevel`/`getRowClasses`/`getUrgencyBadgeClasses` entirely.
+  Rows/cards always use the plain alternating background (no more
+  `level === "neutral"` branch); the category chip is one quiet, uniform
+  style in both themes (the old "neutral" badge classes, now applied
+  unconditionally instead of only to uncategorized rows). `urgency.ts`,
+  `MapTab.tsx`, `NetworkTab.tsx` untouched — confirmed via grep that
+  neither of the latter two import the three removed functions; they
+  reach `urgency.ts` only transitively through `entity-extractor.ts`'s
+  `urgencyBreakdown`, unaffected by this change.
+- `src/app/api/articles/route.ts`: `cluster_updates` CTE now also selects
+  `COUNT(*)::int AS cluster_size` per cluster (duplicated in both the
+  category and no-category branches, same reason the column list already
+  was — the `sql` tag binds `${...}` as a parameter, not raw SQL, so
+  fragments can't be shared across branches); `toFeedItem` maps it to
+  `clusterSize`.
+- `src/lib/types.ts`: `FeedItem.clusterSize?: number`, same contract-note
+  style as `updatedAt` (db mode only, absent in live mode). Checked
+  `useDashboardTable.ts`'s sort/filter code: `ColumnKey = keyof FeedItem`,
+  and `sortItems`/`filterItems` don't special-case any field by name
+  except `published`, so the new optional field is inert everywhere until
+  a caller reads it — no changes needed there.
+- `src/components/dashboard/FeedTable.tsx`, `FeedCardList.tsx`: new
+  `ClusterSizeChip` (duplicated per file, matching this pair's existing
+  `FeedTimestamp`-duplication convention) — a muted "+K" pill (K =
+  `clusterSize - 1`) next to the source name when `clusterSize >= 2`,
+  `title="K more articles about this story across sources"`. Deliberately
+  quieter than the category chip (no `font-semibold`, smaller padding) —
+  it's coverage weight, not severity.
+- `src/app/api/articles/__tests__/route.test.ts`: the mock's query router
+  disambiguated the summary-count query from the `cluster_updates` query
+  by checking for `"COUNT(*)"` — now a false match on both, since the CTE
+  itself contains `COUNT(*)::int AS cluster_size`. Re-keyed on
+  `"last_ingest_at"` (unique to the summary query) across all 4 tests;
+  without this fix the affected tests would throw (`toIsoString` on an
+  `undefined` field from a wrongly-routed mock response), not just
+  mis-assert. Extended the updatedAt test with `cluster_size`/`clusterSize`
+  field-mapping assertions.
+- `src/app/api/articles/__tests__/route.integration.test.ts`: added a
+  `clusterSize` assertion to the existing singleton-head test (expect 1,
+  no chip) and a new test for a head with two members (expect 3, chip
+  math +2).
+- `MANIFEST.md`: updated every row/invariant/boundary touching the 2h
+  passive threshold, `useSources.ts`'s self-heal description, the two
+  touched test-file rows, the `FeedTable`/`FeedCardList` dependency line
+  (dropped `+ urgency`); added two new invariants ("Feeds rows carry no
+  severity", "Cluster weight, not alarm").
+
+**What I declined**: a bespoke refetch schedule for the passive path's
+`"locked"` response (the manual path schedules two backup refetches for
+it). The passive check re-runs on its own every ~5min — well inside the
+10min lock window — so a locked run's completion gets picked up by the
+next periodic check without extra machinery; only `triggered:true` (this
+call's own tick actually ran ingest) gets an explicit refetch. Also
+declined: no in-flight guard shared between the passive and manual paths
+— they use independent refs/timeout arrays, since a manual click and a
+passive tick landing at the same moment is harmless (the server-side lock
+already arbitrates) and cross-guarding them would add state for no
+observed benefit.
+
+**Gotchas**:
+- The `useSources.test.ts` `refresh()` suite's shared 30min-old
+  "definitely fresh" fixture silently stopped being fresh once the passive
+  threshold dropped to 15min — every test in that suite would have started
+  racing an unmocked `/api/tick` call (the fetch router throws on any
+  unmocked URL) had the fixture not moved to 5min. Caught by re-running the
+  suite, not by inspection.
+- Same class of bug in `route.test.ts` (articles): the mock query router's
+  `"COUNT(*)"` discriminator silently started matching the
+  `cluster_updates` query too, once that CTE gained its own `COUNT(*)`.
+  Re-keyed on the summary query's unique `last_ingest_at` alias instead.
+
+Tests: 509 → 513 (`useSources.test.ts`'s rewritten passive suite: 3 old
+tests removed for fire-once semantics that no longer exist, 6 new ones
+added, net +3; `route.integration.test.ts` +1). `tsc --noEmit` and `npm
+run build` both clean.
+
 ## 2026-07-18 — DESIGN.md + "honest time" compliance: cluster updatedAt, two-fact Feeds timestamps, signals warm-up honesty, animated collecting state
 
 **What changed**: added `DESIGN.md` (the product's design philosophy — Jobs'
