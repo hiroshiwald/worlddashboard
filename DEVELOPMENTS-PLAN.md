@@ -43,6 +43,11 @@ The smallest implementation that can prove or kill the idea:
 - **One additive API change:** `getBrief` gains a `developments` array in its
   JSON. Existing Brief consumers are unaffected.
 - **One new Brief section** rendering the cards, placed at the top of Brief.
+
+The slice ships as two sequential tasks: **L1A** (server: developments
+module, scoring, additive `getBrief` field, tests) and **L1B** (UI: the
+Brief section with honest empty/warm-up states). L1A merges and is verified
+before L1B starts.
 - No new sources, no new products, no repo split, no deletions, no new
   dependencies, no settings.
 
@@ -156,9 +161,10 @@ ceiling classifier and inside the capped corroboration part.
   article intersection; N/E use `article_entities`. C matches each of the
   candidate's `sample_titles` exactly against `articles.title`, constrained
   to the candidate's `source_names` and a narrow time window around its
-  seen-window — no broad display-name matching. If no exact, unambiguous
-  match resolves (zero hits, or one title matching conflicting articles
-  beyond normal cross-source duplicates), the card is suppressed.
+  seen-window — no broad display-name matching. The card is suppressed when
+  matches are zero, ambiguous (one title resolving to conflicting article
+  clusters beyond normal cross-source duplicates), or inconsistent with the
+  source/window constraints.
 - `firstObservedAt`/`lastObservedAt` are arrival-based (migration 003
   semantics) and are labeled in the UI as "first observed" — never
   "happened" (spine #4). For R/N/E cards they come from the underlying row's
