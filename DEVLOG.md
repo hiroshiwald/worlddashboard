@@ -1672,3 +1672,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: Added `FABLE-ROADMAP.md`, a strategy and review-process brief for Claude Code Fable.
 - What it affected: Planning guidance only; no application code or runtime behavior changed.
 - Gotchas: The roadmap explicitly recommends not splitting the repo until domain-specific complexity creates a concrete deploy, compliance, data-governance, or coupling problem.
+
+## 2026-07-20
+- What changed: Added `RADAR-STRATEGY.md`, the planning packet for the radar product direction (idea maze, object model, ranking strategy, roadmap, surface decisions, validation plan, reviewer checklist). Planning only; no application code changed.
+- What it affected: Supersedes FABLE-ROADMAP.md's breadth with hard decisions: one app/one repo, developments as the unit of value, AI Radar as first domain mode, Network/Map/watchlist/cascade-graph slated for deletion in the first slice.
+- Gotchas: Red-team review caught that 30-day article retention (`ingest-writer.ts:113`) would silently break evidence for long-dormancy threads — the packet's evidence model now denormalizes evidence snapshots onto thread updates. Also: the famous auto-accept gate optimizes for the opposite of the anchor/satellite hypothesis, and relations touching unresolved candidates are dropped every run — both named as L1 fixes.
