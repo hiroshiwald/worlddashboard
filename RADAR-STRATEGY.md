@@ -1,13 +1,24 @@
 # RADAR-STRATEGY.md — Planning Packet
 
-> **Scope correction (2026-07-20):** current implementation scope is the
-> existing news dashboard only, per operator direction. AI/Medical/Alpha
-> radars are future portability context — they do not drive sources,
-> migrations, routes, navigation, or repo structure now. The roadmap levels
-> in §7 and the surface deletions in §8 are deferred and require explicit
-> approval. The active plan is **DEVELOPMENTS-PLAN.md** (read-only
-> development cards in Brief, no migrations, no source changes, no
-> deletions). This document remains as strategic context.
+## ⚠️ STRATEGIC CONTEXT ONLY — DO NOT IMPLEMENT FROM THIS DOCUMENT
+
+**The only active implementation plan is `DEVELOPMENTS-PLAN.md`.**
+
+Current scope (operator direction, 2026-07-20) is the existing news
+dashboard only. Nothing in this document authorizes implementation. In
+particular, do NOT implement from here:
+
+- AI Radar, Medical/Bio Radar, or Alpha Radar in any form.
+- Source expansion of any kind (no AI feeds, no medical feeds).
+- Navigation or product-surface changes.
+- Migrations, new tables, or schema changes.
+- Repo splits, new apps, or new routes.
+- Surface deletions (Network, Map, watchlist, cascade-graph all stay).
+
+The roadmap in §7 and the surface decisions in §8 are deferred future
+context and require explicit operator approval before any of it becomes
+work. This document exists to explain *why* the development model is shaped
+the way it is — nothing more.
 
 Planning output only. No code changes are proposed for this PR. This packet is
 written to be critiqued by a second reviewer before any implementation, per
@@ -242,15 +253,30 @@ Six paths, each with an explicit verdict. Confidence noted where it matters.
 
 Where incumbents are strong — by their unit of value:
 
-| Category | Unit of value | They own | They structurally lack |
-|---|---|---|---|
-| Feedly/Inoreader/Ground News/newsletters | the **article** | filtering, reading UX, digest habit | any persistent entity object; no first-seen, no edges, no diffing |
-| AlphaSense/Tegus/CB Insights | the **query** | licensed corpora, enterprise search | push-discovery of entities you didn't know to search; change-as-narrative |
-| Dataminr/Samdesk/Factal | the **event** | sub-minute speed, verification ops | memory — an alert fires and dies; no trajectory, no evolution |
-| Meltwater/Signal AI | the **brand mention** | licensed media archives, SoV analytics | open entity universe — they only watch entities you enumerate |
-| Elicit/Consensus/S2/ResearchRabbit | the **paper** | citation graph, retrospective synthesis | present tense; news-to-research bridge; entity-level change detection |
-| Citeline/BioPharmCatalyst | the **curated row** | pharma system of record | generalization (no Citeline-for-AI); narrative threads over row diffs |
-| ChatGPT/Perplexity/Gemini | the **answer** | explanation, reach, price | see below — the four missing primitives |
+- **Feedly / Inoreader / Ground News / newsletters** — unit of value: the
+  **article**. They own filtering, reading UX, and the digest habit. They
+  structurally lack any persistent entity object: no first-seen, no edges,
+  no diffing.
+- **AlphaSense / Tegus / CB Insights** — unit of value: the **query**. They
+  own licensed corpora and enterprise search. They structurally lack
+  push-discovery of entities you didn't know to search, and
+  change-as-narrative.
+- **Dataminr / Samdesk / Factal** — unit of value: the **event**. They own
+  sub-minute speed and verification ops. They structurally lack memory — an
+  alert fires and dies; no trajectory, no evolution.
+- **Meltwater / Signal AI** — unit of value: the **brand mention**. They own
+  licensed media archives and share-of-voice analytics. They structurally
+  lack an open entity universe — they only watch entities you enumerate.
+- **Elicit / Consensus / Semantic Scholar / ResearchRabbit** — unit of
+  value: the **paper**. They own the citation graph and retrospective
+  synthesis. They structurally lack the present tense, a news-to-research
+  bridge, and entity-level change detection.
+- **Citeline / BioPharmCatalyst** — unit of value: the **curated row**. They
+  own the pharma system of record. They structurally lack generalization
+  (no Citeline-for-AI) and narrative threads over row diffs.
+- **ChatGPT / Perplexity / Gemini** — unit of value: the **answer**. They
+  own explanation, reach, and price. They structurally lack the four missing
+  primitives below.
 
 **Why general AI assistants — the biggest looming substitute — do not fill
 the gap:** (a) no persistent entity memory across sessions: each query
@@ -438,17 +464,32 @@ instead of dropping them.
 
 **Development attention score — components and direction of effect:**
 
-| Component | Effect | Grounding |
-|---|---|---|
-| Specificity | satellite types (product, technology, company, person-obscure) ↑; country/region-only ↓ | 15-type ontology already distinguishes these |
-| Novelty | recent true first_seen ↑; novel typed edge ↑↑ | `first_seen`/`novel_edge` detectors exist; bootstrap + warm-up guards keep them honest |
-| Anchor association | satellite orbiting a tracked anchor ↑ (never boosts the anchor itself) | `co_entities`, `entity_relations` |
-| Relation type | acquisition/investment/supply/regulation/sanction > membership > statement_about; typed-directed > undirected co-occurrence | `entity_relations` vs `entity_edges` |
-| Source spread | distinct sources ↑; distinct source categories (cross-category migration: tech→policy, research→business) ↑↑ | `source_count`, `cross_category` detector pattern |
-| Persistence | recurring across days ↑ vs single-day burst | `day_count` already computed on candidates |
-| Evidence quality | source tier weighting; zero resolvable evidence ⇒ suppress | `source_tier` on every article row |
-| Domain relevance | matches the active domain's source set ↑ | requires the `domain` tag (§7) |
-| Penalties | famous standalone; country-only; generic terms; single-source; old news presented fresh (publish≪first_seen gap must be labeled, not hidden) | spine #4 |
+- **Specificity** — satellite types (product, technology, company,
+  person-obscure) score up; country/region-only scores down. Grounding: the
+  15-type ontology already distinguishes these.
+- **Novelty** — recent true first_seen scores up; a novel typed edge scores
+  up strongly. Grounding: the `first_seen`/`novel_edge` detectors exist;
+  bootstrap + warm-up guards keep them honest.
+- **Anchor association** — a satellite orbiting a tracked anchor scores up;
+  this never boosts the anchor itself. Grounding: `co_entities`,
+  `entity_relations`.
+- **Relation type** — acquisition/investment/supply/regulation/sanction
+  above membership, above statement_about; typed-directed above undirected
+  co-occurrence. Grounding: `entity_relations` vs `entity_edges`.
+- **Source spread** — distinct sources score up; distinct source categories
+  (cross-category migration: tech→policy, research→business) score up
+  strongly. Grounding: `source_count`, the `cross_category` detector
+  pattern.
+- **Persistence** — recurring across days beats a single-day burst.
+  Grounding: `day_count` is already computed on candidates.
+- **Evidence quality** — source tier weighting; zero resolvable evidence
+  means the card is suppressed. Grounding: `source_tier` on every article
+  row.
+- **Domain relevance** — matches the active domain's source set. Grounding:
+  requires the `domain` tag (§7, deferred).
+- **Penalties** — famous standalone; country-only; generic terms;
+  single-source; old news presented fresh (a publish≪first_seen gap must be
+  labeled, not hidden — spine #4).
 
 The score must be a pure, unit-tested function (the codebase's established
 pattern — `scoreSurge` etc. are cleanly separated and synthetic-panel
@@ -503,14 +544,27 @@ kill before any AI-specific work beyond the data-only source tag.
 
 **Level 1 scope bounds (per FABLE-ROADMAP §9.6):**
 
-| Item | Files expected to change | Contract/migration | Rollback | Tests |
-|---|---|---|---|---|
-| 1. Persist prominence/tier | migration 006; `entity-ingest.ts`; `llm-extract.ts` (none — field exists) | `entities` + 2 columns | column drop; no data loss | entity-ingest unit + integration |
-| 2. Pending relations | migration 006; `entity-ingest.ts` | new `pending_relations` table, attach-on-track | table drop | entity-ingest unit + integration |
-| 3. Thread updates | migration 006; `signal-store.ts`; `detectors.ts` (dedupe keys unchanged) | new `signal_updates` table, append-only; `signals` semantics preserved for existing readers | table drop; readers unaffected | signal-store unit + integration |
-| 4. Satellite-first Brief | `brief.ts`; `BriefTab.tsx` + brief sections; new ranking module | Brief JSON shape (additive) | revert route | brief unit; ranking pure-fn tests |
-| 5. Ranking function | new `development-score.ts` | none (pure) | n/a | synthetic-panel unit tests |
-| 6. Deletions | `NetworkTab.tsx`, `MapTab.tsx`, watchlist halves of signals components, `cascade-graph.ts`, `geo-coordinates.ts` + dead deps (leaflet, react-force-graph) | none | git revert | existing suites stay green |
+- **Item 1 — persist prominence/tier.** Files: migration 006,
+  `entity-ingest.ts` (`llm-extract.ts` unchanged — the field exists).
+  Contract: `entities` gains 2 columns. Rollback: column drop, no data loss.
+  Tests: entity-ingest unit + integration.
+- **Item 2 — pending relations.** Files: migration 006, `entity-ingest.ts`.
+  Contract: new `pending_relations` table, attach-on-track. Rollback: table
+  drop. Tests: entity-ingest unit + integration.
+- **Item 3 — thread updates.** Files: migration 006, `signal-store.ts`,
+  `detectors.ts` (dedupe keys unchanged). Contract: new `signal_updates`
+  table, append-only; `signals` semantics preserved for existing readers.
+  Rollback: table drop; readers unaffected. Tests: signal-store unit +
+  integration.
+- **Item 4 — satellite-first Brief.** Files: `brief.ts`, `BriefTab.tsx` +
+  brief sections, new ranking module. Contract: Brief JSON shape (additive).
+  Rollback: revert route. Tests: brief unit; ranking pure-function tests.
+- **Item 5 — ranking function.** Files: new `development-score.ts`.
+  Contract: none (pure). Tests: synthetic-panel unit tests.
+- **Item 6 — deletions.** Files: `NetworkTab.tsx`, `MapTab.tsx`, watchlist
+  halves of the signals components, `cascade-graph.ts`,
+  `geo-coordinates.ts`, plus dead dependencies (leaflet, react-force-graph).
+  Contract: none. Rollback: git revert. Tests: existing suites stay green.
 
 Explicitly out of scope for L1: `feed-fetcher.ts`, `run-ingest.ts` pipeline
 stages, `tick.ts`, auth/accounts, any new tab, any mobile/notification work.
@@ -662,8 +716,9 @@ required** / **relation** / **timeline behavior** / **possible readthrough**
 
 7. **Microbiome/longevity research signal.** A strain, compound, or
    biomarker recurs across papers and a trial update. Anchor: the
-   condition/pathway and the research institutions involved. Evidence: preprint/journal + registry;
-   maturity label (preclinical vs clinical) mandatory and prominent.
+   condition/pathway and the research institutions involved. Evidence:
+   preprint/journal + registry; maturity label (preclinical vs clinical)
+   mandatory and prominent.
    Relation: `publication`, intervention-target edges. Timeline: slow
    accumulation across months; anecdote sources (communities) are context,
    never evidence. Readthrough: none for patients — research awareness only;

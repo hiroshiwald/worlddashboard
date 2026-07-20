@@ -50,12 +50,20 @@ Why read-only works: anchor/satellite classification is computable at query
 time from `entity_mentions_hourly` baselines plus entity type;
 `entity_candidates` already carries anchor context (`co_entities`),
 corroboration (`source_names`, `day_count`), and role phrases (`contexts`);
-relations and edges carry `first_seen_at`/`last_seen_at`. The known cost of
-skipping a migration: candidate-subject evidence must be resolved by matching
-article titles within the candidate's seen-window (candidates have no article
-FK), and a card whose evidence fails to resolve is suppressed. That is
-acceptable for a proof; if the slice proves value, evidence linking is the
-first thing a follow-up migration would fix.
+relations and edges carry arrival-based `first_seen_at`/`last_seen_at`.
+
+Two known costs of skipping a migration, both accepted for the proof:
+
+- Candidates have no article FK, so candidate-card evidence is resolved by
+  exact `sample_titles` → `articles.title` matching, constrained to the
+  candidate's `source_names` and a narrow time window (§6). A card whose
+  evidence cannot be resolved unambiguously is suppressed. If the slice
+  proves value, proper evidence linking is the first follow-up migration.
+- Candidate `first_seen_at`/`last_seen_at` are news-time (`rollupCandidate`
+  in `entity-ingest.ts` accumulates by `effectiveAt` = publish date when
+  known), not arrival time. They are therefore usable only as a
+  matching/search window. A candidate card's observed times are derived from
+  the `articles.first_seen_at` of its matched evidence rows (§6).
 
 Card subjects come from four read-only sources, strongest first:
 
@@ -67,7 +75,8 @@ Card subjects come from four read-only sources, strongest first:
   articles' co-entities. Label `observed`.
 - **C** — a candidate satellite clearing the corroboration bar (≥2 distinct
   sources AND ≥2 distinct days) with an anchor in `co_entities`. Label
-  `observed`.
+  `observed`. Candidate timestamps are news-time and serve only as the
+  evidence search window; observed times come from matched articles (§6).
 - **E** — a recent undirected edge (`entity_edges`, ≥2 articles) between an
   anchor and a satellite, when no typed relation exists. Label `pattern`
   (derived from co-coverage, not a stated relation).
@@ -79,12 +88,16 @@ interface DevelopmentCardJson {
   subjectName: string;      // the satellite — never an anchor
   subjectType: string;      // 15-type ontology value (or candidate type_hint)
   anchorNames: string[];    // 1–3 anchors providing context
-  relationOrReason: string; // "sanction (stated relation)" | "recurring co-coverage with Russia" | role phrase
+  relationOrReason: string; // "sanction (stated relation)" |
+                            //   "recurring co-coverage with Russia" | role phrase
   whyShown: string;         // one plain sentence derived from scoreParts
   label: "observed" | "pattern"; // "hypothesis" reserved; v0 never emits it
-  firstSeenAt: string;      // arrival-based (system observation time)
-  lastSeenAt: string;
-  staleReporting: boolean;  // true when newest evidence publish date lags first-seen by >7d
+  firstObservedAt: string;  // arrival-based, always. R/N/E: from the row's
+                            //   own first_seen_at. C: min(articles.first_seen_at)
+                            //   over matched evidence — never candidate timestamps.
+  lastObservedAt: string;   // same derivation, max side
+  staleReporting: boolean;  // true when newest evidence publish date
+                            //   lags first-observed by >7d
   evidence: EvidenceArticleJson[]; // 1–5; card suppressed if 0 resolve
   score: number;
   scoreParts: {             // kept in JSON for the operator; rendered compactly
@@ -140,10 +153,19 @@ ceiling classifier and inside the capped corroboration part.
 - Every card links 1–5 evidence articles; a card whose evidence resolves to
   zero articles is suppressed, not rendered bare (spine #2).
 - Evidence resolution: R uses `evidence_article_id` plus the two-entity
-  article intersection; N/E use `article_entities`; C matches article titles
-  against the candidate's display name within its seen-window.
-- `firstSeenAt`/`lastSeenAt` are arrival-based (migration 003 semantics) and
-  are labeled in the UI as "first observed" — never "happened" (spine #4).
+  article intersection; N/E use `article_entities`. C matches each of the
+  candidate's `sample_titles` exactly against `articles.title`, constrained
+  to the candidate's `source_names` and a narrow time window around its
+  seen-window — no broad display-name matching. If no exact, unambiguous
+  match resolves (zero hits, or one title matching conflicting articles
+  beyond normal cross-source duplicates), the card is suppressed.
+- `firstObservedAt`/`lastObservedAt` are arrival-based (migration 003
+  semantics) and are labeled in the UI as "first observed" — never
+  "happened" (spine #4). For R/N/E cards they come from the underlying row's
+  own arrival-based timestamps. For C cards they are derived as
+  min/max of `articles.first_seen_at` over the matched evidence rows;
+  candidate `first_seen_at`/`last_seen_at` are news-time, are used only as
+  the matching window, and are never rendered or labeled as observed time.
 - `publishedAt` is shown per evidence article when known, null never faked.
   When the newest evidence publish date lags the card's first-observed date
   by more than 7 days, the card shows a "older reporting, newly observed"
@@ -196,6 +218,11 @@ JSON shape and zero-evidence suppression.
 - Old article presented as fresh → eligible only with `staleReporting: true`
   and scored down; UI marker asserted.
 - Card with no resolvable evidence → suppressed.
+- Candidate whose `sample_titles` have no exact match in `articles` (or an
+  ambiguous match) → suppressed, even if corroboration clears the bar.
+- Candidate card must derive observed times from matched
+  `articles.first_seen_at`, not from candidate timestamps → asserted with a
+  fixture where the two diverge (publish date days before arrival).
 - Generic topic word (type `other`, no relation, no anchor context) →
   ineligible.
 
@@ -234,7 +261,9 @@ Reviewable, all-or-nothing:
    new dependencies in `package.json`, no deleted components, no new tabs.
 5. Honest time verified in the running app: first-observed labels, warm-up
    empty state, stale-reporting marker on at least one synthetic case.
-6. A card with unresolvable evidence never renders (verified by test).
+6. A card with unresolvable or ambiguous evidence never renders, and no
+   card's observed times derive from candidate news-time timestamps (both
+   verified by test).
 7. DEVLOG.md updated with the implementation entry.
 8. Proof-of-value gate (after ~2 weeks of live use): the operator can point
    to ≥3 cards/week that surfaced something a headline scan of Feeds did not.
