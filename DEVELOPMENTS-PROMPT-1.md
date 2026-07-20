@@ -342,12 +342,17 @@ TESTS
 - Verify in the running app (npm run dev): a populated state, the
   warm-up state, and the empty state (temporarily stub the fetch if
   needed to see each; remove stubs before committing).
+- Because this is a perceptible web-app UI change, take a screenshot of
+  the Brief tab after implementation. If the app cannot be run in the
+  environment, state the limitation in the PR.
 
 ACCEPTANCE
 
 - git diff touches only the five files listed.
 - All render-spec fields present on a populated card; all three states
   reachable and honest.
+- Screenshot of the Brief tab attached to the PR, or the environment
+  limitation stated in the PR description.
 - No new dependencies, no settings, no server changes, no deletions.
 - DEVLOG.md entry appended.
 ```
@@ -373,3 +378,5 @@ L1B:
       stale-reporting marker works.
 - [ ] Warm-up and empty states render honestly; section never hidden.
 - [ ] Both themes render correctly; expander accessible.
+- [ ] Screenshot of the Brief tab in the PR (or the run limitation
+      stated explicitly).
