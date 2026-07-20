@@ -1,5 +1,14 @@
 # RADAR-STRATEGY.md — Planning Packet
 
+> **Scope correction (2026-07-20):** current implementation scope is the
+> existing news dashboard only, per operator direction. AI/Medical/Alpha
+> radars are future portability context — they do not drive sources,
+> migrations, routes, navigation, or repo structure now. The roadmap levels
+> in §7 and the surface deletions in §8 are deferred and require explicit
+> approval. The active plan is **DEVELOPMENTS-PLAN.md** (read-only
+> development cards in Brief, no migrations, no source changes, no
+> deletions). This document remains as strategic context.
+
 Planning output only. No code changes are proposed for this PR. This packet is
 written to be critiqued by a second reviewer before any implementation, per
 FABLE-ROADMAP.md §9–10. It supersedes FABLE-ROADMAP.md's breadth with hard
