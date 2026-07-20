@@ -1807,3 +1807,28 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: Added `FABLE-ROADMAP.md`, a strategy and review-process brief for Claude Code Fable.
 - What it affected: Planning guidance only; no application code or runtime behavior changed.
 - Gotchas: The roadmap explicitly recommends not splitting the repo until domain-specific complexity creates a concrete deploy, compliance, data-governance, or coupling problem.
+
+## 2026-07-20
+- What changed: Added `RADAR-STRATEGY.md`, the planning packet for the radar product direction (idea maze, object model, ranking strategy, roadmap, surface decisions, validation plan, reviewer checklist). Planning only; no application code changed.
+- What it affected: Supersedes FABLE-ROADMAP.md's breadth with hard decisions: one app/one repo, developments as the unit of value, AI Radar as first domain mode, Network/Map/watchlist/cascade-graph slated for deletion in the first slice.
+- Gotchas: Red-team review caught that 30-day article retention (`ingest-writer.ts:113`) would silently break evidence for long-dormancy threads — the packet's evidence model now denormalizes evidence snapshots onto thread updates. Also: the famous auto-accept gate optimizes for the opposite of the anchor/satellite hypothesis, and relations touching unresolved candidates are dropped every run — both named as L1 fixes.
+
+## 2026-07-20
+- What changed: Added `DEVELOPMENTS-PLAN.md` (scope-corrected first slice: read-only development cards in Brief, current news corpus only) and a scope-correction note atop `RADAR-STRATEGY.md`. Planning only.
+- What it affected: Narrows active scope to the existing dashboard. AI/Medical/Alpha are future portability context only; RADAR-STRATEGY §7 roadmap and §8 deletions are deferred pending approval. First slice: no migrations, no new sources, no deletions, Brief-only UI change.
+- Gotchas: Tracked satellites are rare today (tracking flows from dictionary hits, famous auto-accepts, or manual Review acceptance — mostly anchors), so the read-only slice must draw card subjects from `entity_candidates` too; candidate evidence has no article FK, so v0 resolves it by title-window matching and suppresses cards whose evidence doesn't resolve.
+
+## 2026-07-20
+- What changed: Pre-merge revisions to the planning docs: candidate-card time semantics corrected (candidate first/last_seen are news-time via rollupCandidate's effectiveAt — observed times now derive from matched articles.first_seen_at); candidate evidence matching tightened to exact sample_titles→articles.title within source_names + narrow window, suppress on ambiguity; RADAR-STRATEGY.md tables reformatted to per-line bullets and given a prominent "strategic context only, do not implement" warning.
+- What it affected: DEVELOPMENTS-PLAN.md is the sole active implementation plan; card fields renamed firstObservedAt/lastObservedAt with per-source derivation rules and matching test fixtures.
+- Gotchas: entity_candidates timestamps must never be labeled "first observed" — they are publish-date-based and can predate system observation by days.
+
+## 2026-07-20
+- What changed: Added `DEVELOPMENTS-PROMPT-1.md` (self-contained L1A/L1B implementation prompts for a code model) and hardened DEVELOPMENTS-PLAN.md wording: candidate evidence suppression now explicitly covers zero/ambiguous/source-window-inconsistent matches, and the first slice is labeled L1A (server) / L1B (Brief UI).
+- What it affected: Planning docs only. L1A = developments module + scoring + additive getBrief field + tests; L1B = Brief section with honest states. Verified the previously reported formatting/matching issues were already absent from pushed HEAD f52045a (271 LF lines; zero display-name matching hits) — reviewer was viewing the pre-revision commit.
+- Gotchas: The prompt packet inlines the two traps a cheap model would hit: entity_candidates timestamps are news-time (search window only; observed times from matched articles.first_seen_at), and evidence matching is exact sample_titles→articles.title with cluster-ambiguity suppression.
+
+## 2026-07-20
+- What changed: Added the L1B screenshot requirement to DEVELOPMENTS-PROMPT-1.md (screenshot Brief after implementation, or state the run limitation in the PR) and its reviewer checklist. Verified formatting hygiene: awk length>100 over all three planning docs returns empty on both working tree and origin blobs; zero CR/U+2028/U+2029/NEL characters; 277/375/878 real LF lines.
+- What it affected: Prompt packet only. PR #63 ready to merge as the planning/prompt basis; next step is pasting L1A alone into a code-model session.
+- Gotchas: Twice the reviewer saw the docs "collapsed into ~30 physical lines" on GitHub while the pushed blobs were verifiably clean — likely the rendered/preview view or a stale diff pin; check the raw view at the head commit before diagnosing file problems.
