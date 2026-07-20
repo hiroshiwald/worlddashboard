@@ -27,6 +27,7 @@ function toFeedItem(row: SqlRow): FeedItem {
     link: String(row.link),
     published: toIsoString(row.published_at ?? row.first_seen_at),
     updatedAt: toIsoString(row.updated_at),
+    clusterSize: Number(row.cluster_size),
     summary: row.summary != null ? String(row.summary) : "",
     sourceName: String(row.source_name),
     sourceCategory: String(row.source_category),
@@ -52,13 +53,13 @@ async function queryClusterHeads(
 ): Promise<FeedItem[]> {
   const rows = category
     ? await sql`WITH cluster_updates AS (
-        SELECT COALESCE(dup_group_id, id) AS cluster_id, MAX(first_seen_at) AS updated_at
+        SELECT COALESCE(dup_group_id, id) AS cluster_id, MAX(first_seen_at) AS updated_at, COUNT(*)::int AS cluster_size
         FROM articles
         GROUP BY COALESCE(dup_group_id, id)
       )
         SELECT h.id, h.title, h.link, h.published_at, h.first_seen_at,
         h.source_name, h.source_category, h.source_tier, h.summary, h.image_url,
-        cu.updated_at
+        cu.updated_at, cu.cluster_size
         FROM articles h
         JOIN cluster_updates cu ON cu.cluster_id = h.id
         WHERE h.dup_group_id IS NULL
@@ -67,13 +68,13 @@ async function queryClusterHeads(
         ORDER BY cu.updated_at DESC
         LIMIT ${MAX_ITEMS}`
     : await sql`WITH cluster_updates AS (
-        SELECT COALESCE(dup_group_id, id) AS cluster_id, MAX(first_seen_at) AS updated_at
+        SELECT COALESCE(dup_group_id, id) AS cluster_id, MAX(first_seen_at) AS updated_at, COUNT(*)::int AS cluster_size
         FROM articles
         GROUP BY COALESCE(dup_group_id, id)
       )
         SELECT h.id, h.title, h.link, h.published_at, h.first_seen_at,
         h.source_name, h.source_category, h.source_tier, h.summary, h.image_url,
-        cu.updated_at
+        cu.updated_at, cu.cluster_size
         FROM articles h
         JOIN cluster_updates cu ON cu.cluster_id = h.id
         WHERE h.dup_group_id IS NULL

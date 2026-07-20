@@ -20,18 +20,18 @@ describe("isRecent", () => {
     expect(isRecent(null, NOW, FRESHNESS_THRESHOLD_MS)).toBe(false);
   });
 
-  it("freshness (2h): a timestamp just under 2 hours old is recent", () => {
-    const timestamp = minutesBefore(NOW, 119);
+  it("freshness (15min): a timestamp just under 15 minutes old is recent", () => {
+    const timestamp = minutesBefore(NOW, 14);
     expect(isRecent(timestamp, NOW, FRESHNESS_THRESHOLD_MS)).toBe(true);
   });
 
-  it("freshness (2h): a timestamp exactly 2 hours old is not recent", () => {
-    const timestamp = minutesBefore(NOW, 120);
+  it("freshness (15min): a timestamp exactly 15 minutes old is not recent", () => {
+    const timestamp = minutesBefore(NOW, 15);
     expect(isRecent(timestamp, NOW, FRESHNESS_THRESHOLD_MS)).toBe(false);
   });
 
-  it("freshness (2h): a timestamp just over 2 hours old is not recent", () => {
-    const timestamp = minutesBefore(NOW, 121);
+  it("freshness (15min): a timestamp just over 15 minutes old is not recent", () => {
+    const timestamp = minutesBefore(NOW, 16);
     expect(isRecent(timestamp, NOW, FRESHNESS_THRESHOLD_MS)).toBe(false);
   });
 
@@ -72,7 +72,7 @@ describe("selectFreshnessThreshold", () => {
 
   it("a timestamp stale under the manual threshold but fresh under the passive one resolves differently per mode", () => {
     const now = NOW;
-    const timestamp = minutesBefore(now, 15);
+    const timestamp = minutesBefore(now, 12);
     expect(isRecent(timestamp, now, selectFreshnessThreshold(true))).toBe(false);
     expect(isRecent(timestamp, now, selectFreshnessThreshold(false))).toBe(true);
   });

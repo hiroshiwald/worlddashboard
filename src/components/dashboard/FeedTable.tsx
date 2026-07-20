@@ -1,6 +1,5 @@
 import { FeedItem } from "@/lib/types";
 import { ThemeClasses } from "@/lib/theme";
-import { getUrgencyLevel, getRowClasses, getUrgencyBadgeClasses } from "@/lib/urgency";
 import { formatDate, timeAgo } from "@/lib/date-utils";
 import FeedItemImage from "../FeedItemImage";
 import { ColumnKey } from "@/hooks/useDashboardTable";
@@ -44,21 +43,46 @@ function FeedTimestamp({ item, t }: { item: FeedItem; t: ThemeClasses }) {
   );
 }
 
-function TableRow({ item, idx, dark, t }: { item: FeedItem; idx: number; dark: boolean; t: ThemeClasses }) {
-  const level = getUrgencyLevel(item.sourceCategory);
-  const rowColor = getRowClasses(level, dark);
+// Feeds carries no severity of its own — that's earned on the Signals tab
+// by actual deviation. Every category gets the same quiet chip.
+function categoryChipClasses(dark: boolean): string {
+  return dark
+    ? "text-slate-400 bg-slate-500/10 px-2 py-0.5 rounded-full text-[10px] font-semibold"
+    : "text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full text-[10px] font-semibold";
+}
 
+// Weight, not alarm: a cluster of 2+ articles about the same story gets a
+// muted "+K" chip (K = other members), quieter than the category chip.
+function ClusterSizeChip({ item, dark }: { item: FeedItem; dark: boolean }) {
+  if (!item.clusterSize || item.clusterSize < 2) return null;
+  const more = item.clusterSize - 1;
+  return (
+    <span
+      className={dark
+        ? "text-slate-500 bg-slate-800/60 px-1.5 py-0.5 rounded-full text-[10px]"
+        : "text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full text-[10px]"}
+      title={`${more} more articles about this story across sources`}
+    >
+      +{more}
+    </span>
+  );
+}
+
+function TableRow({ item, idx, dark, t }: { item: FeedItem; idx: number; dark: boolean; t: ThemeClasses }) {
   return (
     <tr
       key={item.id + idx}
-      className={`${rowColor} ${
-        level === "neutral" ? (idx % 2 === 0 ? t.rowAltA : t.rowAltB) : ""
-      } ${t.rowHover} transition-colors ${t.rowBorder}`}
+      className={`${idx % 2 === 0 ? t.rowAltA : t.rowAltB} ${t.rowHover} transition-colors ${t.rowBorder}`}
     >
       <td className={`px-4 py-3 text-xs whitespace-nowrap ${t.dtgText}`}><FeedTimestamp item={item} t={t} /></td>
-      <td className={`px-4 py-3 text-sm font-medium whitespace-nowrap ${t.sourceText}`}>{item.sourceName}</td>
+      <td className={`px-4 py-3 text-sm font-medium whitespace-nowrap ${t.sourceText}`}>
+        <span className="inline-flex items-center gap-1.5">
+          {item.sourceName}
+          <ClusterSizeChip item={item} dark={dark} />
+        </span>
+      </td>
       <td className="px-4 py-3">
-        <span className={getUrgencyBadgeClasses(level, dark)}>{item.sourceCategory.toUpperCase()}</span>
+        <span className={categoryChipClasses(dark)}>{item.sourceCategory.toUpperCase()}</span>
       </td>
       <td className="px-4 py-3 max-w-[500px]">
         <div className="flex items-start gap-3">

@@ -1,10 +1,15 @@
 import type { Sql } from "./db";
 
-export const FRESHNESS_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
+// Short enough that an open, visible dashboard keeps itself fresh on its
+// own — useSources.ts checks on load, on visibilitychange, and on an
+// interval while the tab is visible. This is attention-driven upkeep, not
+// a cron replacement: the lock threshold below is still the real ceiling
+// on how often an ingest run can actually start.
+export const FRESHNESS_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes
 export const LOCK_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 
 // An explicit user click (?manual=1 on /api/tick) uses the lock window
-// itself as its freshness threshold, not the 2h passive one — so a click
+// itself as its freshness threshold, not the 15min passive one — so a click
 // almost always triggers a real collection attempt. This is safe because
 // the lock, not the freshness check, is the actual abuse ceiling: at most
 // one ingest run can start per LOCK_THRESHOLD_MS no matter which threshold
@@ -23,8 +28,8 @@ export function isRecent(timestamp: Date | null, now: Date, thresholdMs: number)
 }
 
 /** Which freshness threshold governs a tick request: the 10-minute manual
- * window for an explicit user click, or the 2-hour passive window for the
- * background page-load self-heal. */
+ * window for an explicit user click, or the 15-minute passive window that
+ * keeps an open, visible dashboard fresh on its own. */
 export function selectFreshnessThreshold(manual: boolean): number {
   return manual ? MANUAL_FRESHNESS_THRESHOLD_MS : FRESHNESS_THRESHOLD_MS;
 }

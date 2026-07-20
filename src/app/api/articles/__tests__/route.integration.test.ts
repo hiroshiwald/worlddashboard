@@ -91,7 +91,7 @@ describe.skipIf(!TEST_DATABASE_URL)("GET /api/articles integration (real Postgre
     expect(publishedAgeMs).toBeGreaterThan(60 * 60 * 1000);
   });
 
-  it("a head with no members has updatedAt equal to its own first_seen_at", async () => {
+  it("a head with no members has updatedAt equal to its own first_seen_at, and clusterSize 1 (no chip)", async () => {
     await insertArticle(currentSql, {
       contentHash: "hash-solo",
       titleSignature: "sig-2",
@@ -108,6 +108,47 @@ describe.skipIf(!TEST_DATABASE_URL)("GET /api/articles integration (real Postgre
     const updatedAt = new Date(body.items[0].updatedAt).getTime();
     const firstSeenAt = new Date(body.items[0].published).getTime();
     expect(Math.abs(updatedAt - firstSeenAt)).toBeLessThan(5000);
+    expect(body.items[0].clusterSize).toBe(1);
+  });
+
+  it("a head with two members has clusterSize 3 (chip math: +2 more articles)", async () => {
+    const head = await insertArticle(currentSql, {
+      contentHash: "hash-cluster-head",
+      titleSignature: "sig-cluster",
+      title: "Clustered story",
+      link: "https://a.example.com/cluster",
+      publishedAgo: "3 hours",
+      firstSeenAgo: "3 hours",
+      sourceName: "Source A",
+    });
+    await insertArticle(currentSql, {
+      contentHash: "hash-cluster-m1",
+      titleSignature: "sig-cluster",
+      title: "Clustered story, follow-up 1",
+      link: "https://b.example.com/cluster1",
+      publishedAgo: "2 hours",
+      firstSeenAgo: "1 hour",
+      sourceName: "Source B",
+      dupGroupId: head.id,
+    });
+    await insertArticle(currentSql, {
+      contentHash: "hash-cluster-m2",
+      titleSignature: "sig-cluster",
+      title: "Clustered story, follow-up 2",
+      link: "https://c.example.com/cluster2",
+      publishedAgo: "1 hour",
+      firstSeenAgo: "10 minutes",
+      sourceName: "Source C",
+      dupGroupId: head.id,
+    });
+
+    const res = await GET(new NextRequest("http://localhost/api/articles"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.items).toHaveLength(1); // only the head is served
+    expect(body.items[0].clusterSize).toBe(3); // head + 2 members
+    expect(body.items[0].clusterSize - 1).toBe(2); // the FeedTable/FeedCardList "+K" chip shows +2
   });
 
   it("sorts by the cluster's updatedAt, not by publish time", async () => {
