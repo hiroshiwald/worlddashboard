@@ -1667,3 +1667,8 @@ Run: `npm test`
 ### No Behavior Changes
 
 All refactoring was purely structural. No UI changes, no functional changes, no API changes. The application behaves identically before and after this refactoring.
+
+## 2026-07-20
+- What changed: Added `FABLE-ROADMAP.md`, a strategy and review-process brief for Claude Code Fable.
+- What it affected: Planning guidance only; no application code or runtime behavior changed.
+- Gotchas: The roadmap explicitly recommends not splitting the repo until domain-specific complexity creates a concrete deploy, compliance, data-governance, or coupling problem.
