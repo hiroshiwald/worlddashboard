@@ -1,5 +1,120 @@
 # World Dashboard Development Log
 
+## 2026-07-21 — L1A fix: R-source bootstrap cohort exclusion + candidate fan-out cap
+
+**What changed**: two small fixes to `src/lib/server/developments.ts` from
+review feedback on PR #64, before merge.
+
+1. Source **R** (stated `entity_relations`) was missing the bootstrap-cohort
+   exclusion that N and E already had. An initial ingest run can backfill
+   relations for every already-tracked pair at once; without a guard, that
+   whole cohort would sit inside the 14-day window and surface as
+   high-priority "observed" cards the moment warm-up clears. Fixed by adding
+   `loadRelationBootstrapFloor` (same `MIN(first_seen_at)`-over-tracked-pairs
+   pattern as the existing `loadEdgeBootstrapFloor`) and skipping any
+   relation where `isBootstrapCohort(relation.firstSeenAt, globalMin)` is
+   true — the same imported helper E already uses, applied the same way.
+2. Candidate (source C) evidence resolution fans out one SQL query per
+   eligible candidate (`loadCandidateTitleMatches`). Added
+   `capCandidateFanout` — a small pure sort-and-slice, most-recently-active
+   first, capped at a new `MAX_CANDIDATE_FANOUT = 30` constant — applied to
+   the eligible set right before that fan-out. A batched single query (the
+   `loadPairEvidenceArticles` UNNEST pattern already used elsewhere in this
+   file) would be the better long-term fix; this is the v0 stopgap, noted as
+   a fast-follow if the cap is ever actually reached in practice.
+
+**What it affected**:
+- `src/lib/server/developments.ts`: `loadRelationBootstrapFloor` (new);
+  `buildRelationCardDrafts` takes a `globalMin` parameter and skips
+  bootstrap-cohort relations, mirroring `buildEdgeCardDrafts` exactly;
+  `buildRelationSourceDrafts` fetches the floor alongside the window query
+  via `Promise.all`. `capCandidateFanout` (new, pure); called from
+  `buildCandidateSourceDrafts` on the anchor-resolved eligible set before
+  `loadCandidateTitleMatches`. No other card source, no scoring, no
+  eligibility, no evidence-matching logic touched.
+- `src/lib/server/__tests__/developments.test.ts`: `baseResponses()` now
+  defaults `relationBootstrapFloor` to `OLD_EPOCH` so all pre-existing
+  R-source fixtures (1, 3, 5, 8, 9, 10) keep passing unmodified; the mock
+  router gained one branch (`MIN(r.first_seen_at)`, checked before the
+  generic `FROM entity_relations` branch, same ordering trick already used
+  for the edge floor vs. the generic edges branch). Two new fixtures assert
+  the R bootstrap exclusion both ways (excluded when the relation is the
+  cohort itself; still eligible with the same shape once the floor is old).
+  Two new unit tests cover `capCandidateFanout` directly.
+- No UI, no migrations, no new sources, no dependency, no other module.
+
+**Gotchas**: the new `loadRelationBootstrapFloor` query also fires (via
+`Promise.all`) on fixtures with zero relations (N/C/E-only fixtures) — this
+mirrors `buildEdgeSourceDrafts`'s existing behavior exactly (it already
+fetches its bootstrap floor unconditionally too) and is harmless: the early
+`if (relations.length === 0) return [];` in `buildRelationSourceDrafts` runs
+after both promises resolve, so an unused/default floor response never
+reaches `buildRelationCardDrafts`.
+
+## 2026-07-21 — L1A: read-only development cards in Brief (server-side)
+
+**What changed**: added `src/lib/server/developments.ts`, a new read-only
+module that surfaces "development cards" — a lower-frequency satellite
+entity around a high-volume anchor, with linked evidence and honest
+(arrival-based) observation times. Cards come from four sources, strongest
+to weakest: **R** stated `entity_relations`, **N** newly tracked satellites,
+**C** corroborated `entity_candidates`, **E** `entity_edges` co-coverage.
+`getBrief` gains an additive `developments: DevelopmentCardJson[]` field,
+loaded only after warm-up clears (mirrors the existing `movers` pattern) —
+`[]` during warm-up, no query attempted. No migration, no new tables, no UI.
+
+**What it affected**:
+- `src/lib/server/developments.ts` (new): anchor classification
+  (`isAnchor`, type-or-volume; `computeAnchorThreshold`, max(3, 90th
+  percentile of trailing-15-day baselines)); per-source SQL loaders +
+  card builders; a uniform `passesEligibility` gate run identically over
+  every source's output; pure scoring (`novelty`/`corroboration`/
+  `persistence`/`relationStrength`/`anchorContext`/`penalty` +
+  `scoreDevelopment`); `buildWhyShown`; cross-source `dedupeCards` (highest
+  relationStrength wins, R>N>C>E tie-break) + `sortAndCapCards` (cap 8).
+- `src/lib/server/brief.ts`: additive only — new import, `developments`
+  field on `Brief`, one conditional-load line mirroring `movers`.
+- `src/lib/server/__tests__/developments.test.ts` (new): pure-function
+  unit tests for every exported helper, plus the 14 required fixtures
+  (good: low-freq company + Russia/sanction, infra + shipping edge, obscure
+  person + Trump/legal_action, disease entity, new relation to a famous
+  anchor; bad: country/high-baseline subject, single-source, stale
+  reporting, zero/no-match/ambiguous candidate evidence, generic term with
+  no anchor) as `getDevelopments` integration tests against a fixed `now`.
+- `src/lib/server/__tests__/brief.test.ts`: additive `describe` block —
+  `developments: []` during warm-up; response shape additive (exact key
+  set, pre-existing movers behavior unchanged).
+
+**Gotchas / non-obvious traps for a future reader**:
+- The new module's tracked-entity/baseline panel query originally would
+  have used `loadMoverAgg`'s own column alias `baseline_sum` — but
+  `brief.test.ts`'s existing mock branches on `query.includes("baseline_sum")`,
+  and any test exercising both queries would silently misroute rows between
+  them. Aliased to `baseline_mentions`/`total_mentions_15d` instead;
+  verified no collision and confirmed the existing movers tests still pass
+  unmodified with `getDevelopments` now also running inside `getBrief`.
+- "Subject is not an anchor, no exceptions" is *not* structurally guaranteed
+  for the C (candidate) source the way it is for R/E's two-endpoint pairing:
+  `entity_candidates.type_hint` can legitimately be `'region'` (compromise's
+  NLP place-tagger stamps every detected place `type_hint: 'region'`
+  regardless of dictionary membership, and `classifyCandidate` only
+  auto-tracks a dictionary hit or an LLM-"famous" hit — everything else,
+  including every such region tag, reaches the candidate queue intact).
+  Verified directly against `extract-v2.ts`/`entity-ingest.ts`. Fixed by
+  running one shared `passesEligibility` check (including the anchor-type
+  test) uniformly over every source's assembled card, rather than trusting
+  a per-source "this can't happen" argument.
+- Evidence is scored (distinct sources/days, staleReporting, eligibility)
+  off the *full* resolved/matched set per card, then sliced to the newest 5
+  only at the very last step for the JSON `evidence` field — capping before
+  scoring could understate real corroboration if the newest 5 articles
+  happen to cluster on fewer sources than the full matched set.
+- Candidate `first_seen_at`/`last_seen_at` are news-time and are used only
+  as the title-match search window; a card's `firstObservedAt`/
+  `lastObservedAt` always come from the matched evidence articles' own
+  (arrival-based) `first_seen_at` — asserted directly in a fixture where the
+  two deliberately diverge (fixture 13).
+
 ## 2026-07-18 — Attention-driven freshness (15min passive tick) + honest Feeds rows + cluster-weight chip
 
 **What changed**: freshness now follows attention instead of a slow fixed
