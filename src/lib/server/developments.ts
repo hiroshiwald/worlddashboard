@@ -100,6 +100,7 @@ const MIN_DISTINCT_SOURCES = 2;
 const MIN_ANCHOR_COUNT = 1;
 const MIN_CANDIDATE_DAY_COUNT = 2;
 const MIN_CANDIDATE_SOURCE_NAMES = 2;
+const MAX_CANDIDATE_FANOUT = 30;
 const MIN_EDGE_ARTICLE_COUNT = 2;
 const CANDIDATE_MATCH_WINDOW_PAD_DAYS = 2;
 const STALE_REPORTING_THRESHOLD_DAYS = 7;
@@ -309,6 +310,16 @@ export function passesEligibility(input: EligibilityInput): boolean {
  * scoreNovelEdge, etc.) is a testable function rather than baked into SQL. */
 export function isCorroboratedCandidate(dayCount: number, distinctSourceNameCount: number): boolean {
   return dayCount >= MIN_CANDIDATE_DAY_COUNT && distinctSourceNameCount >= MIN_CANDIDATE_SOURCE_NAMES;
+}
+
+/** Bounds candidate evidence fan-out: each candidate that reaches this point
+ * costs one SQL round trip in loadCandidateTitleMatches. Most-recently-active
+ * first; candidates past the cap are dropped before any query runs, not
+ * merely deprioritized in scoring. A batched single query (the
+ * loadPairEvidenceArticles UNNEST pattern) is the better long-term fix if
+ * this cap is ever actually reached in practice. */
+export function capCandidateFanout(candidates: CandidateRow[], cap: number): CandidateRow[] {
+  return [...candidates].sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime()).slice(0, cap);
 }
 
 /** Groups candidate title matches by the sample title they satisfied; a
@@ -552,6 +563,23 @@ async function loadRelationsInWindow(sql: Sql): Promise<RelationRow[]> {
   return rows.map(parseRelationRow);
 }
 
+// Own local copy of the same global-min-first-seen pattern loadEdgeBootstrapFloor
+// uses (same tracked-tracked join loadRelationsInWindow already applies). Stated
+// relations need the identical bootstrap-cohort guard: an initial ingest run can
+// backfill relations for every already-tracked pair at once, and without this
+// guard that whole cohort would sit inside the 14-day window as high-priority
+// "observed" cards the moment warm-up clears.
+async function loadRelationBootstrapFloor(sql: Sql): Promise<Date | null> {
+  const rows = await sql`
+    SELECT MIN(r.first_seen_at) AS min_first_seen
+    FROM entity_relations r
+    JOIN entities es ON es.id = r.source_id AND es.status = 'tracked'
+    JOIN entities et ON et.id = r.target_id AND et.status = 'tracked'
+  `;
+  const value = rows[0]?.min_first_seen;
+  return value == null ? null : toDate(value);
+}
+
 function mergeRelationEvidence(
   pairEvidence: RawEvidenceArticle[],
   resolvedEvidence: RawEvidenceArticle | undefined,
@@ -563,13 +591,16 @@ function mergeRelationEvidence(
 
 function buildRelationCardDrafts(
   relations: RelationRow[],
+  globalMin: Date | null,
   entityIndex: Map<number, TrackedEntityMeta>,
   pairArticles: Map<string, RawEvidenceArticle[]>,
   resolvedEvidenceById: Map<number, RawEvidenceArticle>,
   anchorThreshold: number,
 ): CardDraft[] {
+  if (!globalMin) return [];
   const drafts: CardDraft[] = [];
   for (const relation of relations) {
+    if (isBootstrapCohort(relation.firstSeenAt, globalMin)) continue;
     const source = entityIndex.get(relation.sourceId);
     const target = entityIndex.get(relation.targetId);
     if (!source || !target) continue;
@@ -602,7 +633,7 @@ function buildRelationCardDrafts(
 }
 
 async function buildRelationSourceDrafts(sql: Sql, ctx: CardContext): Promise<CardDraft[]> {
-  const relations = await loadRelationsInWindow(sql);
+  const [relations, globalMin] = await Promise.all([loadRelationsInWindow(sql), loadRelationBootstrapFloor(sql)]);
   if (relations.length === 0) return [];
 
   const pairs = relations.map((r) => ({ a: r.sourceId, b: r.targetId }));
@@ -611,7 +642,14 @@ async function buildRelationSourceDrafts(sql: Sql, ctx: CardContext): Promise<Ca
     loadPairEvidenceArticles(sql, pairs),
     loadArticlesByIds(sql, evidenceArticleIds),
   ]);
-  return buildRelationCardDrafts(relations, ctx.entityIndex, pairArticles, resolvedEvidenceById, ctx.anchorThreshold);
+  return buildRelationCardDrafts(
+    relations,
+    globalMin,
+    ctx.entityIndex,
+    pairArticles,
+    resolvedEvidenceById,
+    ctx.anchorThreshold,
+  );
 }
 
 // ---- source N: newly tracked satellite ----
@@ -917,7 +955,10 @@ async function buildCandidateSourceDrafts(sql: Sql, ctx: CardContext): Promise<C
   if (candidates.length === 0) return [];
 
   const anchorsByCandidate = resolveCandidateAnchors(candidates, ctx.nameIndex, ctx.anchorThreshold);
-  const eligible = candidates.filter((c) => (anchorsByCandidate.get(c.nameNorm) ?? []).length > 0);
+  const eligible = capCandidateFanout(
+    candidates.filter((c) => (anchorsByCandidate.get(c.nameNorm) ?? []).length > 0),
+    MAX_CANDIDATE_FANOUT,
+  );
   if (eligible.length === 0) return [];
 
   const titleMatchesByCandidate = await loadCandidateTitleMatches(sql, eligible);

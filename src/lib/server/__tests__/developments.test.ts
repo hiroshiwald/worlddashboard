@@ -16,6 +16,7 @@ import {
   buildWhyShown,
   passesEligibility,
   isCorroboratedCandidate,
+  capCandidateFanout,
   resolveAmbiguousTitles,
   selectDisplayEvidence,
   dedupeCards,
@@ -279,6 +280,38 @@ describe("isCorroboratedCandidate", () => {
   });
 });
 
+describe("capCandidateFanout", () => {
+  function candidate(nameNorm: string, lastSeenAt: string) {
+    return {
+      nameNorm,
+      displayName: nameNorm,
+      typeHint: "company",
+      firstSeenAt: new Date(lastSeenAt),
+      lastSeenAt: new Date(lastSeenAt),
+      sourceNames: [],
+      dayCount: 2,
+      sampleTitles: [],
+      contexts: [],
+      coEntities: [],
+    };
+  }
+
+  it("keeps the most-recently-active candidates up to the cap", () => {
+    const candidates = [
+      candidate("old", "2026-07-01T00:00:00Z"),
+      candidate("newest", "2026-07-10T00:00:00Z"),
+      candidate("mid", "2026-07-05T00:00:00Z"),
+    ];
+    const result = capCandidateFanout(candidates, 2);
+    expect(result.map((c) => c.nameNorm)).toEqual(["newest", "mid"]);
+  });
+
+  it("is a no-op when already under the cap", () => {
+    const candidates = [candidate("a", "2026-07-01T00:00:00Z")];
+    expect(capCandidateFanout(candidates, 30)).toHaveLength(1);
+  });
+});
+
 describe("resolveAmbiguousTitles", () => {
   it("keeps a title whose matches all resolve to one cluster head", () => {
     const result = resolveAmbiguousTitles([
@@ -413,6 +446,7 @@ function makeDevelopmentsSql(responses: Partial<Record<string, SqlRow[]>>): Sql 
   return (async (strings: TemplateStringsArray) => {
     const query = strings.join(" ? ");
     if (query.includes("MIN(ee.first_seen_at)")) return responses.edgeBootstrapFloor ?? [];
+    if (query.includes("MIN(r.first_seen_at)")) return responses.relationBootstrapFloor ?? [];
     if (query.includes("min_first_seen") && query.includes("FROM articles")) return responses.epoch ?? [];
     if (query.includes("baseline_mentions")) return responses.baseline ?? [];
     if (query.includes("FROM entity_relations")) return responses.relations ?? [];
@@ -428,8 +462,14 @@ function makeDevelopmentsSql(responses: Partial<Record<string, SqlRow[]>>): Sql 
   }) as Sql;
 }
 
+// relationBootstrapFloor defaults old (matching OLD_EPOCH) so every existing
+// R-source fixture's recent relations clear the bootstrap guard by default;
+// only the dedicated bootstrap-cohort tests below override it.
 function baseResponses(): Partial<Record<string, SqlRow[]>> {
-  return { epoch: [{ min_first_seen: OLD_EPOCH }] };
+  return {
+    epoch: [{ min_first_seen: OLD_EPOCH }],
+    relationBootstrapFloor: [{ min_first_seen: OLD_EPOCH }],
+  };
 }
 
 function entityRow(id: number, canonicalName: string, type: string, baselineMentions: number) {
@@ -722,6 +762,48 @@ describe("getDevelopments — required fixtures", () => {
 
     const result = await getDevelopments(sql, NOW);
     expect(result).toHaveLength(0);
+  });
+});
+
+describe("getDevelopments — source R bootstrap cohort exclusion", () => {
+  // Same relation shape as fixture 1 (Company/Russia/sanction, 2 evidence
+  // articles, 2 distinct sources) so the ONLY variable under test is the
+  // relation bootstrap floor — everything else about the fixture already
+  // proves eligible on its own (see fixture 1 above).
+  const relationFixtureBase = {
+    baseline: [entityRow(1, "Russia", "country", 0), entityRow(2, "Company", "company", 14)],
+    relations: [
+      { source_id: 2, target_id: 1, relation: "sanction", first_seen_at: iso(5), last_seen_at: iso(4), evidence_article_id: null },
+    ],
+    pairEvidence: [
+      { entity_a: 1, entity_b: 2, id: 301, title: "R1", link: "http://r1", source_name: "Source A", published_at: iso(5), first_seen_at: iso(5) },
+      { entity_a: 1, entity_b: 2, id: 302, title: "R2", link: "http://r2", source_name: "Source B", published_at: iso(4), first_seen_at: iso(4) },
+    ],
+  };
+
+  it("excludes a relation whose first_seen_at falls inside the bootstrap cohort", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      ...relationFixtureBase,
+      // Floor equals the relation's own first_seen_at: this relation IS the
+      // earliest one ever recorded, i.e. exactly the initial-backfill case.
+      relationBootstrapFloor: [{ min_first_seen: iso(5) }],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(0);
+  });
+
+  it("still surfaces a non-bootstrap relation with the same shape once the floor is old", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      ...relationFixtureBase,
+      relationBootstrapFloor: [{ min_first_seen: iso(60) }],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(1);
+    expect(result[0].subjectName).toBe("Company");
   });
 });
 

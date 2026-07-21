@@ -1,5 +1,56 @@
 # World Dashboard Development Log
 
+## 2026-07-21 — L1A fix: R-source bootstrap cohort exclusion + candidate fan-out cap
+
+**What changed**: two small fixes to `src/lib/server/developments.ts` from
+review feedback on PR #64, before merge.
+
+1. Source **R** (stated `entity_relations`) was missing the bootstrap-cohort
+   exclusion that N and E already had. An initial ingest run can backfill
+   relations for every already-tracked pair at once; without a guard, that
+   whole cohort would sit inside the 14-day window and surface as
+   high-priority "observed" cards the moment warm-up clears. Fixed by adding
+   `loadRelationBootstrapFloor` (same `MIN(first_seen_at)`-over-tracked-pairs
+   pattern as the existing `loadEdgeBootstrapFloor`) and skipping any
+   relation where `isBootstrapCohort(relation.firstSeenAt, globalMin)` is
+   true — the same imported helper E already uses, applied the same way.
+2. Candidate (source C) evidence resolution fans out one SQL query per
+   eligible candidate (`loadCandidateTitleMatches`). Added
+   `capCandidateFanout` — a small pure sort-and-slice, most-recently-active
+   first, capped at a new `MAX_CANDIDATE_FANOUT = 30` constant — applied to
+   the eligible set right before that fan-out. A batched single query (the
+   `loadPairEvidenceArticles` UNNEST pattern already used elsewhere in this
+   file) would be the better long-term fix; this is the v0 stopgap, noted as
+   a fast-follow if the cap is ever actually reached in practice.
+
+**What it affected**:
+- `src/lib/server/developments.ts`: `loadRelationBootstrapFloor` (new);
+  `buildRelationCardDrafts` takes a `globalMin` parameter and skips
+  bootstrap-cohort relations, mirroring `buildEdgeCardDrafts` exactly;
+  `buildRelationSourceDrafts` fetches the floor alongside the window query
+  via `Promise.all`. `capCandidateFanout` (new, pure); called from
+  `buildCandidateSourceDrafts` on the anchor-resolved eligible set before
+  `loadCandidateTitleMatches`. No other card source, no scoring, no
+  eligibility, no evidence-matching logic touched.
+- `src/lib/server/__tests__/developments.test.ts`: `baseResponses()` now
+  defaults `relationBootstrapFloor` to `OLD_EPOCH` so all pre-existing
+  R-source fixtures (1, 3, 5, 8, 9, 10) keep passing unmodified; the mock
+  router gained one branch (`MIN(r.first_seen_at)`, checked before the
+  generic `FROM entity_relations` branch, same ordering trick already used
+  for the edge floor vs. the generic edges branch). Two new fixtures assert
+  the R bootstrap exclusion both ways (excluded when the relation is the
+  cohort itself; still eligible with the same shape once the floor is old).
+  Two new unit tests cover `capCandidateFanout` directly.
+- No UI, no migrations, no new sources, no dependency, no other module.
+
+**Gotchas**: the new `loadRelationBootstrapFloor` query also fires (via
+`Promise.all`) on fixtures with zero relations (N/C/E-only fixtures) — this
+mirrors `buildEdgeSourceDrafts`'s existing behavior exactly (it already
+fetches its bootstrap floor unconditionally too) and is harmless: the early
+`if (relations.length === 0) return [];` in `buildRelationSourceDrafts` runs
+after both promises resolve, so an unused/default floor response never
+reaches `buildRelationCardDrafts`.
+
 ## 2026-07-21 — L1A: read-only development cards in Brief (server-side)
 
 **What changed**: added `src/lib/server/developments.ts`, a new read-only
