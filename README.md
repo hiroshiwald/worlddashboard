@@ -6,17 +6,27 @@ A live intelligence dashboard that aggregates RSS/Atom feeds from 147+ global da
 
 ## Documentation
 
+Living docs, one owner per topic:
+
 - **DESIGN.md** — design philosophy and the product spine; read before any UI work
+- **FABLE-ROADMAP.md** — product direction and operating constraints
+- **RADAR-STRATEGY.md** — analysis appendix to the roadmap
+- **DEVELOPMENTS-PLAN.md** — current implementation slice
+- **DEVELOPMENTS-PROMPT-1.md** — prompt packet for the current slice; delete after L1B ships
+- **MANIFEST.md** — file-by-file code map
+- **DEVLOG.md** — chronological change log
+- **FEED_TRACKER.md** — feed source inventory
 
 ## Features
 
-- **Feed Aggregation** — Fetches 147+ RSS/Atom feeds in parallel with 3-phase fallback (direct, relay, alt URL)
-- **FEEDS Tab** — Sortable table (desktop) with responsive card layout (mobile), urgency color-coded rows
-- **INTEL Tab** — Named entity extraction (countries, organizations, regions, persons) with frequency, urgency breakdown, trend velocity, co-occurrence links, and sentiment analysis
-- **SIGNALS Tab** — Anomaly detection: surge detection, sentiment deterioration, cross-category alerts, novel entity emergence, escalation tracking, cascading effects modeling
-- **NETWORK Tab** — Force-directed graph of entity co-occurrences
-- **MAP Tab** — Geospatial markers with Leaflet, color-coded by urgency
-- **Ad Filtering** — 3-tier system: URL patterns, title regex (50+ patterns), and financial ad detection
+- **Brief** — daily-brief view: movers relative to each entity's own baseline, active signals, newly-tracked entities, top stories
+- **Feeds** — 147+ RSS/Atom sources fetched in parallel with 3-phase fallback (direct, relay, alt URL); sortable table (desktop) / card layout (mobile), with cross-source duplicates grouped
+- **Signals** — server-side anomaly detection: detectors scored against each entity's own trailing baseline (surge, first-seen novelty, new relationships, category-spread deviation, sentiment deviation), with an accept/dismiss/promote review lifecycle and honest warm-up states
+- **Network** — force-directed graph of entity co-occurrences
+- **Map** — geospatial markers via Leaflet, color-coded by urgency
+- **Review** — accept/merge/dismiss queue for candidate entities extracted from articles
+- **Ingest pipeline** — server-side Postgres ingest: entity registry with dedup, cross-source duplicate clustering, LLM-assisted entity/relation extraction under a hard monthly budget (degrades to free heuristics when the budget caps out), honest publish-time-vs-arrival-time display throughout
+- **Ad Filtering** — 3-tier system: URL patterns, title regex, and financial ad detection
 - **Light/Dark Mode** — Persisted to localStorage
 - **Search & Filter** — Full-text search across titles, sources, summaries, and categories
 

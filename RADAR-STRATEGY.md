@@ -2,6 +2,10 @@
 
 ## ⚠️ STRATEGIC CONTEXT ONLY — DO NOT IMPLEMENT FROM THIS DOCUMENT
 
+This document is the analysis appendix behind FABLE-ROADMAP.md.
+FABLE-ROADMAP.md owns product direction; where the two disagree,
+FABLE-ROADMAP.md wins.
+
 **The only active implementation plan is `DEVELOPMENTS-PLAN.md`.**
 
 Current scope (operator direction, 2026-07-20) is the existing news

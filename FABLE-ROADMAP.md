@@ -203,6 +203,8 @@ A longitudinal development object. It records:
 - Current status.
 - Observed facts, derived patterns, and hypotheses.
 
+Note: threads imply stored state — see section 14c before planning them.
+
 ## 5. Ranking Philosophy
 
 Never rank primarily by raw mention count.
@@ -436,3 +438,32 @@ And more like:
 > Here are the specific new entities and relationships entering important
 > domains, how they are changing, why they may matter, and the evidence behind
 > them.
+
+## 14. Operating Constraints (binding)
+
+These are not aspirational. Every plan above must fit inside them or state
+explicitly how it doesn't.
+
+**a) LLM budget.** Entity extraction runs on a hard monthly budget: the cap
+lives in the settings table (`llm_monthly_budget_usd`, default 5), spend is
+tracked in the `llm_usage` ledger, and when the cap is hit extraction
+degrades to free heuristics by design — ingest never depends on the LLM.
+Consequence for this roadmap: cost scales with article volume, so any plan
+that adds sources or a vertical (AI Radar especially) must state expected
+added article volume, check the current month's ledger, and either fit the
+cap or explicitly propose raising it. Raising the cap is an operator
+decision, never a side effect of a feature PR.
+
+**b) Runtime ceilings.** Vercel Hobby: 60 seconds per function invocation (a
+backlog once caused a timeout loop — the LLM wall-clock budget exists
+because of it); Neon free tier at 0.25 CU. Consequences: batch analysis
+belongs in the ingest path behind its existing wall-clock budgets;
+request-time computation (like the developments panels) must stay well
+under the ceiling and gets a stated query-count/cost note in its plan;
+nothing history-dependent runs during warm-up.
+
+**c) Thread storage.** Section 4.5's Signal Thread ("new evidence since last
+view", status) requires stored per-user/viewing state — a migration and a
+"what has been seen" design decision. The first read-only slice deliberately
+avoided this. Plan it as its own slice when threads arrive; do not back into
+it inside a feature PR.
