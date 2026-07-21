@@ -2,6 +2,7 @@ import type { Sql, SqlRow } from "./db";
 import type { Settings } from "./settings";
 import { loadSignals, SignalJson } from "./signal-store";
 import { computeWarmupState, computeEffectiveBaselineDays, WarmupState } from "./detectors";
+import { getDevelopments, DevelopmentCardJson } from "./developments";
 
 const TOP_STORIES_LIMIT = 15;
 const TOP_STORIES_WINDOW_HOURS = 48;
@@ -44,6 +45,7 @@ export interface Brief {
   topStories: TopStoryJson[];
   movers: MoverJson[];
   warmup: WarmupState;
+  developments: DevelopmentCardJson[];
 }
 
 /** Recency-decayed cluster size, hand-checkable in isolation: bigger
@@ -220,6 +222,7 @@ export async function getBrief(sql: Sql, settings: Settings): Promise<Brief> {
   const warmup = computeWarmupState(epoch, settings.warmup_days, now);
   // computeWarmupState only returns active:false when epoch is non-null.
   const movers = warmup.active ? [] : await loadMovers(sql, epoch as Date, now);
+  const developments = warmup.active ? [] : await getDevelopments(sql, now);
 
-  return { generatedAt: now.toISOString(), signals, newEntities, topStories, movers, warmup };
+  return { generatedAt: now.toISOString(), signals, newEntities, topStories, movers, warmup, developments };
 }

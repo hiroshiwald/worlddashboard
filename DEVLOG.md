@@ -1,5 +1,69 @@
 # World Dashboard Development Log
 
+## 2026-07-21 — L1A: read-only development cards in Brief (server-side)
+
+**What changed**: added `src/lib/server/developments.ts`, a new read-only
+module that surfaces "development cards" — a lower-frequency satellite
+entity around a high-volume anchor, with linked evidence and honest
+(arrival-based) observation times. Cards come from four sources, strongest
+to weakest: **R** stated `entity_relations`, **N** newly tracked satellites,
+**C** corroborated `entity_candidates`, **E** `entity_edges` co-coverage.
+`getBrief` gains an additive `developments: DevelopmentCardJson[]` field,
+loaded only after warm-up clears (mirrors the existing `movers` pattern) —
+`[]` during warm-up, no query attempted. No migration, no new tables, no UI.
+
+**What it affected**:
+- `src/lib/server/developments.ts` (new): anchor classification
+  (`isAnchor`, type-or-volume; `computeAnchorThreshold`, max(3, 90th
+  percentile of trailing-15-day baselines)); per-source SQL loaders +
+  card builders; a uniform `passesEligibility` gate run identically over
+  every source's output; pure scoring (`novelty`/`corroboration`/
+  `persistence`/`relationStrength`/`anchorContext`/`penalty` +
+  `scoreDevelopment`); `buildWhyShown`; cross-source `dedupeCards` (highest
+  relationStrength wins, R>N>C>E tie-break) + `sortAndCapCards` (cap 8).
+- `src/lib/server/brief.ts`: additive only — new import, `developments`
+  field on `Brief`, one conditional-load line mirroring `movers`.
+- `src/lib/server/__tests__/developments.test.ts` (new): pure-function
+  unit tests for every exported helper, plus the 14 required fixtures
+  (good: low-freq company + Russia/sanction, infra + shipping edge, obscure
+  person + Trump/legal_action, disease entity, new relation to a famous
+  anchor; bad: country/high-baseline subject, single-source, stale
+  reporting, zero/no-match/ambiguous candidate evidence, generic term with
+  no anchor) as `getDevelopments` integration tests against a fixed `now`.
+- `src/lib/server/__tests__/brief.test.ts`: additive `describe` block —
+  `developments: []` during warm-up; response shape additive (exact key
+  set, pre-existing movers behavior unchanged).
+
+**Gotchas / non-obvious traps for a future reader**:
+- The new module's tracked-entity/baseline panel query originally would
+  have used `loadMoverAgg`'s own column alias `baseline_sum` — but
+  `brief.test.ts`'s existing mock branches on `query.includes("baseline_sum")`,
+  and any test exercising both queries would silently misroute rows between
+  them. Aliased to `baseline_mentions`/`total_mentions_15d` instead;
+  verified no collision and confirmed the existing movers tests still pass
+  unmodified with `getDevelopments` now also running inside `getBrief`.
+- "Subject is not an anchor, no exceptions" is *not* structurally guaranteed
+  for the C (candidate) source the way it is for R/E's two-endpoint pairing:
+  `entity_candidates.type_hint` can legitimately be `'region'` (compromise's
+  NLP place-tagger stamps every detected place `type_hint: 'region'`
+  regardless of dictionary membership, and `classifyCandidate` only
+  auto-tracks a dictionary hit or an LLM-"famous" hit — everything else,
+  including every such region tag, reaches the candidate queue intact).
+  Verified directly against `extract-v2.ts`/`entity-ingest.ts`. Fixed by
+  running one shared `passesEligibility` check (including the anchor-type
+  test) uniformly over every source's assembled card, rather than trusting
+  a per-source "this can't happen" argument.
+- Evidence is scored (distinct sources/days, staleReporting, eligibility)
+  off the *full* resolved/matched set per card, then sliced to the newest 5
+  only at the very last step for the JSON `evidence` field — capping before
+  scoring could understate real corroboration if the newest 5 articles
+  happen to cluster on fewer sources than the full matched set.
+- Candidate `first_seen_at`/`last_seen_at` are news-time and are used only
+  as the title-match search window; a card's `firstObservedAt`/
+  `lastObservedAt` always come from the matched evidence articles' own
+  (arrival-based) `first_seen_at` — asserted directly in a fixture where the
+  two deliberately diverge (fixture 13).
+
 ## 2026-07-18 — Attention-driven freshness (15min passive tick) + honest Feeds rows + cluster-weight chip
 
 **What changed**: freshness now follows attention instead of a slow fixed

@@ -98,3 +98,34 @@ describe("getBrief: movers + warmup", () => {
     expect(brief.movers).toHaveLength(5);
   });
 });
+
+describe("getBrief: developments", () => {
+  it("response includes developments: [] during warm-up (getDevelopments is not called)", async () => {
+    const sql = makeMockSql(() => []);
+    const brief = await getBrief(sql, DEFAULTS);
+    expect(brief.warmup.active).toBe(true);
+    expect(brief.developments).toEqual([]);
+  });
+
+  it("response shape is additive: every pre-existing field is unchanged, plus developments", async () => {
+    const oldEpoch = new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString();
+    const sql = makeMockSql((query) => {
+      if (query.includes("min_first_seen")) return [{ min_first_seen: oldEpoch }];
+      if (query.includes("baseline_sum")) {
+        return [
+          { entity_id: "1", canonical_name: "Alpha", observed_24h: 10, baseline_sum: 20 },
+          { entity_id: "2", canonical_name: "Bravo", observed_24h: 30, baseline_sum: 14 },
+        ];
+      }
+      return [];
+    });
+
+    const brief = await getBrief(sql, DEFAULTS);
+    expect(Object.keys(brief).sort()).toEqual([
+      "developments", "generatedAt", "movers", "newEntities", "signals", "topStories", "warmup",
+    ]);
+    // Pre-existing behavior is byte-identical, not just present alongside the new field.
+    expect(brief.movers.map((m) => m.name)).toEqual(["Bravo", "Alpha"]);
+    expect(brief.developments).toEqual([]);
+  });
+});
