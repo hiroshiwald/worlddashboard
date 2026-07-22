@@ -1,5 +1,55 @@
 # World Dashboard Development Log
 
+## 2026-07-21 — Roadmap operating constraints; docs-ownership restore
+
+**What changed**: Added FABLE-ROADMAP.md §14 "Operating Constraints
+(binding)": the LLM monthly budget and its heuristic fallback, Vercel
+Hobby/Neon free-tier runtime ceilings, and the Signal Thread storage
+decision that's deliberately deferred — plus a one-line cross-reference
+from §4.5 to §14c. Added an ownership line directly under RADAR-STRATEGY.md's
+warning header naming FABLE-ROADMAP.md as the owner of product direction.
+Rewrote README.md's Documentation section into a one-owner-per-topic docs
+map (8 docs) and its Features section to match the app as it exists today
+(Brief/Feeds/Signals/Network/Map/Review; server-side Postgres ingest with
+entity registry, dedup clustering, LLM-assisted extraction under budget,
+baseline-relative detectors, honest-time display) instead of the deleted
+INTEL tab, feed urgency-coloring, and client-side signal detection it
+previously described. Deleted HANDOFF.md, AUDIT.md, AUDIT-2.md, AUDIT-3.md —
+all four were point-in-time snapshots of a client-side architecture
+(`IntelTab.tsx`, `DiscoveryTab.tsx`, `situation-builder.ts`) that no longer
+exists, and every violation they recorded was already confirmed fixed
+in-file or by a later audit.
+
+**What it affected**: Docs only — FABLE-ROADMAP.md, RADAR-STRATEGY.md,
+README.md, DEVLOG.md (this entry); HANDOFF.md/AUDIT.md/AUDIT-2.md/AUDIT-3.md
+removed. No source, tests, or migrations touched. MANIFEST.md left
+unchanged: its Modules table does carry root docs (e.g. `DESIGN.md`), but
+none of the four deleted docs had rows there, so there was nothing to
+remove or add.
+
+**Gotchas**:
+- RADAR-STRATEGY.md still has an older sentence a few lines below the new
+  ownership line ("where the two disagree, this document is the proposal on
+  the table") that now reads in tension with it. Left as-is — the task
+  scoped this file to one added line — and flagged for the operator rather
+  than silently rewritten.
+- `entity-extractor.ts` and `novelty-scorer.ts` (the modules the deleted
+  AUDIT docs scanned) are still live, just narrowed: they power
+  Network/Map's client-side co-occurrence graph and a top-mentioned-entities
+  watchlist widget on Signals, not anomaly detection — the real anomaly
+  detection is now `detectors.ts`'s server-side baseline scoring. Verified
+  via import grep before writing the README Features claims; the audits'
+  file list alone would have been misleading.
+- This file's entry order isn't fully consistent — six 2026-07-20 entries
+  sit appended at the very end, out of place, from a session that didn't
+  follow the prepend-newest-at-top convention every other entry uses. This
+  entry follows the dominant convention (prepend at top) rather than the
+  outlier.
+- Declined to migrate one item from HANDOFF.md's "PARKING LOT" section (a
+  caching-relay proposal for feed reliability: cron-fetch + IP reputation +
+  conditional GET) because its natural owner, FEED_TRACKER.md, is outside
+  this task's allowlist. Still recoverable from git history if still wanted.
+
 ## 2026-07-21 — L1A fix: R-source bootstrap cohort exclusion + candidate fan-out cap
 
 **What changed**: two small fixes to `src/lib/server/developments.ts` from
