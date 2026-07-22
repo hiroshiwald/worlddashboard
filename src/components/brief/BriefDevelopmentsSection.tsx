@@ -136,6 +136,7 @@ interface BriefDevelopmentsSectionProps {
 // for "section header plus" the warm-up line, and an honest zero-card state
 // that must not hide the section (DESIGN.md spine #4).
 export default function BriefDevelopmentsSection({ developments, warmup, dark, onEntityClick }: BriefDevelopmentsSectionProps) {
+  const warmupDays = Math.ceil(warmup.daysRemaining);
   return (
     <div className="mb-6">
       <h3 className={`text-xs font-bold uppercase tracking-wide mb-2 ${dark ? "text-slate-400" : "text-gray-500"}`}>
@@ -143,7 +144,7 @@ export default function BriefDevelopmentsSection({ developments, warmup, dark, o
       </h3>
       {warmup.active ? (
         <p className={`text-xs ${dark ? "text-slate-500" : "text-gray-400"}`}>
-          Signal engine warming up — {Math.ceil(warmup.daysRemaining)} days of baseline remaining.
+          Signal engine warming up — {warmupDays} {warmupDays === 1 ? "day" : "days"} of baseline remaining.
         </p>
       ) : developments.length === 0 ? (
         <p className={`text-sm ${dark ? "text-slate-400" : "text-gray-500"}`}>

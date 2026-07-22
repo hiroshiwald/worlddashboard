@@ -17,7 +17,7 @@ describe("useSignalsTab warmup", () => {
 
   it("exposes a well-shaped warmup object parsed from the API response", async () => {
     stubFetch({ signals: [], warmup: { active: true, daysRemaining: 3.5 } });
-    const { result } = renderHook(() => useSignalsTab({ items: [], dark: false, onEntityClick: () => {} }));
+    const { result } = renderHook(() => useSignalsTab({ dark: false, onEntityClick: () => {} }));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.warmup).toEqual({ active: true, daysRemaining: 3.5 });
@@ -25,7 +25,7 @@ describe("useSignalsTab warmup", () => {
 
   it("defaults warmup to null when the response omits it", async () => {
     stubFetch({ signals: [] });
-    const { result } = renderHook(() => useSignalsTab({ items: [], dark: false, onEntityClick: () => {} }));
+    const { result } = renderHook(() => useSignalsTab({ dark: false, onEntityClick: () => {} }));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.warmup).toBeNull();
@@ -33,7 +33,7 @@ describe("useSignalsTab warmup", () => {
 
   it("defaults warmup to null when the field is malformed", async () => {
     stubFetch({ signals: [], warmup: { active: "yes", daysRemaining: 3 } });
-    const { result } = renderHook(() => useSignalsTab({ items: [], dark: false, onEntityClick: () => {} }));
+    const { result } = renderHook(() => useSignalsTab({ dark: false, onEntityClick: () => {} }));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.warmup).toBeNull();

@@ -1,5 +1,74 @@
 # World Dashboard Development Log
 
+## 2026-07-22 — Signals watchlist cleanup: delete unearned-ranking surfaces, fix warm-up/pluralization honesty bugs
+
+**What changed**: Deleted the "Watchlist — Top 12" block from the Signals
+tab — the last surface ranking entities by raw mention volume (DESIGN.md
+spine #1; FABLE-ROADMAP §5's "never rank primarily by raw mention count").
+`useSignalsTab.ts` no longer runs client-side entity extraction/enrichment
+(`extractEntities`, `useEnrichedEntities`) or builds `topEntities`/
+`sparklineData`; its `items` input, now unused, is gone, and with it the
+whole `SignalsTabTheme`/`buildSignalsTheme` construct (only ever consumed by
+the Watchlist cards — nothing else in `SignalsTab` used the `t` theme
+object). Deleted `WatchlistCard.tsx`/`WatchlistSection.tsx` outright and
+`SentimentBadge` from `signals/utils.tsx` (its only caller was
+`WatchlistCard`). `SignalsTab` now renders purely from `/api/signals`.
+Deleted the Critical/Warning/Advisory/Monitoring legend from `HeaderBar`
+(`MapTab`, the one place severity color still lives, untouched). Fixed a
+duplicate warm-up line on Brief: `BriefMoversSection` now renders nothing
+during warm-up instead of repeating the "Signal engine warming up" line
+`BriefDevelopmentsSection` (rendered first) already owns. Fixed two
+pluralization bugs: "1 days" in `BriefDevelopmentsSection`'s warm-up line
+and "1 sources" on `BriefNewEntitiesSection`'s new-entity chips both now
+render singular correctly via inline ternaries.
+
+**What it affected**: `src/components/SignalsTab.tsx`,
+`src/hooks/useSignalsTab.ts`, `src/components/signals/index.ts`,
+`src/components/signals/utils.tsx` (all modified);
+`src/components/signals/WatchlistCard.tsx`,
+`src/components/signals/WatchlistSection.tsx` (deleted);
+`src/components/HeaderBar.tsx`, `src/components/dashboard/TabContent.tsx`
+(Signals moved ahead of the `items.length` gate, alongside Brief/Review),
+`src/components/brief/BriefMoversSection.tsx`,
+`src/components/brief/BriefDevelopmentsSection.tsx`,
+`src/components/brief/BriefNewEntitiesSection.tsx` (all modified).
+Reviewer-approved allowlist extension: `src/components/DashboardTable.tsx`'s
+`isItemsDependentTab` also gained `"signals"` alongside `"brief"`/`"review"`
+— a second, independent items-gate (live-feed loading spinner and "No feed
+items" block rendered as siblings around `<TabContent>`) that the original
+task scope didn't name but which would otherwise still wrap the Signals tab
+in live-feed loading/empty states. Updated test:
+`src/hooks/__tests__/useSignalsTab.test.ts` (dropped the removed `items`
+param). `MANIFEST.md` rows updated/removed to match.
+
+**Gotchas**:
+- `useEnrichedEntities.ts` (and, transitively, `novelty-scorer.ts` and
+  `signal-storage.ts`'s edge-history/baseline functions) lost their only
+  caller and are now dead code. Left in place — it's outside
+  `src/components/signals/`, so outside this task's deletion-only allowlist
+  — but flagged here as a follow-up cleanup candidate.
+- `BriefDevelopmentsSection.tsx` has no MANIFEST.md row at all (a
+  pre-existing gap from the prior L1B task, not caused by this change).
+  Noticed, not fixed — adding a net-new row was outside this task's
+  MANIFEST scope ("remove rows for deleted files").
+- Tried adding component-render vitest coverage for the three new/changed
+  branches (warm-up suppression in `BriefMoversSection`, singular/plural in
+  `BriefDevelopmentsSection`/`BriefNewEntitiesSection`) via
+  `@testing-library/react`'s `render()`. Failed: this repo's vitest pipeline
+  has never transformed a `.tsx` **source** file — every existing test
+  exercises hooks/lib (`.ts`) only, `renderHook` never imports a project
+  `.tsx` file — and `tsconfig.json`'s `"jsx": "preserve"` has no matching
+  vite JSX plugin wired into `vitest.config.ts`, so importing any `.tsx`
+  component (even from a JSX-free `.ts` test file, via `React.createElement`)
+  fails with "Failed to parse source... make sure to not set jsx to
+  preserve." Fixing it means editing `tsconfig.json` or `vitest.config.ts`
+  (neither in this task's allowlist) or adding `@vitejs/plugin-react` (a new
+  dependency the task explicitly rules out). Deferred to the Playwright pass
+  instead, which is this repo's actual, working convention for verifying
+  presentational-component behavior. Flagged as a follow-up: either wire a
+  React/JSX vite plugin into `vitest.config.ts`, or accept that `.tsx`
+  components stay covered by Playwright only.
+
 ## 2026-07-22 — L1B: Developments section in Brief (UI)
 
 **What changed**: Added `BriefDevelopmentsSection`, the first section of the

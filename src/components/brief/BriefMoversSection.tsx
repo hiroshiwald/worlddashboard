@@ -9,15 +9,11 @@ interface BriefMoversSectionProps {
   onEntityClick: (name: string) => void;
 }
 
+// BriefDevelopmentsSection (rendered first in BriefTab) owns the single
+// warm-up line — this section stays silent during warm-up instead of
+// duplicating it.
 export default function BriefMoversSection({ movers, warmup, dark, onEntityClick }: BriefMoversSectionProps) {
-  if (warmup.active) {
-    return (
-      <p className={`text-xs mb-6 ${dark ? "text-slate-500" : "text-gray-400"}`}>
-        Signal engine warming up — {Math.ceil(warmup.daysRemaining)} days of baseline remaining.
-      </p>
-    );
-  }
-
+  if (warmup.active) return null;
   if (movers.length === 0) return null;
 
   return (

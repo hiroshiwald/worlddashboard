@@ -57,10 +57,11 @@ interface TabContentProps {
 
 export default function TabContent({ activeTab, items, filteredItems, dark, onEntityClick, onCandidatesChanged }: TabContentProps) {
   if (activeTab === "feeds") return null;
-  // Brief and Review are DB-backed, independent of the live feed items
-  // array, so they aren't gated behind items.length like the tabs below.
+  // Brief, Review, and Signals are DB-backed, independent of the live feed
+  // items array, so they aren't gated behind items.length like the tabs below.
   if (activeTab === "brief") return <BriefTab dark={dark} onEntityClick={onEntityClick} />;
   if (activeTab === "review") return <ReviewTab dark={dark} onCandidatesChanged={onCandidatesChanged} />;
+  if (activeTab === "signals") return <SignalsTab dark={dark} onEntityClick={onEntityClick} />;
   if (items.length === 0) return null;
 
   switch (activeTab) {
@@ -68,8 +69,6 @@ export default function TabContent({ activeTab, items, filteredItems, dark, onEn
       return <MapTab items={filteredItems} dark={dark} onEntityClick={onEntityClick} />;
     case "network":
       return <NetworkTab items={items} dark={dark} onEntityClick={onEntityClick} />;
-    case "signals":
-      return <SignalsTab items={items} dark={dark} onEntityClick={onEntityClick} />;
     default:
       return null;
   }

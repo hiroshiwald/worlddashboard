@@ -1,11 +1,9 @@
 "use client";
 
-import { FeedItem } from "@/lib/types";
 import { useSignalsTab } from "@/hooks/useSignalsTab";
-import { StateFilterBar, ManagedSignalGrid, WatchlistSection } from "./signals";
+import { StateFilterBar, ManagedSignalGrid } from "./signals";
 
 interface SignalsTabProps {
-  items: FeedItem[];
   dark: boolean;
   onEntityClick: (name: string) => void;
 }
@@ -28,11 +26,11 @@ function WarmupEmptyState({ dark, daysRemaining }: { dark: boolean; daysRemainin
   );
 }
 
-export default function SignalsTab({ items, dark, onEntityClick }: SignalsTabProps) {
+export default function SignalsTab({ dark, onEntityClick }: SignalsTabProps) {
   const {
-    topEntities, sparklineData, visibleSignals, stateCounts, stateFilter, setStateFilter,
-    loading, error, dbUnconfigured, busyIds, act, warmup, t,
-  } = useSignalsTab({ items, dark, onEntityClick });
+    visibleSignals, stateCounts, stateFilter, setStateFilter,
+    loading, error, dbUnconfigured, busyIds, act, warmup,
+  } = useSignalsTab({ dark, onEntityClick });
 
   const showWarmupEmpty = warmup !== null && warmup.active && stateCounts.all === 0;
 
@@ -60,8 +58,6 @@ export default function SignalsTab({ items, dark, onEntityClick }: SignalsTabPro
           <ManagedSignalGrid signals={visibleSignals} busyIds={busyIds} dark={dark} onAction={act} onEntityClick={onEntityClick} />
         </>
       )}
-
-      <WatchlistSection topEntities={topEntities} sparklineData={sparklineData} dark={dark} onEntityClick={onEntityClick} t={t} />
     </div>
   );
 }
