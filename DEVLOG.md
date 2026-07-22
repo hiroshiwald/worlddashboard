@@ -1,5 +1,58 @@
 # World Dashboard Development Log
 
+## 2026-07-22 — L1B: Developments section in Brief (UI)
+
+**What changed**: Added `BriefDevelopmentsSection`, the first section of the
+Brief tab, rendering the `developments` array L1A added to `getBrief`. Each
+card shows the satellite subject (headline, bold) with its type badge, 1-3
+anchor chips kept visually secondary, the relation/reason line, the
+`whyShown` sentence, "first observed"/"updated" times via `date-utils`'
+`timeAgo`, a `staleReporting` marker ("older reporting, newly observed")
+when set, an "observed"/"pattern" label tag, a collapsed-by-default evidence
+expander (title link opening in a new tab, source, publish date when known,
+observed time — implemented locally, not imported from `signals/`), and a
+compact score with `scoreParts` in the title attribute. Both the warm-up and
+honest-empty states keep the section header visible (unlike
+`BriefMoversSection`, which hides its own header in both cases) so the
+section is never hidden. Extended `useBriefTab.ts`'s `BriefData` with
+`developments` and new `BriefDevelopment`/`BriefDevelopmentEvidence`/
+`BriefDevelopmentScoreParts` types mirroring `DevelopmentCardJson` from
+`src/lib/server/developments.ts`.
+
+**What it affected**: `src/components/brief/BriefDevelopmentsSection.tsx`
+(new), `src/components/brief/index.ts` (export), `src/components/BriefTab.tsx`
+(renders Developments first, above Movers — no other section changed),
+`src/hooks/useBriefTab.ts` (additive types only). No server, schema, or
+dependency changes; `npm test` (540 passed) and `tsc --noEmit` stay green.
+
+**Gotchas**:
+- The task instructions said to use `getThemeClasses(dark)` "like the
+  sibling brief sections," but none of the four existing `brief/` components
+  or `ManagedSignalCard` actually do — they all theme with inline
+  `dark ? ... : ...` ternaries (`getThemeClasses`/`ThemeClasses` is only used
+  by `dashboard/FeedCardList.tsx`, `dashboard/FeedTable.tsx`, and
+  `HeaderBar.tsx`). Followed the real sibling convention instead of the
+  inaccurate instruction.
+- `BriefDevelopmentsSection` and `BriefMoversSection` both gate independently
+  on the same shared `warmup.active`, so the "Signal engine warming up — N
+  days of baseline remaining." line renders twice (once per section) during
+  warm-up. Kept as specified — reusing "the same honest line
+  BriefMoversSection uses" — rather than editing that file, which this
+  task's file list didn't include.
+- No dedicated test file added: the only formatting logic in the new
+  component (joining `scoreParts` into the title-attribute tooltip string)
+  is a straight `toFixed` join with no branching or edge cases, and none of
+  the sibling `brief/` section components have test files either — this
+  keeps the component thin per the task's own instruction rather than
+  adding logic just to justify a test.
+- `node_modules` wasn't installed in this environment (`npx tsc` initially
+  failed to resolve `next`/`vitest`/`react`); ran `npm ci` against the
+  existing lockfile before anything would build. No `package.json` change.
+- No configured database here, so the three states (populated, warm-up,
+  empty) were verified by mocking `/api/brief` at the network layer with
+  Playwright route interception (matching DESIGN.md's stated UI-verification
+  convention) rather than a real Postgres instance.
+
 ## 2026-07-21 — Roadmap operating constraints; docs-ownership restore
 
 **What changed**: Added FABLE-ROADMAP.md §14 "Operating Constraints

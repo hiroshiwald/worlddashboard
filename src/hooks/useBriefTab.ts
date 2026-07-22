@@ -37,6 +37,38 @@ export interface BriefWarmup {
   daysRemaining: number;
 }
 
+export interface BriefDevelopmentEvidence {
+  title: string;
+  link: string;
+  sourceName: string;
+  publishedAt: string | null;
+  firstSeenAt: string;
+}
+
+export interface BriefDevelopmentScoreParts {
+  novelty: number;
+  corroboration: number;
+  persistence: number;
+  relationStrength: number;
+  anchorContext: number;
+  penalty: number;
+}
+
+export interface BriefDevelopment {
+  subjectName: string;
+  subjectType: string;
+  anchorNames: string[];
+  relationOrReason: string;
+  whyShown: string;
+  label: "observed" | "pattern";
+  firstObservedAt: string;
+  lastObservedAt: string;
+  staleReporting: boolean;
+  evidence: BriefDevelopmentEvidence[];
+  score: number;
+  scoreParts: BriefDevelopmentScoreParts;
+}
+
 export interface BriefData {
   generatedAt: string;
   signals: BriefSignal[];
@@ -44,6 +76,7 @@ export interface BriefData {
   topStories: BriefTopStory[];
   movers: BriefMover[];
   warmup: BriefWarmup;
+  developments: BriefDevelopment[];
 }
 
 // Distinguishes "no database configured yet" from a genuine fetch/shape
