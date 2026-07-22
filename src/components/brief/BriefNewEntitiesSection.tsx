@@ -26,7 +26,7 @@ export default function BriefNewEntitiesSection({ entities, dark, onEntityClick 
           >
             <span className="font-semibold">{entity.canonicalName}</span>
             <span className={dark ? "text-slate-500" : "text-gray-400"}>
-              {" "}&middot; {entity.sourceCount} sources &middot; {timeAgo(entity.firstSeenAt)}
+              {" "}&middot; {entity.sourceCount} {entity.sourceCount === 1 ? "source" : "sources"} &middot; {timeAgo(entity.firstSeenAt)}
             </span>
           </button>
         ))}

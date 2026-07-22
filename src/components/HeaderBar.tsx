@@ -303,27 +303,6 @@ export default function HeaderBar({
             </option>
           ))}
         </select>
-
-        {(activeTab === "brief" || activeTab === "feeds" || activeTab === "map" || activeTab === "signals") && (
-          <div className="hidden sm:flex items-center gap-4 text-xs">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-              Critical
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-              Warning
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
-              Advisory
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
-              Monitoring
-            </span>
-          </div>
-        )}
       </div>
     </div>
   );

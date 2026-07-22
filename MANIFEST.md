@@ -43,7 +43,7 @@
 | `src/components/BriefTab.tsx` | Thin composition shell: imports hook + sub-components, composes layout — the default landing tab | `BriefTab` |
 | `src/components/brief/BriefSignalsSection.tsx` | Active signals grouped by severity, using the shared `ManagedSignalCard` (Seen/Promote/Dismiss actions) | `BriefSignalsSection` |
 | `src/components/brief/BriefNewEntitiesSection.tsx` | Chip row of newly-tracked entities with source counts | `BriefNewEntitiesSection` |
-| `src/components/brief/BriefMoversSection.tsx` | "Unusually active" chip strip of top-5 lift movers ("Entity ×4.2"), each opening the entity panel; hidden when empty. During warm-up, renders a single muted "Signal engine warming up — N days remaining" line instead | `BriefMoversSection` |
+| `src/components/brief/BriefMoversSection.tsx` | "Unusually active" chip strip of top-5 lift movers ("Entity ×4.2"), each opening the entity panel; hidden when empty or during warm-up (`BriefDevelopmentsSection` owns the one warm-up line) | `BriefMoversSection` |
 | `src/components/brief/BriefTopStoriesSection.tsx` | Ranked top-stories list: headline link, cluster size, source count, age | `BriefTopStoriesSection` |
 | `src/components/brief/index.ts` | Barrel export for brief sub-components | — |
 | `src/components/ReviewTab.tsx` | Entity candidate review queue: counts, source chips, sample titles, Accept/Merge/Dismiss actions. Cards render a `contexts` role line (e.g. "former IRGC commander") and a `coEntities` "appears with: ..." line when present. Type `<select>` offers the full 15-type ontology (snake_case value, space-separated label) | `ReviewTab` |
@@ -53,9 +53,7 @@
 | `src/components/signals/ManagedSignalCard.tsx` | Signal card with header, confidence bar, evidence expander (article links), entity chips, and a caller-supplied action button list — shared by BriefTab and SignalsTab | `ManagedSignalCard` |
 | `src/components/signals/ManagedSignalGrid.tsx` | Grid of `ManagedSignalCard`s with per-state action sets (`reopen` only for dismissed) and an empty state | `ManagedSignalGrid` |
 | `src/components/signals/StateFilterBar.tsx` | Client-side state filter buttons (All/New/Seen/Dismissed/Promoted) with live counts | `StateFilterBar` |
-| `src/components/signals/WatchlistCard.tsx` | Entity sparkline card with sentiment badge and mention stats | `WatchlistCard` |
-| `src/components/signals/WatchlistSection.tsx` | Watchlist header and card grid for top entities | `WatchlistSection` |
-| `src/components/signals/utils.tsx` | Shared helpers: severityColor, timeAgo, SentimentBadge | `severityColor`, `timeAgo`, `SentimentBadge` |
+| `src/components/signals/utils.tsx` | Shared helpers: severityColor, timeAgo | `severityColor`, `timeAgo` |
 | `src/components/signals/index.ts` | Barrel export for signals sub-components | — |
 | `src/components/NetworkTab.tsx` | Force-directed graph of entity co-occurrences | `NetworkTab` |
 | `src/components/MapTab.tsx` | Leaflet geospatial map with entity markers | `MapTab` |
@@ -63,8 +61,8 @@
 | `src/hooks/useDashboardTable.ts` | Custom hook: all DashboardTable state, memos, effects, handlers. Default `activeTab` is `"brief"`. `handleEntityClick` resolves a name to an entity id (opens `EntityPanel`) before falling back to the text filter; tracks `candidateCount` for the Review tab badge | `useDashboardTable`, `TabKey`, `ColumnKey` |
 | `src/hooks/useBusyIds.ts` | Per-id "in flight" tracking (a `Set`, not a single shared id) so one action's controls don't get wrongly re-enabled by an unrelated concurrent action | `useBusyIds` |
 | `src/hooks/useBriefTab.ts` | Fetches/refreshes `/api/brief`, dispatches signal actions (POST-then-refresh) via `useBusyIds`, sequence-guards `load()` against out-of-order responses, distinguishes DB-not-configured from a fetch error | `useBriefTab`, `BriefData`, `BriefSignal`, `BriefNewEntity`, `BriefTopStory`, `BriefMover`, `BriefWarmup` |
-| `src/hooks/useSignalsTab.ts` | Custom hook: watchlist memos (unchanged from before) plus the signal-manager fetch/action/state-filter state (via `useBusyIds` + a sequence-guarded `load()`), theme | `useSignalsTab`, `SignalsTabTheme`, `StateFilter`, `STATE_FILTERS` |
-| `src/hooks/useEnrichedEntities.ts` | Loads persisted analysis stores, enriches extracted entities with novelty scores via `novelty-scorer.ts`, then persists updated edge history/baselines via `signal-storage.ts` — the client-side extraction pipeline `useSignalsTab`'s watchlist still depends on | `useEnrichedEntities` |
+| `src/hooks/useSignalsTab.ts` | Custom hook: signal-manager fetch/action/state-filter state (via `useBusyIds` + a sequence-guarded `load()`) — no longer carries the watchlist memos or theme builder, both removed with the Watchlist block | `useSignalsTab`, `StateFilter`, `STATE_FILTERS` |
+| `src/hooks/useEnrichedEntities.ts` | Loads persisted analysis stores, enriches extracted entities with novelty scores via `novelty-scorer.ts`, then persists updated edge history/baselines via `signal-storage.ts` — unreferenced now that `useSignalsTab`'s watchlist (its only caller) is removed; left in place, out of this change's scope | `useEnrichedEntities` |
 | `src/hooks/useSources.ts` | React hook for fetching feed data: tries DB-backed `/api/articles` first, falls back to live `/api/sources`. In db mode, an attention-driven passive freshness check — on load, on `visibilitychange` to visible, and on a ~5min interval while the tab is visible, no external pinger — pings unauthenticated `POST /api/tick` (no `?manual=1`) whenever `lastIngestAt` is over `STALE_INGEST_MS` (15min, mirrors `tick.ts`'s `FRESHNESS_THRESHOLD_MS`) stale; nothing fires while `document.hidden`, and the interval/listener are cleared on unmount and on mode change. Only `triggered:true` refetches (`applyPassiveTickResult`: immediate + one ~30s backup, same schedule the manual path uses); `reason:"fresh"`/`"locked"` are left for the next periodic/visibility check. Always silent — unlike `refresh()` below, this path never touches `refreshState`, which is reserved for the user's own click. `refresh()` itself: in live mode, unchanged (re-fetches `/api/sources`); in db mode, POSTs `/api/tick?manual=1` and drives an exported `refreshState` (`'idle' \| 'collecting' \| 'fresh'`) off the parsed `{triggered, reason}` — `triggered` or `reason:"locked"` both mean a run is in flight, so both show `'collecting'` and schedule `/api/articles` refetches at ~30s and ~90s (past `/api/articles`'s CDN edge-cache window); `reason:"fresh"` refetches once immediately and shows `'fresh'` for a few seconds; a failed or malformed tick response warns and falls back to one plain refetch, matching the old behavior | `useFeed` |
 | `src/lib/types.ts` | All shared TypeScript interfaces | `FeedItem`, `SourceMeta`, `ExtractedEntity`, `EnrichedEntity`, `Signal`, `UrgencyLevel`, `SortConfig`, etc. |
 | `src/lib/feed-fetcher.ts` | RSS/Atom fetching with 3-phase fallback (direct → relay → altUrl), parsing, and caller-owned cache | `fetchAllFeeds`, `parseFeedXml`, `parseRssItems`, `parseAtomEntries`, `CacheEntry` |
@@ -209,7 +207,7 @@
 - `useDashboardTable` → `useFeed` + `theme` + `/api/entities` (name resolution) + `/api/candidates` (badge count)
 - `TabContent` → all tab components (dynamic imports) + `BriefTab` + `ReviewTab`
 - `BriefTab` → `useBriefTab` + brief sub-components (`BriefMoversSection`, `ManagedSignalCard` from `signals/`)
-- `SignalsTab` → `useSignalsTab` + signals sub-components (`StateFilterBar`, `ManagedSignalGrid` → `ManagedSignalCard`, `WatchlistSection`)
+- `SignalsTab` → `useSignalsTab` + signals sub-components (`StateFilterBar`, `ManagedSignalGrid` → `ManagedSignalCard`)
 - `ReviewTab` → `/api/candidates` (GET/POST)
 - `EntityPanel` → `/api/entities/[id]`
 - `/api/ingest` → `run-ingest` (`runIngest`)
@@ -226,8 +224,8 @@
 - `/api/entities`, `/api/entities/[id]` → `extract-v2` (`normalizeName`)
 - `FeedTable` / `FeedCardList` → `FeedItemImage` + `date-utils`
 - All analysis tabs → `entity-extractor` → `entity-dictionaries` + `urgency`
-- `useSignalsTab` → `entity-extractor` + `useEnrichedEntities` (watchlist) + `/api/signals` (manager)
-- `useEnrichedEntities` → `novelty-scorer` + `signal-storage`
+- `useSignalsTab` → `/api/signals` (manager)
+- `useEnrichedEntities` → `novelty-scorer` + `signal-storage` (unreferenced now — no caller since `useSignalsTab`'s watchlist was removed)
 - `MapTab` → `geo-coordinates` + `react-leaflet`
 - `NetworkTab` → `react-force-graph-2d`
 - `feed-fetcher` → `ad-filter` + `xml-helpers` + `image-extractor`
