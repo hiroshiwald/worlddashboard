@@ -144,3 +144,12 @@ _All entries in this section have been promoted to active as of 2026-04-22. Rema
 | CSIS | Think Tank | Empty | RSS broken |
 | RAND | Think Tank | Empty | RSS removed |
 | Carnegie Endowment | Think Tank | Empty | Solr endpoint dead |
+
+## Ideas
+
+**Caching relay for feed reliability**: instead of fetching every source live
+on each request, have the relay (`relay/` directory) run a periodic cron
+fetch, cache results, and serve them instantly — with conditional
+`If-Modified-Since`/`ETag` requests and steady-interval fetching to build IP
+reputation and reduce blocks. Not implemented. Originally proposed in
+HANDOFF.md (deleted 2026-07-22; full detail in git history).

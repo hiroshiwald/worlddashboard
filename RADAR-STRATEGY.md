@@ -26,8 +26,9 @@ the way it is — nothing more.
 
 Planning output only. No code changes are proposed for this PR. This packet is
 written to be critiqued by a second reviewer before any implementation, per
-FABLE-ROADMAP.md §9–10. It supersedes FABLE-ROADMAP.md's breadth with hard
-decisions; where the two disagree, this document is the proposal on the table.
+FABLE-ROADMAP.md §9–10. It narrows FABLE-ROADMAP.md's breadth into concrete
+proposals; FABLE-ROADMAP.md remains the governing direction (see the note at
+the top of this document).
 
 Everything here is grounded in the codebase as of this branch. File references
 are real paths; claimed capabilities and gaps were verified by reading the code.
