@@ -7,6 +7,7 @@ import { processNewArticles } from "@/lib/server/entity-ingest";
 import { getSettings } from "@/lib/server/settings";
 import { runDetectors, computeWarmupState, WarmupState } from "@/lib/server/detectors";
 import { persistSignals } from "@/lib/server/signal-store";
+import { runFameSweep, FameSweepStats } from "@/lib/server/fame-sweep";
 
 const ingestCache = new Map<string, CacheEntry>();
 
@@ -50,6 +51,19 @@ async function getIngestWarmupState(sql: Sql): Promise<WarmupState> {
   return computeWarmupState(epoch, settings.warmup_days, new Date());
 }
 
+// Deliberately NOT run through runStage: per FABLE-ROADMAP.md §14, the fame
+// layer is a pure enrichment that ingest must never depend on, so unlike
+// every other stage a sweep failure logs loudly and lets the run finish
+// (200, with fameSweep:null) instead of aborting it.
+async function runFameSweepStage(sql: Sql): Promise<FameSweepStats | null> {
+  try {
+    return await runFameSweep(sql);
+  } catch (err) {
+    console.error('[ingest] stage "fame-sweep" failed (non-fatal, continuing)', err);
+    return null;
+  }
+}
+
 export interface IngestResult {
   status: number;
   body: Record<string, unknown>;
@@ -86,6 +100,7 @@ export async function runIngest(): Promise<IngestResult> {
       const candidates = await runDetectors(sql, settings);
       return persistSignals(sql, candidates, settings);
     });
+    counts.fameSweep = await runFameSweepStage(sql);
     counts.warmup = await runStage("compute-warmup", () => getIngestWarmupState(sql));
 
     return { status: 200, body: { ...counts, tookMs: Date.now() - start } };

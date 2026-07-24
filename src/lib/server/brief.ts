@@ -120,7 +120,11 @@ async function loadTopStories(sql: Sql): Promise<TopStoryJson[]> {
 
 /** Tracked entities first seen within the last 48h, excluding the initial
  * dictionary-import cohort (same 72h bootstrap guard as the first-seen
- * novelty detector). */
+ * novelty detector). Also excludes a stored fame='famous' verdict: Brief's
+ * job here is surfacing names the reader does NOT already know, and a
+ * famous auto-accept (Facebook, Schwarzenegger) is noise in that strip —
+ * 'unknown' and 'not_famous' both still appear, since neither is a
+ * confirmed household name. */
 async function loadNewEntities(sql: Sql): Promise<NewEntityJson[]> {
   const rows = await sql`
     SELECT e.id, e.canonical_name, e.type, e.first_seen_at, COUNT(DISTINCT a.source_name) AS source_count
@@ -128,6 +132,7 @@ async function loadNewEntities(sql: Sql): Promise<NewEntityJson[]> {
     JOIN article_entities ae ON ae.entity_id = e.id
     JOIN articles a ON a.id = ae.article_id AND a.dup_group_id IS NULL
     WHERE e.status = 'tracked'
+      AND e.fame != 'famous'
       AND e.first_seen_at >= now() - make_interval(hours => ${NEW_ENTITIES_WINDOW_HOURS}::int)
       AND e.first_seen_at >= (SELECT MIN(first_seen_at) FROM entities WHERE status = 'tracked')
         + make_interval(hours => ${BOOTSTRAP_GUARD_HOURS}::int)

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/server/db";
 import type { Sql, SqlRow } from "@/lib/server/db";
+import { checkAndWriteEntityFame } from "@/lib/server/fame-sweep";
 
 export const dynamic = "force-dynamic";
 
@@ -125,14 +126,31 @@ async function deleteCandidate(sql: Sql, nameNorm: string): Promise<void> {
 // sit stranded for the full 14-day retention window. Read-then-delete below
 // isn't transactional; a single-writer app accepts that as a rare, bounded
 // undercount rather than added complexity, never data corruption.
-async function resolveConflictedCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<boolean> {
-  const existing = await sql`SELECT id FROM entities WHERE canonical_name = ${candidate.displayName}`;
-  if (existing.length === 0) return false;
-  await deleteCandidate(sql, candidate.nameNorm);
-  return true;
+interface AcceptedEntity {
+  id: number;
+  aliases: string[];
 }
 
-async function acceptCandidate(sql: Sql, candidate: CandidateSnapshot, type: string): Promise<boolean> {
+function toAcceptedEntity(row: SqlRow): AcceptedEntity {
+  return { id: Number(row.id), aliases: Array.isArray(row.aliases) ? row.aliases.map(String) : [] };
+}
+
+/** Returns the resolved entity (id + its REAL current aliases — this
+ * pre-existing entity may already have accumulated some) on success, null
+ * when the conflicting entity genuinely doesn't exist (caller 409s). */
+async function resolveConflictedCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<AcceptedEntity | null> {
+  const existing = await sql`SELECT id, aliases FROM entities WHERE canonical_name = ${candidate.displayName}`;
+  if (existing.length === 0) return null;
+  await deleteCandidate(sql, candidate.nameNorm);
+  return toAcceptedEntity(existing[0]);
+}
+
+/** Returns the newly-tracked (or conflict-resolved existing) entity, or
+ * null on an unresolvable conflict. A fresh insert always starts with
+ * empty aliases (the INSERT below never sets that column); the
+ * conflict-resolved branch fetches whatever the pre-existing entity
+ * already has, so inlineFameCheck's alias merge never clobbers it. */
+async function acceptCandidate(sql: Sql, candidate: CandidateSnapshot, type: string): Promise<AcceptedEntity | null> {
   const result = await sql`
     INSERT INTO entities (canonical_name, type, status, first_seen_at, last_seen_at)
     VALUES (${candidate.displayName}, ${type}, 'tracked', ${candidate.firstSeenAt}, ${candidate.lastSeenAt})
@@ -141,9 +159,21 @@ async function acceptCandidate(sql: Sql, candidate: CandidateSnapshot, type: str
   `;
   if (result.length > 0) {
     await deleteCandidate(sql, candidate.nameNorm);
-    return true;
+    return { id: Number(result[0].id), aliases: [] };
   }
   return resolveConflictedCandidate(sql, candidate);
+}
+
+// A lookup/write failure here must never surface as a route-level error —
+// the entity is already successfully tracked and its candidate row already
+// deleted by this point, so a Wikidata hiccup only means fame stays
+// 'unknown' until fame-sweep.ts's periodic sweep retries it.
+async function inlineFameCheck(sql: Sql, entity: AcceptedEntity, canonicalName: string): Promise<void> {
+  try {
+    await checkAndWriteEntityFame(sql, { id: entity.id, canonicalName, aliases: entity.aliases });
+  } catch (err) {
+    console.error("candidates accept: inline fame check failed (non-fatal, sweep will retry)", err);
+  }
 }
 
 async function dismissCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<boolean> {
@@ -157,7 +187,7 @@ async function dismissCandidate(sql: Sql, candidate: CandidateSnapshot): Promise
     await deleteCandidate(sql, candidate.nameNorm);
     return true;
   }
-  return resolveConflictedCandidate(sql, candidate);
+  return (await resolveConflictedCandidate(sql, candidate)) !== null;
 }
 
 /** Returns false if mergeInto doesn't name an existing entity (caller 404s). */
@@ -184,7 +214,8 @@ const CONFLICT_MESSAGE = "Could not resolve a naming conflict for this candidate
 async function dispatchAction(sql: Sql, candidate: CandidateSnapshot, action: CandidateAction): Promise<NextResponse> {
   if (action.action === "accept") {
     const accepted = await acceptCandidate(sql, candidate, action.type!);
-    if (!accepted) return NextResponse.json({ error: CONFLICT_MESSAGE }, { status: 409 });
+    if (accepted === null) return NextResponse.json({ error: CONFLICT_MESSAGE }, { status: 409 });
+    await inlineFameCheck(sql, accepted, candidate.displayName);
     return NextResponse.json({ ok: true });
   }
   if (action.action === "merge") {

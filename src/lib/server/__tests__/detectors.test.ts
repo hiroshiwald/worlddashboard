@@ -421,4 +421,28 @@ describe("runDetectors — novel-edge fame suppression (L2A)", () => {
     const others = (signals: CandidateSignal[]) => signals.filter((s) => s.type !== "novel_edge");
     expect(others(withFamousPair)).toEqual(others(withoutFamousPair));
   });
+
+  it("a stored-famous, heuristically-invisible endpoint counts as famous: suppresses a stored-famous-famous pair, but not a stored-famous+satellite pair", async () => {
+    // Neither QuietOrgD/E/F has a dictionary entry, aggRows baseline, or
+    // breadth mock — every heuristic prong is negative for all three. Only
+    // the stored fame column distinguishes them.
+    const storedFamousFamousEdge = {
+      entity_a: 101, entity_b: 102, name_a: "QuietOrgD", name_b: "QuietOrgE",
+      aliases_a: [], aliases_b: [], fame_a: "famous", fame_b: "famous", first_seen_at: RECENT, article_count: 2,
+    };
+    const storedFamousSatelliteEdge = {
+      entity_a: 101, entity_b: 103, name_a: "QuietOrgD", name_b: "QuietOrgF",
+      aliases_a: [], aliases_b: [], fame_a: "famous", fame_b: "unknown", first_seen_at: RECENT, article_count: 2,
+    };
+
+    const sql = makeRichMockSql({
+      ...baseRichResponses(),
+      novelEdges: [storedFamousFamousEdge, storedFamousSatelliteEdge],
+      edgeArticles: [],
+    });
+
+    const signals = await runDetectors(sql, DEFAULTS);
+    const novelEdgeKeys = signals.filter((s) => s.type === "novel_edge").map((s) => s.dedupeKey).sort();
+    expect(novelEdgeKeys).toEqual(["novel_edge:101:103"]);
+  });
 });

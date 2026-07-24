@@ -108,9 +108,24 @@ describe("GET /api/candidates", () => {
   });
 });
 
+// A clean "no Wikidata match" response — the safe default for every accept
+// test below that isn't specifically about the inline fame check itself.
+// This sandbox has no internet egress, so without a stub every accept path
+// would otherwise attempt (and fail) a real network call — see the
+// dedicated "inline fame check" tests for stubs that exercise the fame
+// write itself.
+function noMatchFetch() {
+  return vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ search: [] }) });
+}
+
 describe("POST /api/candidates", () => {
   beforeEach(() => {
     process.env.DATABASE_URL = "postgres://fake";
+    vi.stubGlobal("fetch", noMatchFetch());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("400s on an unknown action", async () => {
@@ -187,7 +202,7 @@ describe("POST /api/candidates", () => {
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
       if (call.query.includes("INSERT INTO entities")) return [];
-      if (call.query.includes("SELECT id FROM entities WHERE canonical_name")) return [{ id: "42" }];
+      if (call.query.includes("SELECT id, aliases FROM entities WHERE canonical_name")) return [{ id: "42" }];
       return [];
     });
     currentSql = sql;
@@ -201,7 +216,7 @@ describe("POST /api/candidates", () => {
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
       if (call.query.includes("INSERT INTO entities")) return [];
-      if (call.query.includes("SELECT id FROM entities WHERE canonical_name")) return [];
+      if (call.query.includes("SELECT id, aliases FROM entities WHERE canonical_name")) return [];
       return [];
     });
     currentSql = sql;
@@ -230,7 +245,7 @@ describe("POST /api/candidates", () => {
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
       if (call.query.includes("INSERT INTO entities")) return [];
-      if (call.query.includes("SELECT id FROM entities WHERE canonical_name")) return [{ id: "42" }];
+      if (call.query.includes("SELECT id, aliases FROM entities WHERE canonical_name")) return [{ id: "42" }];
       return [];
     });
     currentSql = sql;
@@ -244,7 +259,7 @@ describe("POST /api/candidates", () => {
     const { sql } = makeMockSql((call) => {
       if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
       if (call.query.includes("INSERT INTO entities")) return [];
-      if (call.query.includes("SELECT id FROM entities WHERE canonical_name")) return [];
+      if (call.query.includes("SELECT id, aliases FROM entities WHERE canonical_name")) return [];
       return [];
     });
     currentSql = sql;
@@ -284,5 +299,72 @@ describe("POST /api/candidates", () => {
 
     expect(res.status).toBe(404);
     expect(calls.some((c) => c.query.includes("DELETE FROM entity_candidates"))).toBe(false);
+  });
+
+  describe("inline fame check after accept", () => {
+    it("runs the same lookup+write as the sweep, keeping the response contract unchanged", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ search: [] }) }),
+      );
+      const { sql, calls } = makeMockSql((call) => {
+        if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
+        if (call.query.includes("INSERT INTO entities")) return [{ id: "55" }];
+        return [];
+      });
+      currentSql = sql;
+
+      const res = await POST(postRequest({ nameNorm: "kestrel basin", action: "accept", type: "region" }));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true }); // response contract unchanged
+      const fameUpdate = calls.find((c) => c.query.includes("UPDATE entities") && c.query.includes("fame ="));
+      expect(fameUpdate).toBeDefined();
+      expect(fameUpdate!.values).toContain("not_famous"); // no Wikidata match -> not_famous, not left unknown
+      expect(fameUpdate!.values).toContain(55);
+    });
+
+    it("a failed inline lookup still 200s the accept, writing only fame_checked_at (fame stays unknown)", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      const { sql, calls } = makeMockSql((call) => {
+        if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
+        if (call.query.includes("INSERT INTO entities")) return [{ id: "56" }];
+        return [];
+      });
+      currentSql = sql;
+
+      const res = await POST(postRequest({ nameNorm: "kestrel basin", action: "accept", type: "region" }));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      const fameUpdate = calls.find((c) => c.query.includes("UPDATE entities"));
+      expect(fameUpdate!.query).not.toContain("fame =");
+      expect(fameUpdate!.query).toContain("fame_checked_at = now()");
+      consoleError.mockRestore();
+    });
+
+    it("on a conflict-resolved accept, preserves the pre-existing entity's real aliases instead of wiping them", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ search: [] }) }),
+      );
+      const { sql, calls } = makeMockSql((call) => {
+        if (call.query.includes("SELECT name_norm, display_name, type_hint")) return [candidateRow];
+        if (call.query.includes("INSERT INTO entities")) return []; // ON CONFLICT DO NOTHING: already exists
+        if (call.query.includes("SELECT id, aliases FROM entities WHERE canonical_name")) {
+          return [{ id: "42", aliases: ["Existing Alias"] }];
+        }
+        return [];
+      });
+      currentSql = sql;
+
+      const res = await POST(postRequest({ nameNorm: "kestrel basin", action: "accept", type: "region" }));
+
+      expect(res.status).toBe(200);
+      const fameUpdate = calls.find((c) => c.query.includes("UPDATE entities") && c.query.includes("fame ="));
+      const aliases = fameUpdate!.values.find((v) => Array.isArray(v)) as string[];
+      expect(aliases).toContain("Existing Alias");
+    });
   });
 });

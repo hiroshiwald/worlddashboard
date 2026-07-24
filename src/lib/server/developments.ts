@@ -2,6 +2,7 @@ import type { Sql, SqlRow } from "./db";
 import { computeEffectiveBaselineDays, isBootstrapCohort } from "./detectors";
 import { normalizeName } from "./extract-v2";
 import { computeFameVolumeThreshold, isDictionaryFamous, isFamous, loadLifetimeSourceBreadth } from "./fame";
+import type { StoredFame } from "./fame";
 
 export interface EvidenceArticleJson {
   title: string;
@@ -43,6 +44,7 @@ interface TrackedEntityMeta {
   type: string;
   aliases: string[];
   baselineDaily: number;
+  fame: StoredFame;
 }
 
 interface EntityBaselineRow {
@@ -52,6 +54,7 @@ interface EntityBaselineRow {
   aliases: string[];
   baselineMentions: number;
   totalMentions15d: number;
+  fame: StoredFame;
 }
 
 interface RawEvidenceArticle {
@@ -138,6 +141,10 @@ function toStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
+function toStoredFame(value: unknown): StoredFame {
+  return value === "not_famous" || value === "famous" ? value : "unknown";
+}
+
 // ---- anchor classification ----
 
 /** An entity is an anchor by type (country/region, regardless of volume) or
@@ -175,6 +182,7 @@ function computeIsFamous(
       names: [entity.canonicalName, ...entity.aliases],
       baselineDaily: entity.baselineDaily,
       sourceBreadth: breadthById.get(entity.id) ?? 0,
+      storedFame: entity.fame,
     },
     fameVolumeThreshold,
   );
@@ -458,6 +466,7 @@ function parseEntityBaselineRow(row: SqlRow): EntityBaselineRow {
     aliases: toStringArray(row.aliases),
     baselineMentions: Number(row.baseline_mentions),
     totalMentions15d: Number(row.total_mentions_15d),
+    fame: toStoredFame(row.fame),
   };
 }
 
@@ -469,7 +478,7 @@ function parseEntityBaselineRow(row: SqlRow): EntityBaselineRow {
 // it here would silently misroute rows in any test exercising both queries.
 async function loadEntityBaselinePanel(sql: Sql): Promise<EntityBaselineRow[]> {
   const rows = await sql`
-    SELECT e.id, e.canonical_name, e.type, e.aliases,
+    SELECT e.id, e.canonical_name, e.type, e.aliases, e.fame,
       COALESCE(SUM(emh.mentions) FILTER (WHERE emh.bucket < now() - INTERVAL '24 hours'), 0) AS baseline_mentions,
       COALESCE(SUM(emh.mentions), 0) AS total_mentions_15d
     FROM entities e
@@ -488,6 +497,7 @@ function toTrackedEntityMeta(rows: EntityBaselineRow[], effectiveBaselineDays: n
     type: row.type,
     aliases: row.aliases,
     baselineDaily: row.baselineMentions / effectiveBaselineDays,
+    fame: row.fame,
   }));
 }
 
@@ -872,7 +882,8 @@ function buildNewEntityCardDrafts(
 
     const names = [entity.canonicalName, ...(meta?.aliases ?? [])];
     const sourceBreadth = breadthById.get(entity.id) ?? 0;
-    const subjectIsFamous = isFamous({ names, baselineDaily, sourceBreadth }, fameVolumeThreshold);
+    const storedFame = meta?.fame ?? "unknown";
+    const subjectIsFamous = isFamous({ names, baselineDaily, sourceBreadth, storedFame }, fameVolumeThreshold);
 
     drafts.push({
       sourceKind: "N",
