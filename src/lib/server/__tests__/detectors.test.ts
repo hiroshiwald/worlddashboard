@@ -10,6 +10,7 @@ import {
   computeEffectiveBaselineDays,
   runDetectors,
 } from "../detectors";
+import type { CandidateSignal } from "../detectors";
 import { DEFAULTS } from "../settings";
 import type { Sql, SqlRow } from "../db";
 
@@ -276,5 +277,148 @@ describe("runDetectors query shape", () => {
     });
     const signals = await runDetectors(sql, DEFAULTS);
     expect(signals).toEqual([]);
+  });
+});
+
+// ---- L2A: novel-edge fame suppression ----
+//
+// Same query-substring routing convention as makeMockSql above, extended
+// with the additional query shapes a full runDetectors call exercises once
+// every detector actually fires (rather than the empty/warm-up panels
+// above). "aliases_a"/"source_breadth" are new substrings introduced by
+// this change (loadRecentNovelEdges's added alias columns, fame.ts's
+// loadLifetimeSourceBreadth); every other branch matches a pre-existing
+// query untouched by it.
+const RICH_EPOCH = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
+const OLD_FLOOR = new Date(Date.now() - 500 * 3600 * 1000).toISOString();
+const RECENT = new Date(Date.now() - 10 * 3600 * 1000).toISOString();
+const FIRST_SEEN_RECENT = new Date(Date.now() - 20 * 3600 * 1000).toISOString();
+
+function makeRichMockSql(responses: Partial<Record<string, SqlRow[]>>): Sql {
+  return (async (strings: TemplateStringsArray) => {
+    const q = strings.join(" ? ");
+    if (q.includes("source_breadth")) return responses.breadth ?? [];
+    if (q.includes("aliases_a")) return responses.novelEdges ?? [];
+    if (q.includes("MIN(ee.first_seen_at)")) return responses.edgeGlobalMin ?? [];
+    if (q.includes("v.a AS entity_a, v.b AS entity_b")) return responses.edgeArticles ?? [];
+    if (q.includes("MIN(first_seen_at)") && q.includes("FROM articles")) return responses.epoch ?? [];
+    if (q.includes("MIN(first_seen_at)") && q.includes("FROM entities")) return responses.entityGlobalMin ?? [];
+    if (q.includes("id, canonical_name, first_seen_at")) return responses.newEntities ?? [];
+    if (q.includes("a.id AS article_id, a.source_name")) return responses.entityArticles ?? [];
+    if (q.includes("id, canonical_name FROM entities")) return responses.entityNames ?? [];
+    if (q.includes("FROM entity_mentions_hourly")) return responses.aggRows ?? [];
+    // loadCategoryBaseline's own query also contains "a.source_category"
+    // (inside its nested COUNT(DISTINCT ...)) — day_categories distinguishes
+    // it and must be checked first.
+    if (q.includes("day_categories")) return responses.categoryBaseline ?? [];
+    if (q.includes("a.source_category")) return responses.articles24h ?? [];
+    return [];
+  }) as Sql;
+}
+
+// One entity per detector type (surge/sentiment/cross_category/first_seen),
+// chosen to reproduce the exact numbers this file's own pure-function tests
+// already hand-check above (e.g. scoreSurge(50,5,...) -> z=18.371 critical).
+function baseRichResponses(): Partial<Record<string, SqlRow[]>> {
+  return {
+    epoch: [{ min_first_seen: RICH_EPOCH }],
+    entityGlobalMin: [{ min_first_seen: OLD_FLOOR }],
+    edgeGlobalMin: [{ min_first_seen: OLD_FLOOR }],
+    entityNames: [
+      { id: 6, canonical_name: "SurgeEntity" },
+      { id: 7, canonical_name: "SentimentEntity" },
+      { id: 8, canonical_name: "CrossCategoryEntity" },
+    ],
+    aggRows: [
+      { entity_id: 6, observed_24h: 50, sentiment_sum_24h: 0, baseline_sum: 70, baseline_sentiment_sum: 0, baseline_days: 14 },
+      { entity_id: 7, observed_24h: 10, sentiment_sum_24h: -4, baseline_sum: 20, baseline_sentiment_sum: 0, baseline_days: 5 },
+    ],
+    articles24h: ["world", "politics", "business", "tech", "sports"].map((cat, i) => ({
+      entity_id: 8,
+      article_id: 300 + i,
+      source_category: cat,
+    })),
+    categoryBaseline: [{ entity_id: 8, active_days: 3, avg_categories: 1 }],
+    newEntities: [{ id: 9, canonical_name: "FirstSeenEntity", first_seen_at: FIRST_SEEN_RECENT }],
+    entityArticles: ["Source A", "Source B", "Source C"].map((name, i) => ({
+      entity_id: 9,
+      article_id: 400 + i,
+      source_name: name,
+    })),
+  };
+}
+
+describe("runDetectors — novel-edge fame suppression (L2A)", () => {
+  // Russia/China: real COUNTRY_DICT entries — dictionary-famous with zero
+  // baseline/breadth data, proving the dictionary prong alone suffices.
+  // QuietOrg*: no dictionary entry, no aggRows row (baseline 0), no breadth
+  // mock (0) — never famous by any prong.
+  const famousFamousEdge = {
+    entity_a: 1, entity_b: 2, name_a: "Russia", name_b: "China",
+    aliases_a: [], aliases_b: [], first_seen_at: RECENT, article_count: 2,
+  };
+  const famousSatelliteEdge = {
+    entity_a: 1, entity_b: 3, name_a: "Russia", name_b: "QuietOrgA",
+    aliases_a: [], aliases_b: [], first_seen_at: RECENT, article_count: 2,
+  };
+  const satelliteSatelliteEdge = {
+    entity_a: 4, entity_b: 5, name_a: "QuietOrgB", name_b: "QuietOrgC",
+    aliases_a: [], aliases_b: [], first_seen_at: RECENT, article_count: 2,
+  };
+  const edgeArticles = [
+    { article_id: 701, entity_a: 1, entity_b: 3 },
+    { article_id: 702, entity_a: 1, entity_b: 3 },
+    { article_id: 703, entity_a: 4, entity_b: 5 },
+    { article_id: 704, entity_a: 4, entity_b: 5 },
+  ];
+
+  it("suppresses famous-famous, keeps famous-satellite and satellite-satellite, alongside unaffected surge/sentiment/cross_category/first_seen", async () => {
+    const sql = makeRichMockSql({
+      ...baseRichResponses(),
+      novelEdges: [famousFamousEdge, famousSatelliteEdge, satelliteSatelliteEdge],
+      edgeArticles,
+    });
+
+    const signals = await runDetectors(sql, DEFAULTS);
+
+    const novelEdgeKeys = signals
+      .filter((s) => s.type === "novel_edge")
+      .map((s) => s.dedupeKey)
+      .sort();
+    expect(novelEdgeKeys).toEqual(["novel_edge:1:3", "novel_edge:4:5"]);
+
+    const surge = signals.find((s) => s.dedupeKey === "surge:6");
+    expect(surge?.severity).toBe("critical");
+    expect(surge?.evidence.z).toBeCloseTo(18.371, 3);
+
+    const sentiment = signals.find((s) => s.dedupeKey === "sentiment:7");
+    expect(sentiment?.severity).toBe("warning");
+    expect(sentiment?.evidence.delta).toBeCloseTo(-0.4, 5);
+
+    const crossCategory = signals.find((s) => s.dedupeKey === "cross_category:8");
+    expect(crossCategory?.severity).toBe("critical");
+    expect(crossCategory?.evidence.excess).toBe(4);
+
+    const firstSeen = signals.find((s) => s.dedupeKey === "first_seen:9");
+    expect(firstSeen?.severity).toBe("warning");
+    expect(firstSeen?.evidence.sourceCount).toBe(3);
+  });
+
+  it("surge/sentiment/cross_category/first_seen are byte-identical whether or not a famous-famous novel edge is present", async () => {
+    const withoutFamousPair = await runDetectors(
+      makeRichMockSql({ ...baseRichResponses(), novelEdges: [famousSatelliteEdge, satelliteSatelliteEdge], edgeArticles }),
+      DEFAULTS,
+    );
+    const withFamousPair = await runDetectors(
+      makeRichMockSql({
+        ...baseRichResponses(),
+        novelEdges: [famousFamousEdge, famousSatelliteEdge, satelliteSatelliteEdge],
+        edgeArticles,
+      }),
+      DEFAULTS,
+    );
+
+    const others = (signals: CandidateSignal[]) => signals.filter((s) => s.type !== "novel_edge");
+    expect(others(withFamousPair)).toEqual(others(withoutFamousPair));
   });
 });

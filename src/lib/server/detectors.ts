@@ -1,5 +1,6 @@
 import type { Sql, SqlRow } from "./db";
 import type { Settings } from "./settings";
+import { computeFameVolumeThreshold, isFamous, loadLifetimeSourceBreadth } from "./fame";
 
 export type SignalSeverity = "advisory" | "warning" | "critical";
 export type SignalType = "surge" | "first_seen" | "novel_edge" | "cross_category" | "sentiment";
@@ -32,6 +33,10 @@ const SENTIMENT_CRITICAL_DELTA = -0.5;
 
 function toDate(value: unknown): Date {
   return value instanceof Date ? value : new Date(value as string);
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [];
 }
 
 function capArticleIds(ids: number[]): number[] {
@@ -481,6 +486,8 @@ interface NovelEdgeRow {
   entityB: number;
   nameA: string;
   nameB: string;
+  aliasesA: string[];
+  aliasesB: string[];
   firstSeenAt: Date;
   articleCount: number;
 }
@@ -488,6 +495,7 @@ interface NovelEdgeRow {
 async function loadRecentNovelEdges(sql: Sql): Promise<NovelEdgeRow[]> {
   const rows = await sql`
     SELECT ee.entity_a, ee.entity_b, ea.canonical_name AS name_a, eb.canonical_name AS name_b,
+      ea.aliases AS aliases_a, eb.aliases AS aliases_b,
       ee.first_seen_at, ee.article_count
     FROM entity_edges ee
     JOIN entities ea ON ea.id = ee.entity_a
@@ -501,9 +509,51 @@ async function loadRecentNovelEdges(sql: Sql): Promise<NovelEdgeRow[]> {
     entityB: Number(row.entity_b),
     nameA: String(row.name_a),
     nameB: String(row.name_b),
+    aliasesA: toStringArray(row.aliases_a),
+    aliasesB: toStringArray(row.aliases_b),
     firstSeenAt: toDate(row.first_seen_at),
     articleCount: Number(row.article_count),
   }));
+}
+
+/** max(3, 75th percentile) of baselineDaily over the hourly-agg panel — the
+ * same population/percentile math fame.ts's computeFameVolumeThreshold
+ * always takes, just assembled from detectors.ts's own already-loaded
+ * panel instead of developments.ts's separate baseline query. */
+function computeNovelEdgeFameThreshold(aggRows: HourlyAggRow[], effectiveBaselineDays: number): number {
+  return computeFameVolumeThreshold(aggRows.map((row) => row.baselineSum / effectiveBaselineDays));
+}
+
+/** Suppresses a novel_edge candidate when BOTH endpoints are famous (full
+ * fame test) — a famous-famous pair is expected co-coverage between two
+ * already-known subjects (e.g. Washington + White House), not a genuine
+ * emerging link. One-famous and zero-famous edges still fire. Bounded to
+ * just this (typically small) 48h edge list's endpoint entities — never
+ * the whole tracked roster (see fame.ts's loadLifetimeSourceBreadth). */
+async function suppressFamousEdges(
+  sql: Sql,
+  edges: NovelEdgeRow[],
+  aggRows: HourlyAggRow[],
+  effectiveBaselineDays: number,
+): Promise<NovelEdgeRow[]> {
+  if (edges.length === 0) return edges;
+
+  const endpointIds = Array.from(new Set(edges.flatMap((e) => [e.entityA, e.entityB])));
+  const breadthById = await loadLifetimeSourceBreadth(sql, endpointIds);
+  const baselineById = new Map(aggRows.map((row) => [row.entityId, row.baselineSum / effectiveBaselineDays]));
+  const volumeThreshold = computeNovelEdgeFameThreshold(aggRows, effectiveBaselineDays);
+
+  function endpointIsFamous(id: number, name: string, aliases: string[]): boolean {
+    return isFamous(
+      { names: [name, ...aliases], baselineDaily: baselineById.get(id) ?? 0, sourceBreadth: breadthById.get(id) ?? 0 },
+      volumeThreshold,
+    );
+  }
+
+  return edges.filter((e) => {
+    const bothFamous = endpointIsFamous(e.entityA, e.nameA, e.aliasesA) && endpointIsFamous(e.entityB, e.nameB, e.aliasesB);
+    return !bothFamous;
+  });
 }
 
 async function loadEdgeArticles(sql: Sql, edges: NovelEdgeRow[]): Promise<Map<string, number[]>> {
@@ -526,7 +576,11 @@ async function loadEdgeArticles(sql: Sql, edges: NovelEdgeRow[]): Promise<Map<st
   return map;
 }
 
-async function detectNovelEdges(sql: Sql): Promise<CandidateSignal[]> {
+async function detectNovelEdges(
+  sql: Sql,
+  aggRows: HourlyAggRow[],
+  effectiveBaselineDays: number,
+): Promise<CandidateSignal[]> {
   const globalMin = await loadGlobalMinFirstSeen(sql, "entity_edges");
   if (!globalMin) return [];
 
@@ -534,10 +588,13 @@ async function detectNovelEdges(sql: Sql): Promise<CandidateSignal[]> {
   const eligible = edges.filter((e) => !isBootstrapCohort(e.firstSeenAt, globalMin));
   if (eligible.length === 0) return [];
 
-  const articlesByPair = await loadEdgeArticles(sql, eligible);
+  const surviving = await suppressFamousEdges(sql, eligible, aggRows, effectiveBaselineDays);
+  if (surviving.length === 0) return [];
+
+  const articlesByPair = await loadEdgeArticles(sql, surviving);
 
   const signals: CandidateSignal[] = [];
-  for (const edge of eligible) {
+  for (const edge of surviving) {
     const scored = scoreNovelEdge(edge.articleCount);
     if (!scored) continue;
     const articleIds = articlesByPair.get(`${edge.entityA}:${edge.entityB}`) ?? [];
@@ -593,18 +650,23 @@ export async function runDetectors(sql: Sql, settings: Settings): Promise<Candid
   // here instead of quietly feeding a fabricated daysSinceEpoch=0 downstream.
   if (!epoch) throw new Error("runDetectors: epoch is null but warm-up is inactive — invariant violation");
 
-  const [entityNames, aggRows, articleRows, categoryBaseline, firstSeen, novelEdge] = await Promise.all([
+  // Hoisted ahead of the Promise.all below (a slight restructure): the
+  // novel-edge pass now needs the hourly-agg panel (baselineDaily + the
+  // fame volume threshold) to suppress famous-famous edges, so it can no
+  // longer run fully independently of it.
+  const daysSinceEpoch = computeDaysSinceEpoch(now, epoch);
+  const effectiveBaselineDays = computeEffectiveBaselineDays(daysSinceEpoch);
+  const aggRows = await loadHourlyAgg(sql);
+
+  const [entityNames, articleRows, categoryBaseline, firstSeen, novelEdge] = await Promise.all([
     loadTrackedEntityNames(sql),
-    loadHourlyAgg(sql),
     loadArticles24h(sql),
     loadCategoryBaseline(sql),
     detectFirstSeenNovelty(sql),
-    detectNovelEdges(sql),
+    detectNovelEdges(sql, aggRows, effectiveBaselineDays),
   ]);
 
   const articlesByEntity = groupArticlesByEntity(articleRows);
-  const daysSinceEpoch = computeDaysSinceEpoch(now, epoch);
-  const effectiveBaselineDays = computeEffectiveBaselineDays(daysSinceEpoch);
   const { surge, sentiment } = buildSurgeAndSentiment(
     aggRows,
     articlesByEntity,
