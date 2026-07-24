@@ -249,7 +249,7 @@ describe("buildWhyShown", () => {
 });
 
 describe("passesEligibility", () => {
-  const base = { subjectIsAnchor: false, distinctSourceCount: 2, evidenceCount: 2, anchorCount: 1 };
+  const base = { subjectIsAnchor: false, subjectIsFamous: false, distinctSourceCount: 2, evidenceCount: 2, anchorCount: 1 };
 
   it("passes when every condition clears", () => {
     expect(passesEligibility(base)).toBe(true);
@@ -257,6 +257,10 @@ describe("passesEligibility", () => {
 
   it("fails when the subject is an anchor, no exceptions", () => {
     expect(passesEligibility({ ...base, subjectIsAnchor: true })).toBe(false);
+  });
+
+  it("fails when the subject is famous, no exceptions", () => {
+    expect(passesEligibility({ ...base, subjectIsFamous: true })).toBe(false);
   });
 
   it("fails below the distinct-source floor", () => {
@@ -273,10 +277,15 @@ describe("passesEligibility", () => {
 });
 
 describe("isCorroboratedCandidate", () => {
-  it("requires both day_count>=2 and distinct source names >=2", () => {
+  it("qualifies via the persistence bar: day_count>=2 and distinct source names >=2", () => {
     expect(isCorroboratedCandidate(2, 2)).toBe(true);
     expect(isCorroboratedCandidate(1, 2)).toBe(false);
     expect(isCorroboratedCandidate(2, 1)).toBe(false);
+  });
+
+  it("also qualifies via the same-day breaking-satellite shortcut: >=3 distinct source names, any day_count", () => {
+    expect(isCorroboratedCandidate(1, 3)).toBe(true);
+    expect(isCorroboratedCandidate(1, 2)).toBe(false);
   });
 });
 
@@ -361,6 +370,7 @@ describe("dedupeCards", () => {
       subjectName,
       subjectType: "company",
       subjectBaselineDaily: 1,
+      subjectIsFamous: false,
       anchorNames: ["Anchor"],
       relationOrReason: "x",
       label: "observed" as const,
@@ -403,6 +413,7 @@ describe("sortAndCapCards", () => {
       subjectName: `Subject-${score}-${firstObservedAt}`,
       subjectType: "company",
       subjectBaselineDaily: 1,
+      subjectIsFamous: false,
       anchorNames: ["Anchor"],
       relationOrReason: "x",
       label: "observed" as const,
@@ -445,6 +456,7 @@ describe("sortAndCapCards", () => {
 function makeDevelopmentsSql(responses: Partial<Record<string, SqlRow[]>>): Sql {
   return (async (strings: TemplateStringsArray) => {
     const query = strings.join(" ? ");
+    if (query.includes("source_breadth")) return responses.breadth ?? [];
     if (query.includes("MIN(ee.first_seen_at)")) return responses.edgeBootstrapFloor ?? [];
     if (query.includes("MIN(r.first_seen_at)")) return responses.relationBootstrapFloor ?? [];
     if (query.includes("min_first_seen") && query.includes("FROM articles")) return responses.epoch ?? [];
@@ -630,7 +642,9 @@ describe("getDevelopments — required fixtures", () => {
   });
 
   it("fixture 8: single-source subject — ineligible", async () => {
-    expect(passesEligibility({ subjectIsAnchor: false, distinctSourceCount: 1, evidenceCount: 1, anchorCount: 1 })).toBe(false);
+    expect(
+      passesEligibility({ subjectIsAnchor: false, subjectIsFamous: false, distinctSourceCount: 1, evidenceCount: 1, anchorCount: 1 }),
+    ).toBe(false);
 
     const sql = makeDevelopmentsSql({
       ...baseResponses(),
@@ -762,6 +776,168 @@ describe("getDevelopments — required fixtures", () => {
 
     const result = await getDevelopments(sql, NOW);
     expect(result).toHaveLength(0);
+  });
+});
+
+// ---- L2A satellite discipline: shared fame test + gating changes ----
+
+describe("getDevelopments — L2A satellite discipline", () => {
+  it("fixture 15: breaking satellite — candidate with day_count 1 but 3 distinct source names qualifies immediately", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(1, "Russia", "country", 0)],
+      candidates: [
+        {
+          name_norm: "breakingco", display_name: "BreakingCo", type_hint: "company",
+          first_seen_at: iso(1), last_seen_at: iso(1), source_names: ["Source A", "Source B", "Source C"],
+          day_count: 1, sample_titles: ["Breaking Title One", "Breaking Title Two"], contexts: [], co_entities: ["Russia"],
+        },
+      ],
+      titleMatches: [
+        { title: "Breaking Title One", id: 601, dup_group_id: null },
+        { title: "Breaking Title Two", id: 602, dup_group_id: null },
+      ],
+      resolvedArticles: [
+        { id: 601, title: "Breaking Title One", link: "http://601", source_name: "Source A", published_at: iso(1), first_seen_at: iso(1) },
+        { id: 602, title: "Breaking Title Two", link: "http://602", source_name: "Source B", published_at: iso(1), first_seen_at: iso(1) },
+      ],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(1);
+    expect(result[0].subjectName).toBe("BreakingCo");
+  });
+
+  it("fixture 16: a same-day candidate with only 2 distinct source names does not qualify (breaking floor is 3)", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(1, "Russia", "country", 0)],
+      candidates: [
+        {
+          name_norm: "notbreakingco", display_name: "NotBreakingCo", type_hint: "company",
+          first_seen_at: iso(1), last_seen_at: iso(1), source_names: ["Source A", "Source B"],
+          day_count: 1, sample_titles: ["Some Title"], contexts: [], co_entities: ["Russia"],
+        },
+      ],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(0);
+  });
+
+  it("fixture 17: famous-famous relation (anchor + dictionary-famous non-anchor) — no card, though the old isAnchor-only rule would have produced one", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      // NATO: a real ORG_DICT entry, low volume (baselineDaily=1 < the ~3
+      // anchor floor) — famous by dictionary alone, not by type or volume.
+      baseline: [entityRow(1, "Russia", "country", 0), entityRow(2, "NATO", "organization", 14)],
+      relations: [
+        { source_id: 2, target_id: 1, relation: "statement_about", first_seen_at: iso(3), last_seen_at: iso(1), evidence_article_id: null },
+      ],
+      pairEvidence: [
+        { entity_a: 1, entity_b: 2, id: 801, title: "FF1", link: "http://ff1", source_name: "Source A", published_at: iso(3), first_seen_at: iso(3) },
+        { entity_a: 1, entity_b: 2, id: 802, title: "FF2", link: "http://ff2", source_name: "Source B", published_at: iso(2), first_seen_at: iso(2) },
+      ],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(0);
+  });
+
+  it("fixture 18: dictionary-famous low-volume org serves as context for a genuine satellite (the deliberate R widening — previously no card at all)", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(1, "NATO", "organization", 14), entityRow(2, "QuietDefenseCo", "company", 14)],
+      relations: [
+        { source_id: 2, target_id: 1, relation: "supply", first_seen_at: iso(3), last_seen_at: iso(1), evidence_article_id: null },
+      ],
+      pairEvidence: [
+        { entity_a: 1, entity_b: 2, id: 811, title: "W1", link: "http://w1", source_name: "Source A", published_at: iso(3), first_seen_at: iso(3) },
+        { entity_a: 1, entity_b: 2, id: 812, title: "W2", link: "http://w2", source_name: "Source B", published_at: iso(2), first_seen_at: iso(2) },
+      ],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(1);
+    expect(result[0].subjectName).toBe("QuietDefenseCo");
+    expect(result[0].anchorNames).toEqual(["NATO"]);
+  });
+
+  it("fixture 19: satellite-satellite relation — neither endpoint is an anchor or famous — no card", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(1, "QuietCoOne", "company", 14), entityRow(2, "QuietCoTwo", "company", 14)],
+      relations: [
+        { source_id: 1, target_id: 2, relation: "partnership", first_seen_at: iso(3), last_seen_at: iso(1), evidence_article_id: null },
+      ],
+      pairEvidence: [
+        { entity_a: 1, entity_b: 2, id: 821, title: "S1", link: "http://s1", source_name: "Source A", published_at: iso(3), first_seen_at: iso(3) },
+        { entity_a: 1, entity_b: 2, id: 822, title: "S2", link: "http://s2", source_name: "Source B", published_at: iso(2), first_seen_at: iso(2) },
+      ],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(0);
+  });
+
+  it("fixture 20: famous-by-breadth subject arriving via E — rejected by uniform eligibility even though it clears the (unwidened) isAnchor split", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(60, "TallAnchorOrg", "organization", 140), entityRow(61, "WidelyCoveredCo", "company", 14)],
+      edgeBootstrapFloor: [{ min_first_seen: iso(90) }],
+      edges: [{ entity_a: 60, entity_b: 61, first_seen_at: iso(5), last_seen_at: iso(2) }],
+      pairEvidence: [
+        { entity_a: 60, entity_b: 61, id: 950, title: "BR1", link: "http://br1", source_name: "Source A", published_at: iso(5), first_seen_at: iso(5) },
+        { entity_a: 60, entity_b: 61, id: 951, title: "BR2", link: "http://br2", source_name: "Source B", published_at: iso(4), first_seen_at: iso(4) },
+      ],
+      breadth: [{ entity_id: 61, source_breadth: 12 }],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe("getDevelopments — N-source instant-ubiquity guard", () => {
+  const anchorBaseline = entityRow(9, "BigAnchorOrg", "organization", 140);
+
+  it("skips a newly tracked entity with 6 distinct sources within its first 48h (instant ubiquity)", async () => {
+    const entityFirstSeen = iso(2);
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [anchorBaseline, entityRow(50, "BreakingSubject", "person", 14)],
+      newEntities: [
+        { id: 50, canonical_name: "BreakingSubject", type: "person", first_seen_at: entityFirstSeen, last_seen_at: entityFirstSeen },
+      ],
+      clusterHeadArticles: [1, 2, 3, 4, 5, 6].map((n) => ({
+        entity_id: 50, id: 900 + n, title: `T${n}`, link: `http://t${n}`,
+        source_name: `Source ${n}`, published_at: entityFirstSeen, first_seen_at: entityFirstSeen,
+      })),
+      coOccurring: [1, 2, 3, 4, 5, 6].map((n) => ({ article_id: 900 + n, entity_id: 9 })),
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(0);
+  });
+
+  it("keeps a newly tracked entity with only 5 distinct sources within its first 48h", async () => {
+    const entityFirstSeen = iso(2);
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [anchorBaseline, entityRow(51, "GenuineSatellite", "person", 14)],
+      newEntities: [
+        { id: 51, canonical_name: "GenuineSatellite", type: "person", first_seen_at: entityFirstSeen, last_seen_at: entityFirstSeen },
+      ],
+      clusterHeadArticles: [1, 2, 3, 4, 5].map((n) => ({
+        entity_id: 51, id: 950 + n, title: `U${n}`, link: `http://u${n}`,
+        source_name: `Source ${n}`, published_at: entityFirstSeen, first_seen_at: entityFirstSeen,
+      })),
+      coOccurring: [1, 2, 3, 4, 5].map((n) => ({ article_id: 950 + n, entity_id: 9 })),
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(1);
+    expect(result[0].subjectName).toBe("GenuineSatellite");
   });
 });
 

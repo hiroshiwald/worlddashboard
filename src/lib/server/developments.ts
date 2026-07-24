@@ -1,6 +1,7 @@
 import type { Sql, SqlRow } from "./db";
 import { computeEffectiveBaselineDays, isBootstrapCohort } from "./detectors";
 import { normalizeName } from "./extract-v2";
+import { computeFameVolumeThreshold, isDictionaryFamous, isFamous, loadLifetimeSourceBreadth } from "./fame";
 
 export interface EvidenceArticleJson {
   title: string;
@@ -73,6 +74,7 @@ interface CardDraft {
   subjectName: string;
   subjectType: string;
   subjectBaselineDaily: number | null;
+  subjectIsFamous: boolean;
   anchorNames: string[];
   relationOrReason: string;
   label: "observed" | "pattern";
@@ -100,12 +102,15 @@ const MIN_DISTINCT_SOURCES = 2;
 const MIN_ANCHOR_COUNT = 1;
 const MIN_CANDIDATE_DAY_COUNT = 2;
 const MIN_CANDIDATE_SOURCE_NAMES = 2;
+const MIN_BREAKING_CANDIDATE_SOURCE_NAMES = 3;
 const MAX_CANDIDATE_FANOUT = 30;
 const MIN_EDGE_ARTICLE_COUNT = 2;
 const CANDIDATE_MATCH_WINDOW_PAD_DAYS = 2;
 const STALE_REPORTING_THRESHOLD_DAYS = 7;
 const NOVELTY_DECAY_DAYS = 7;
 const CARD_CAP = 8;
+const INSTANT_UBIQUITY_WINDOW_HOURS = 48;
+const INSTANT_UBIQUITY_MIN_SOURCES = 6;
 
 const STRONG_RELATIONS = new Set(["sanction", "supply", "acquisition", "investment", "regulation", "legal_action"]);
 const WEAK_RELATIONS = new Set(["statement_about", "other"]);
@@ -143,6 +148,36 @@ function toStringArray(value: unknown): string[] {
 export function isAnchor(type: string, baselineDaily: number, anchorThreshold: number): boolean {
   if (type === "country" || type === "region") return true;
   return baselineDaily >= anchorThreshold;
+}
+
+/** satellite = NOT (famous OR anchor) — the subject-selection predicate for
+ * source R's relation pairing (L2A). Fame is deliberately broader than
+ * isAnchor, so this is strictly narrower than "not an anchor": a
+ * dictionary-famous or high-breadth entity with modest volume is famous
+ * without being an anchor, and must still be excluded from ever being a
+ * satellite. */
+export function isSatellite(isEntityFamous: boolean, isEntityAnchor: boolean): boolean {
+  return !isEntityFamous && !isEntityAnchor;
+}
+
+/** Assembles a TrackedEntityMeta's fame facts (canonical name + aliases,
+ * baseline, and a pre-loaded lifetime breadth lookup) and applies the shared
+ * fame test. Shared by sources R, N, and E — the only three whose subjects
+ * (R, N) or whose fame-checked side (E) are tracked entities with a real
+ * baseline/breadth; source C (candidates) uses isDictionaryFamous directly. */
+function computeIsFamous(
+  entity: TrackedEntityMeta,
+  breadthById: Map<number, number>,
+  fameVolumeThreshold: number,
+): boolean {
+  return isFamous(
+    {
+      names: [entity.canonicalName, ...entity.aliases],
+      baselineDaily: entity.baselineDaily,
+      sourceBreadth: breadthById.get(entity.id) ?? 0,
+    },
+    fameVolumeThreshold,
+  );
 }
 
 /** max(3, 90th percentile) of baselineDaily across tracked entities with any
@@ -285,6 +320,7 @@ export function buildWhyShown(input: WhyShownInput): string {
 
 interface EligibilityInput {
   subjectIsAnchor: boolean;
+  subjectIsFamous: boolean;
   distinctSourceCount: number;
   evidenceCount: number;
   anchorCount: number;
@@ -295,9 +331,14 @@ interface EligibilityInput {
  * gap: a candidate's type_hint can be 'region' (compromise-tagged place
  * names not in REGION_DICT and not LLM-judged famous fall through to
  * entity_candidates), so it must be checked here rather than assumed
- * structurally impossible for that one source. */
+ * structurally impossible for that one source. subjectIsFamous is the L2A
+ * companion fix: fame is deliberately broader than isAnchor (dictionary
+ * membership, lifetime source breadth, or top-quartile baseline), so a
+ * subject can clear the anchor bar's absence yet still be a famous entity
+ * that must never headline a card. */
 export function passesEligibility(input: EligibilityInput): boolean {
   if (input.subjectIsAnchor) return false;
+  if (input.subjectIsFamous) return false;
   if (input.evidenceCount < 1) return false;
   if (input.distinctSourceCount < MIN_DISTINCT_SOURCES) return false;
   if (input.anchorCount < MIN_ANCHOR_COUNT) return false;
@@ -307,9 +348,16 @@ export function passesEligibility(input: EligibilityInput): boolean {
 /** day_count/distinct-source-name gate for candidates (source C only). A
  * plain JS threshold check, not a SQL WHERE clause — kept consistent with
  * how every other numeric eligibility threshold in this codebase (scoreSurge,
- * scoreNovelEdge, etc.) is a testable function rather than baked into SQL. */
+ * scoreNovelEdge, etc.) is a testable function rather than baked into SQL.
+ * Qualifies on EITHER the original persistence bar (>=2 distinct days AND
+ * >=2 distinct source names) OR a same-day "breaking satellite" shortcut
+ * (>=3 distinct source names, any day_count): an unknown entity suddenly
+ * corroborated by 3+ outlets on its very first day shouldn't have to wait
+ * out a second day just to clear the persistence bar. */
 export function isCorroboratedCandidate(dayCount: number, distinctSourceNameCount: number): boolean {
-  return dayCount >= MIN_CANDIDATE_DAY_COUNT && distinctSourceNameCount >= MIN_CANDIDATE_SOURCE_NAMES;
+  const persistent = dayCount >= MIN_CANDIDATE_DAY_COUNT && distinctSourceNameCount >= MIN_CANDIDATE_SOURCE_NAMES;
+  const breaking = distinctSourceNameCount >= MIN_BREAKING_CANDIDATE_SOURCE_NAMES;
+  return persistent || breaking;
 }
 
 /** Bounds candidate evidence fan-out: each candidate that reaches this point
@@ -589,45 +637,76 @@ function mergeRelationEvidence(
   return Array.from(byId.values());
 }
 
+function buildRelationCard(
+  relation: RelationRow,
+  entityIndex: Map<number, TrackedEntityMeta>,
+  pairArticles: Map<string, RawEvidenceArticle[]>,
+  resolvedEvidenceById: Map<number, RawEvidenceArticle>,
+  breadthById: Map<number, number>,
+  anchorThreshold: number,
+  fameVolumeThreshold: number,
+): CardDraft | null {
+  const source = entityIndex.get(relation.sourceId);
+  const target = entityIndex.get(relation.targetId);
+  if (!source || !target) return null;
+
+  const sourceFamous = computeIsFamous(source, breadthById, fameVolumeThreshold);
+  const targetFamous = computeIsFamous(target, breadthById, fameVolumeThreshold);
+  const sourceIsSatellite = isSatellite(sourceFamous, isAnchor(source.type, source.baselineDaily, anchorThreshold));
+  const targetIsSatellite = isSatellite(targetFamous, isAnchor(target.type, target.baselineDaily, anchorThreshold));
+  // Exactly one satellite endpoint required: both (satellite-satellite) or
+  // neither (famous-famous, anchor-anchor, or famous-anchor) yield no card.
+  if (sourceIsSatellite === targetIsSatellite) return null;
+
+  const subject = sourceIsSatellite ? source : target;
+  const anchorEntity = sourceIsSatellite ? target : source;
+  const pairEvidence = pairArticles.get(pairKey(relation.sourceId, relation.targetId)) ?? [];
+  const resolvedEvidence =
+    relation.evidenceArticleId == null ? undefined : resolvedEvidenceById.get(relation.evidenceArticleId);
+
+  return {
+    sourceKind: "R",
+    subjectName: subject.canonicalName,
+    subjectType: subject.type,
+    subjectBaselineDaily: subject.baselineDaily,
+    // Guaranteed false by construction (the satellite side is never
+    // famous) — computed rather than hardcoded so this stays honest if
+    // the satellite predicate above ever changes.
+    subjectIsFamous: sourceIsSatellite ? sourceFamous : targetFamous,
+    anchorNames: [anchorEntity.canonicalName],
+    relationOrReason: `${relation.relation} (stated relation)`,
+    label: "observed",
+    firstObservedAt: relation.firstSeenAt,
+    lastObservedAt: relation.lastSeenAt,
+    fullEvidence: mergeRelationEvidence(pairEvidence, resolvedEvidence),
+    relation: relation.relation,
+  };
+}
+
 function buildRelationCardDrafts(
   relations: RelationRow[],
   globalMin: Date | null,
   entityIndex: Map<number, TrackedEntityMeta>,
   pairArticles: Map<string, RawEvidenceArticle[]>,
   resolvedEvidenceById: Map<number, RawEvidenceArticle>,
+  breadthById: Map<number, number>,
   anchorThreshold: number,
+  fameVolumeThreshold: number,
 ): CardDraft[] {
   if (!globalMin) return [];
   const drafts: CardDraft[] = [];
   for (const relation of relations) {
     if (isBootstrapCohort(relation.firstSeenAt, globalMin)) continue;
-    const source = entityIndex.get(relation.sourceId);
-    const target = entityIndex.get(relation.targetId);
-    if (!source || !target) continue;
-
-    const sourceIsAnchor = isAnchor(source.type, source.baselineDaily, anchorThreshold);
-    const targetIsAnchor = isAnchor(target.type, target.baselineDaily, anchorThreshold);
-    if (sourceIsAnchor === targetIsAnchor) continue;
-
-    const subject = sourceIsAnchor ? target : source;
-    const anchorEntity = sourceIsAnchor ? source : target;
-    const pairEvidence = pairArticles.get(pairKey(relation.sourceId, relation.targetId)) ?? [];
-    const resolvedEvidence =
-      relation.evidenceArticleId == null ? undefined : resolvedEvidenceById.get(relation.evidenceArticleId);
-
-    drafts.push({
-      sourceKind: "R",
-      subjectName: subject.canonicalName,
-      subjectType: subject.type,
-      subjectBaselineDaily: subject.baselineDaily,
-      anchorNames: [anchorEntity.canonicalName],
-      relationOrReason: `${relation.relation} (stated relation)`,
-      label: "observed",
-      firstObservedAt: relation.firstSeenAt,
-      lastObservedAt: relation.lastSeenAt,
-      fullEvidence: mergeRelationEvidence(pairEvidence, resolvedEvidence),
-      relation: relation.relation,
-    });
+    const card = buildRelationCard(
+      relation,
+      entityIndex,
+      pairArticles,
+      resolvedEvidenceById,
+      breadthById,
+      anchorThreshold,
+      fameVolumeThreshold,
+    );
+    if (card) drafts.push(card);
   }
   return drafts;
 }
@@ -638,9 +717,13 @@ async function buildRelationSourceDrafts(sql: Sql, ctx: CardContext): Promise<Ca
 
   const pairs = relations.map((r) => ({ a: r.sourceId, b: r.targetId }));
   const evidenceArticleIds = relations.map((r) => r.evidenceArticleId).filter((id): id is number => id !== null);
-  const [pairArticles, resolvedEvidenceById] = await Promise.all([
+  // Bounded to this window's relation endpoints (never the whole roster) —
+  // see fame.ts's loadLifetimeSourceBreadth.
+  const endpointIds = Array.from(new Set(relations.flatMap((r) => [r.sourceId, r.targetId])));
+  const [pairArticles, resolvedEvidenceById, breadthById] = await Promise.all([
     loadPairEvidenceArticles(sql, pairs),
     loadArticlesByIds(sql, evidenceArticleIds),
+    loadLifetimeSourceBreadth(sql, endpointIds),
   ]);
   return buildRelationCardDrafts(
     relations,
@@ -648,7 +731,9 @@ async function buildRelationSourceDrafts(sql: Sql, ctx: CardContext): Promise<Ca
     ctx.entityIndex,
     pairArticles,
     resolvedEvidenceById,
+    breadthById,
     ctx.anchorThreshold,
+    ctx.fameVolumeThreshold,
   );
 }
 
@@ -730,6 +815,19 @@ async function loadCoOccurringEntityIds(sql: Sql, articleIds: number[]): Promise
   return map;
 }
 
+/** True when an entity racked up >=6 distinct evidence sources within its
+ * first 48h of tracking — the signature of breaking mega-news about an
+ * already-famous subject arriving in one burst, not an emerging satellite
+ * (the first_seen signal already covers genuine breaking novelty). Both
+ * timestamps are watch-time (arrival): entity.firstSeenAt and each evidence
+ * article's own first_seen_at — never published_at. */
+export function isInstantUbiquity(entityFirstSeenAt: Date, evidence: { sourceName: string; firstSeenAt: Date }[]): boolean {
+  const cutoffMs = entityFirstSeenAt.getTime() + INSTANT_UBIQUITY_WINDOW_HOURS * 3600 * 1000;
+  const within48h = evidence.filter((e) => e.firstSeenAt.getTime() <= cutoffMs);
+  const distinctSources = new Set(within48h.map((e) => e.sourceName)).size;
+  return distinctSources >= INSTANT_UBIQUITY_MIN_SOURCES;
+}
+
 function resolveCoOccurringAnchors(
   evidence: RawEvidenceArticle[],
   selfId: number,
@@ -756,23 +854,32 @@ function buildNewEntityCardDrafts(
   coOccurringByArticle: Map<number, number[]>,
   entityIndex: Map<number, TrackedEntityMeta>,
   anchorThreshold: number,
+  breadthById: Map<number, number>,
+  fameVolumeThreshold: number,
 ): CardDraft[] {
   const drafts: CardDraft[] = [];
   for (const entity of entities) {
-    const baselineDaily = entityIndex.get(entity.id)?.baselineDaily ?? 0;
+    const meta = entityIndex.get(entity.id);
+    const baselineDaily = meta?.baselineDaily ?? 0;
     if (isAnchor(entity.type, baselineDaily, anchorThreshold)) continue;
 
     const evidence = evidenceByEntity.get(entity.id) ?? [];
     if (evidence.length === 0) continue;
+    if (isInstantUbiquity(entity.firstSeenAt, evidence)) continue;
 
     const anchors = resolveCoOccurringAnchors(evidence, entity.id, coOccurringByArticle, entityIndex, anchorThreshold);
     if (anchors.length === 0) continue;
+
+    const names = [entity.canonicalName, ...(meta?.aliases ?? [])];
+    const sourceBreadth = breadthById.get(entity.id) ?? 0;
+    const subjectIsFamous = isFamous({ names, baselineDaily, sourceBreadth }, fameVolumeThreshold);
 
     drafts.push({
       sourceKind: "N",
       subjectName: entity.canonicalName,
       subjectType: entity.type,
       subjectBaselineDaily: baselineDaily,
+      subjectIsFamous,
       anchorNames: anchors.map((a) => a.canonicalName),
       relationOrReason: `first observed around ${anchors[0].canonicalName}`,
       label: "observed",
@@ -789,10 +896,21 @@ async function buildNewEntitySourceDrafts(sql: Sql, ctx: CardContext): Promise<C
   if (entities.length === 0) return [];
 
   const entityIds = entities.map((e) => e.id);
-  const evidenceByEntity = await loadClusterHeadArticlesForEntities(sql, entityIds);
+  const [evidenceByEntity, breadthById] = await Promise.all([
+    loadClusterHeadArticlesForEntities(sql, entityIds),
+    loadLifetimeSourceBreadth(sql, entityIds),
+  ]);
   const articleIds = Array.from(new Set(Array.from(evidenceByEntity.values()).flat().map((a) => a.articleId)));
   const coOccurringByArticle = await loadCoOccurringEntityIds(sql, articleIds);
-  return buildNewEntityCardDrafts(entities, evidenceByEntity, coOccurringByArticle, ctx.entityIndex, ctx.anchorThreshold);
+  return buildNewEntityCardDrafts(
+    entities,
+    evidenceByEntity,
+    coOccurringByArticle,
+    ctx.entityIndex,
+    ctx.anchorThreshold,
+    breadthById,
+    ctx.fameVolumeThreshold,
+  );
 }
 
 // ---- source C: corroborated candidate ----
@@ -936,6 +1054,9 @@ function buildCandidateCardDrafts(
       subjectName: candidate.displayName,
       subjectType: candidate.typeHint,
       subjectBaselineDaily: null,
+      // Candidates aren't tracked entities — no baseline or breadth to check,
+      // so only the dictionary prong applies (see fame.ts's isDictionaryFamous).
+      subjectIsFamous: isDictionaryFamous([candidate.displayName, candidate.nameNorm]),
       anchorNames: anchors.map((a) => a.canonicalName),
       relationOrReason: candidate.contexts[0] ?? `recurring alongside ${anchors[0].canonicalName}`,
       label: "observed",
@@ -1015,15 +1136,26 @@ async function loadEdgesInWindow(sql: Sql): Promise<EdgeRow[]> {
   return rows.map(parseEdgeRow);
 }
 
-function buildEdgeCardDrafts(
+interface PendingEdgeCard {
+  subject: TrackedEntityMeta;
+  anchorEntity: TrackedEntityMeta;
+  evidence: RawEvidenceArticle[];
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+}
+
+// E's own anchor/subject split stays isAnchor-based, unchanged (deliberately
+// NOT widened by fame — see buildEdgeCardDrafts below, which is where the
+// fame-based eligibility check actually applies, uniformly, for this source).
+function resolveEdgeSubjects(
   edges: EdgeRow[],
   globalMin: Date | null,
   entityIndex: Map<number, TrackedEntityMeta>,
   pairArticles: Map<string, RawEvidenceArticle[]>,
   anchorThreshold: number,
-): CardDraft[] {
+): PendingEdgeCard[] {
   if (!globalMin) return [];
-  const drafts: CardDraft[] = [];
+  const pending: PendingEdgeCard[] = [];
   for (const edge of edges) {
     if (isBootstrapCohort(edge.firstSeenAt, globalMin)) continue;
     const entityA = entityIndex.get(edge.entityA);
@@ -1037,21 +1169,29 @@ function buildEdgeCardDrafts(
     const subject = aIsAnchor ? entityB : entityA;
     const anchorEntity = aIsAnchor ? entityA : entityB;
     const evidence = pairArticles.get(pairKey(edge.entityA, edge.entityB)) ?? [];
-
-    drafts.push({
-      sourceKind: "E",
-      subjectName: subject.canonicalName,
-      subjectType: subject.type,
-      subjectBaselineDaily: subject.baselineDaily,
-      anchorNames: [anchorEntity.canonicalName],
-      relationOrReason: `recurring co-coverage with ${anchorEntity.canonicalName}`,
-      label: "pattern",
-      firstObservedAt: edge.firstSeenAt,
-      lastObservedAt: edge.lastSeenAt,
-      fullEvidence: evidence,
-    });
+    pending.push({ subject, anchorEntity, evidence, firstSeenAt: edge.firstSeenAt, lastSeenAt: edge.lastSeenAt });
   }
-  return drafts;
+  return pending;
+}
+
+function buildEdgeCardDrafts(
+  pending: PendingEdgeCard[],
+  breadthById: Map<number, number>,
+  fameVolumeThreshold: number,
+): CardDraft[] {
+  return pending.map((p) => ({
+    sourceKind: "E",
+    subjectName: p.subject.canonicalName,
+    subjectType: p.subject.type,
+    subjectBaselineDaily: p.subject.baselineDaily,
+    subjectIsFamous: computeIsFamous(p.subject, breadthById, fameVolumeThreshold),
+    anchorNames: [p.anchorEntity.canonicalName],
+    relationOrReason: `recurring co-coverage with ${p.anchorEntity.canonicalName}`,
+    label: "pattern",
+    firstObservedAt: p.firstSeenAt,
+    lastObservedAt: p.lastSeenAt,
+    fullEvidence: p.evidence,
+  }));
 }
 
 async function buildEdgeSourceDrafts(sql: Sql, ctx: CardContext): Promise<CardDraft[]> {
@@ -1060,7 +1200,14 @@ async function buildEdgeSourceDrafts(sql: Sql, ctx: CardContext): Promise<CardDr
 
   const pairs = edges.map((e) => ({ a: e.entityA, b: e.entityB }));
   const pairArticles = await loadPairEvidenceArticles(sql, pairs);
-  return buildEdgeCardDrafts(edges, globalMin, ctx.entityIndex, pairArticles, ctx.anchorThreshold);
+  const pending = resolveEdgeSubjects(edges, globalMin, ctx.entityIndex, pairArticles, ctx.anchorThreshold);
+  if (pending.length === 0) return [];
+
+  // Bounded to this source's resolved subjects (never the whole roster) —
+  // see fame.ts's loadLifetimeSourceBreadth.
+  const subjectIds = Array.from(new Set(pending.map((p) => p.subject.id)));
+  const breadthById = await loadLifetimeSourceBreadth(sql, subjectIds);
+  return buildEdgeCardDrafts(pending, breadthById, ctx.fameVolumeThreshold);
 }
 
 // ---- assembly + orchestration ----
@@ -1069,6 +1216,7 @@ interface CardContext {
   entityIndex: Map<number, TrackedEntityMeta>;
   nameIndex: Map<string, TrackedEntityMeta>;
   anchorThreshold: number;
+  fameVolumeThreshold: number;
 }
 
 function scoreCard(draft: CardDraft, anchorThreshold: number, now: Date): ScoredCard {
@@ -1132,6 +1280,7 @@ function finalizeCards(drafts: CardDraft[], anchorThreshold: number, now: Date):
     const subjectIsAnchor = isAnchor(draft.subjectType, draft.subjectBaselineDaily ?? 0, anchorThreshold);
     return passesEligibility({
       subjectIsAnchor,
+      subjectIsFamous: draft.subjectIsFamous,
       distinctSourceCount: countDistinctSources(draft.fullEvidence),
       evidenceCount: draft.fullEvidence.length,
       anchorCount: draft.anchorNames.length,
@@ -1156,12 +1305,15 @@ export async function getDevelopments(sql: Sql, now: Date = new Date()): Promise
   const effectiveBaselineDays = computeEffectiveBaselineDays(computeDaysSinceEpoch(now, epoch));
   const baselineRows = await loadEntityBaselinePanel(sql);
   const entities = toTrackedEntityMeta(baselineRows, effectiveBaselineDays);
-  const anchorThreshold = computeAnchorThreshold(collectBaselinePopulation(baselineRows, effectiveBaselineDays));
+  const population = collectBaselinePopulation(baselineRows, effectiveBaselineDays);
+  const anchorThreshold = computeAnchorThreshold(population);
+  const fameVolumeThreshold = computeFameVolumeThreshold(population);
 
   const ctx: CardContext = {
     entityIndex: buildEntityIndex(entities),
     nameIndex: buildNameIndex(entities),
     anchorThreshold,
+    fameVolumeThreshold,
   };
   const drafts = await buildAllCardDrafts(sql, ctx);
   return finalizeCards(drafts, anchorThreshold, now);
