@@ -78,7 +78,7 @@ describe("computeAnchorThreshold", () => {
 
 describe("rankAnchors", () => {
   function meta(canonicalName: string, baselineDaily: number) {
-    return { id: 1, canonicalName, type: "country", aliases: [], baselineDaily };
+    return { id: 1, canonicalName, type: "country", aliases: [], baselineDaily, fame: "unknown" as const };
   }
 
   it("sorts by baselineDaily descending", () => {
@@ -484,9 +484,9 @@ function baseResponses(): Partial<Record<string, SqlRow[]>> {
   };
 }
 
-function entityRow(id: number, canonicalName: string, type: string, baselineMentions: number) {
+function entityRow(id: number, canonicalName: string, type: string, baselineMentions: number, fame?: string) {
   return {
-    id, canonical_name: canonicalName, type, aliases: [],
+    id, canonical_name: canonicalName, type, aliases: [], fame,
     baseline_mentions: baselineMentions, total_mentions_15d: baselineMentions,
   };
 }
@@ -891,6 +891,42 @@ describe("getDevelopments — L2A satellite discipline", () => {
         { entity_a: 60, entity_b: 61, id: 951, title: "BR2", link: "http://br2", source_name: "Source B", published_at: iso(4), first_seen_at: iso(4) },
       ],
       breadth: [{ entity_id: 61, source_breadth: 12 }],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe("getDevelopments — stored Wikidata fame threading", () => {
+  it("a stored-famous, heuristically-invisible subject is excluded (no dictionary hit, no anchor, no breadth/volume)", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(1, "Russia", "country", 0), entityRow(2, "WidelyFamousPerson", "person", 14, "famous")],
+      relations: [
+        { source_id: 2, target_id: 1, relation: "statement_about", first_seen_at: iso(3), last_seen_at: iso(1), evidence_article_id: null },
+      ],
+      pairEvidence: [
+        { entity_a: 1, entity_b: 2, id: 910, title: "SF1", link: "http://sf1", source_name: "Source A", published_at: iso(3), first_seen_at: iso(3) },
+        { entity_a: 1, entity_b: 2, id: 911, title: "SF2", link: "http://sf2", source_name: "Source B", published_at: iso(2), first_seen_at: iso(2) },
+      ],
+    });
+
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(0);
+  });
+
+  it("a stored not_famous verdict does not veto NATO's own firing dictionary prong — still a famous-famous relation, no card", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(1, "Russia", "country", 0), entityRow(2, "NATO", "organization", 14, "not_famous")],
+      relations: [
+        { source_id: 2, target_id: 1, relation: "statement_about", first_seen_at: iso(3), last_seen_at: iso(1), evidence_article_id: null },
+      ],
+      pairEvidence: [
+        { entity_a: 1, entity_b: 2, id: 920, title: "NF1", link: "http://nf1", source_name: "Source A", published_at: iso(3), first_seen_at: iso(3) },
+        { entity_a: 1, entity_b: 2, id: 921, title: "NF2", link: "http://nf2", source_name: "Source B", published_at: iso(2), first_seen_at: iso(2) },
+      ],
     });
 
     const result = await getDevelopments(sql, NOW);

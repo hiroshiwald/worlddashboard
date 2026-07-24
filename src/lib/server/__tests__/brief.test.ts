@@ -129,3 +129,22 @@ describe("getBrief: developments", () => {
     expect(brief.developments).toEqual([]);
   });
 });
+
+describe("getBrief: new entities fame filter", () => {
+  it("query excludes fame = 'famous'; a non-famous row still passes through to newEntities", async () => {
+    let newEntitiesQuery = "";
+    const sql = makeMockSql((query) => {
+      if (query.includes("JOIN article_entities ae")) {
+        newEntitiesQuery = query;
+        return [{ id: "1", canonical_name: "UnknownPerson", type: "person", first_seen_at: "2026-07-20T00:00:00Z", source_count: 2 }];
+      }
+      return [];
+    });
+
+    const brief = await getBrief(sql, DEFAULTS);
+
+    expect(newEntitiesQuery).toContain("e.fame != 'famous'");
+    expect(brief.newEntities).toHaveLength(1);
+    expect(brief.newEntities[0].canonicalName).toBe("UnknownPerson");
+  });
+});

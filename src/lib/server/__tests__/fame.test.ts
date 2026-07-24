@@ -6,6 +6,10 @@ import {
   isVolumeFamous,
   isFamous,
   loadLifetimeSourceBreadth,
+  computeWikiFameVerdict,
+  FAME_PAGEVIEWS_THRESHOLD,
+  FAME_SITELINKS_THRESHOLD,
+  FAME_SITELINKS_CORROBORATION_PAGEVIEWS,
 } from "../fame";
 import type { Sql, SqlRow } from "../db";
 
@@ -79,24 +83,75 @@ describe("isVolumeFamous", () => {
 
 describe("isFamous", () => {
   it("is famous by the dictionary prong alone — the candidate-path reduction (zero baseline/breadth)", () => {
-    expect(isFamous({ names: ["Russia"], baselineDaily: 0, sourceBreadth: 0 }, 3)).toBe(true);
+    expect(isFamous({ names: ["Russia"], baselineDaily: 0, sourceBreadth: 0, storedFame: "unknown" }, 3)).toBe(true);
   });
 
   it("is famous by the breadth prong alone", () => {
-    expect(isFamous({ names: ["Acme"], baselineDaily: 0, sourceBreadth: 12 }, 3)).toBe(true);
+    expect(isFamous({ names: ["Acme"], baselineDaily: 0, sourceBreadth: 12, storedFame: "unknown" }, 3)).toBe(true);
   });
 
   it("is famous by the volume prong alone", () => {
-    expect(isFamous({ names: ["Acme"], baselineDaily: 5, sourceBreadth: 0 }, 3)).toBe(true);
+    expect(isFamous({ names: ["Acme"], baselineDaily: 5, sourceBreadth: 0, storedFame: "unknown" }, 3)).toBe(true);
   });
 
   it("is not famous when every prong fails", () => {
-    expect(isFamous({ names: ["Acme"], baselineDaily: 1, sourceBreadth: 2 }, 3)).toBe(false);
+    expect(isFamous({ names: ["Acme"], baselineDaily: 1, sourceBreadth: 2, storedFame: "unknown" }, 3)).toBe(false);
   });
 
   it("a non-dictionary candidate (zero baseline, zero breadth) is never famous", () => {
-    const facts = { names: ["Some New Person", "some new person"], baselineDaily: 0, sourceBreadth: 0 };
+    const facts = { names: ["Some New Person", "some new person"], baselineDaily: 0, sourceBreadth: 0, storedFame: "unknown" as const };
     expect(isFamous(facts, 3)).toBe(false);
+  });
+
+  it("stored famous overrides every heuristic prong being negative", () => {
+    const facts = { names: ["Some New Person"], baselineDaily: 1, sourceBreadth: 2, storedFame: "famous" as const };
+    expect(isFamous(facts, 3)).toBe(true);
+  });
+
+  it("stored not_famous does NOT veto a heuristic prong that fires — the stored verdict only ever tightens, never loosens", () => {
+    const facts = { names: ["Russia"], baselineDaily: 0, sourceBreadth: 0, storedFame: "not_famous" as const };
+    expect(isFamous(facts, 3)).toBe(true);
+  });
+
+  it("stored unknown changes nothing, exactly as if the layer didn't exist", () => {
+    const famousByDictionary = { names: ["Russia"], baselineDaily: 0, sourceBreadth: 0, storedFame: "unknown" as const };
+    const notFamous = { names: ["Acme"], baselineDaily: 1, sourceBreadth: 2, storedFame: "unknown" as const };
+    expect(isFamous(famousByDictionary, 3)).toBe(true);
+    expect(isFamous(notFamous, 3)).toBe(false);
+  });
+});
+
+describe("computeWikiFameVerdict", () => {
+  it("no Wikidata match at all -> not_famous, regardless of sitelinks/pageviews", () => {
+    expect(computeWikiFameVerdict({ matched: false, sitelinks: 1000, medianMonthlyPageviews: 1_000_000 })).toBe("not_famous");
+  });
+
+  it("pageviews boundary: 19,999 is not famous, 20,000 is famous (sitelinks irrelevant)", () => {
+    expect(computeWikiFameVerdict({ matched: true, sitelinks: 0, medianMonthlyPageviews: FAME_PAGEVIEWS_THRESHOLD - 1 })).toBe("not_famous");
+    expect(computeWikiFameVerdict({ matched: true, sitelinks: 0, medianMonthlyPageviews: FAME_PAGEVIEWS_THRESHOLD })).toBe("famous");
+  });
+
+  it("sitelinks boundary WITH pageview corroboration: 24 sitelinks is not famous, 25 is famous", () => {
+    expect(
+      computeWikiFameVerdict({ matched: true, sitelinks: FAME_SITELINKS_THRESHOLD - 1, medianMonthlyPageviews: FAME_SITELINKS_CORROBORATION_PAGEVIEWS }),
+    ).toBe("not_famous");
+    expect(
+      computeWikiFameVerdict({ matched: true, sitelinks: FAME_SITELINKS_THRESHOLD, medianMonthlyPageviews: FAME_SITELINKS_CORROBORATION_PAGEVIEWS }),
+    ).toBe("famous");
+  });
+
+  it("sitelinks boundary WITHOUT pageview corroboration: even 100 sitelinks stays not_famous at zero prior views", () => {
+    expect(computeWikiFameVerdict({ matched: true, sitelinks: 100, medianMonthlyPageviews: 0 })).toBe("not_famous");
+  });
+
+  it("sitelinks >=25 with corroboration just under 3,000 is not famous", () => {
+    expect(
+      computeWikiFameVerdict({ matched: true, sitelinks: FAME_SITELINKS_THRESHOLD, medianMonthlyPageviews: FAME_SITELINKS_CORROBORATION_PAGEVIEWS - 1 }),
+    ).toBe("not_famous");
+  });
+
+  it("neither prong fires -> not_famous even with a real match", () => {
+    expect(computeWikiFameVerdict({ matched: true, sitelinks: 1, medianMonthlyPageviews: 1 })).toBe("not_famous");
   });
 });
 

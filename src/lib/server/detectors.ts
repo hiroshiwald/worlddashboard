@@ -1,6 +1,7 @@
 import type { Sql, SqlRow } from "./db";
 import type { Settings } from "./settings";
 import { computeFameVolumeThreshold, isFamous, loadLifetimeSourceBreadth } from "./fame";
+import type { StoredFame } from "./fame";
 
 export type SignalSeverity = "advisory" | "warning" | "critical";
 export type SignalType = "surge" | "first_seen" | "novel_edge" | "cross_category" | "sentiment";
@@ -488,14 +489,20 @@ interface NovelEdgeRow {
   nameB: string;
   aliasesA: string[];
   aliasesB: string[];
+  fameA: StoredFame;
+  fameB: StoredFame;
   firstSeenAt: Date;
   articleCount: number;
+}
+
+function toStoredFame(value: unknown): StoredFame {
+  return value === "not_famous" || value === "famous" ? value : "unknown";
 }
 
 async function loadRecentNovelEdges(sql: Sql): Promise<NovelEdgeRow[]> {
   const rows = await sql`
     SELECT ee.entity_a, ee.entity_b, ea.canonical_name AS name_a, eb.canonical_name AS name_b,
-      ea.aliases AS aliases_a, eb.aliases AS aliases_b,
+      ea.aliases AS aliases_a, eb.aliases AS aliases_b, ea.fame AS fame_a, eb.fame AS fame_b,
       ee.first_seen_at, ee.article_count
     FROM entity_edges ee
     JOIN entities ea ON ea.id = ee.entity_a
@@ -511,6 +518,8 @@ async function loadRecentNovelEdges(sql: Sql): Promise<NovelEdgeRow[]> {
     nameB: String(row.name_b),
     aliasesA: toStringArray(row.aliases_a),
     aliasesB: toStringArray(row.aliases_b),
+    fameA: toStoredFame(row.fame_a),
+    fameB: toStoredFame(row.fame_b),
     firstSeenAt: toDate(row.first_seen_at),
     articleCount: Number(row.article_count),
   }));
@@ -543,15 +552,16 @@ async function suppressFamousEdges(
   const baselineById = new Map(aggRows.map((row) => [row.entityId, row.baselineSum / effectiveBaselineDays]));
   const volumeThreshold = computeNovelEdgeFameThreshold(aggRows, effectiveBaselineDays);
 
-  function endpointIsFamous(id: number, name: string, aliases: string[]): boolean {
+  function endpointIsFamous(id: number, name: string, aliases: string[], storedFame: StoredFame): boolean {
     return isFamous(
-      { names: [name, ...aliases], baselineDaily: baselineById.get(id) ?? 0, sourceBreadth: breadthById.get(id) ?? 0 },
+      { names: [name, ...aliases], baselineDaily: baselineById.get(id) ?? 0, sourceBreadth: breadthById.get(id) ?? 0, storedFame },
       volumeThreshold,
     );
   }
 
   return edges.filter((e) => {
-    const bothFamous = endpointIsFamous(e.entityA, e.nameA, e.aliasesA) && endpointIsFamous(e.entityB, e.nameB, e.aliasesB);
+    const bothFamous =
+      endpointIsFamous(e.entityA, e.nameA, e.aliasesA, e.fameA) && endpointIsFamous(e.entityB, e.nameB, e.aliasesB, e.fameB);
     return !bothFamous;
   });
 }

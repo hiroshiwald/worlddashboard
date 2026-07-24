@@ -1,5 +1,96 @@
 # World Dashboard Development Log
 
+## 2026-07-24 — M006: Wikidata/Wikipedia fame layer + alias enrichment
+
+**What changed**: Added a Wikidata/Wikipedia fame layer answering "was the
+world already watching this entity?" — closing the leak the local
+dictionary/breadth/volume heuristics in `fame.ts` can't: Modi, Guterres,
+Goldman Sachs, TikTok, and Ford headline Developments cards today because
+the seeded dictionaries have no people and few companies, and local
+breadth/volume can't see global fame. New `wikidata.ts` talks to Wikimedia
+(plain `fetch`, 4s per-call `AbortController` timeout, one User-Agent
+constant, never throws to callers): `wbsearchentities` → `wbgetentities`
+(sitelinks/labels/aliases) → the Wikimedia pageviews REST API for the 12
+full calendar months ending 2 months before now. `computeMedianPageviews`
+is the spike-immunity core: a window month with no data counts as 0, so a
+3-month-old article with huge recent views still medians low — recent fame
+is exactly what must not count (direct test coverage for this). `fame.ts`
+gained `computeWikiFameVerdict` (famous at >=20,000 median monthly
+pageviews, OR >=25 sitelinks AND >=3,000 pageviews — sitelinks alone aren't
+spike-immune, since Wikipedia grows them within days of a breaking story)
+and a `storedFame` field on `FameFacts`: `isFamous` ORs in a stored
+'famous' verdict, but a stored 'not_famous' never vetoes a firing heuristic
+prong — the layer only ever tightens, never loosens. New `fame-sweep.ts`
+runs a per-tick batch (never-checked entities first then newest, LIMIT 10,
+~8s wall-clock budget checked between entities) that also merges Wikidata
+aliases and seeded-dictionary aliases (matched by canonical_name) into
+`entities.aliases`, on success AND failure alike — `entity-ingest.ts`'s
+`upsertNewEntities` inserts every new entity with empty aliases, which is
+why "Kyiv"/"Kiev"/"U.S" pile up as duplicate Review candidates today.
+Migration 006 adds `fame`, `wiki_title`, `wiki_sitelinks`,
+`wiki_pageviews_monthly`, `fame_checked_at` to `entities`, fully additive
+(every existing row defaults to `fame='unknown'`, identical to a brand-new
+never-checked entity). Wired: `run-ingest.ts` runs the sweep after
+detect-signals, deliberately NOT through the shared `runStage` helper — a
+sweep failure logs loudly and never aborts the run, since ingest must never
+depend on this layer (FABLE-ROADMAP.md §14). `/api/candidates`'s accept
+path runs the same single-entity check inline via the newly-exported
+`checkAndWriteEntityFame` (shared with the sweep, not duplicated); response
+contract unchanged. `developments.ts` and `detectors.ts` thread the stored
+verdict through their existing fame checks (R/N/E subjects, novel-edge
+endpoints); Source C (untracked candidates) is unchanged, since candidates
+have no `fame` column at all. `brief.ts`'s New Entities strip excludes a
+stored `fame='famous'` entity — that strip's whole job is surfacing names
+the reader does NOT already know.
+
+**What it affected**: `migrations/006_fame_layer.sql` (new);
+`src/lib/server/wikidata.ts`, `src/lib/server/fame-sweep.ts` (new);
+`src/lib/server/fame.ts`, `src/lib/server/developments.ts`,
+`src/lib/server/detectors.ts`, `src/lib/server/brief.ts`,
+`src/lib/server/run-ingest.ts`, `src/app/api/candidates/route.ts` (all
+modified); new tests `src/lib/server/__tests__/wikidata.test.ts`,
+`fame-sweep.test.ts`, `run-ingest.test.ts`; updated tests `fame.test.ts`,
+`developments.test.ts`, `detectors.test.ts`, `brief.test.ts`,
+`src/app/api/candidates/__tests__/route.test.ts`. `MANIFEST.md` rows
+added/updated to match.
+
+**Gotchas**:
+- The Wikimedia pageviews per-article endpoint returns HTTP 404 (not an
+  empty 200) when there's no data at all in the requested range — the
+  documented behavior for an article too young to have any history yet.
+  Treating that as a lookup failure would have left every brand-new
+  Wikidata match `fame='unknown'` forever instead of correctly settling to
+  `not_famous`; it's special-cased to resolve to an all-zero pageviews map
+  instead. Every OTHER non-2xx response (search, entities, or a genuine
+  pageviews outage) is still a typed failure, same as a timeout.
+- `entity_candidates` (Review queue rows) has no `fame` column at all —
+  only `entities` does. Source C in `developments.ts` stays dictionary-only
+  by design; a candidate can't be "stored famous" until after it's accepted.
+- This closes the alias gap (Kyiv/Kiev/U.S piling up as duplicate
+  candidates) going forward for already-tracked entities, via the sweep and
+  the inline accept check — it does not retroactively merge aliases for
+  candidates still sitting unresolved in `entity_candidates` today, since
+  that table was out of this task's allowlist and isn't part of the fame
+  system at all.
+- Discovered mid-task that `src/app/api/candidates/__tests__/route.test.ts`'s
+  existing accept-path tests had no `fetch` stub at all — harmless only
+  because this sandbox's real network calls fail fast, but a real violation
+  of "tests never touch the network" the moment the accept path started
+  transitively reaching `wikidata.ts`. Fixed by stubbing a safe default
+  "no Wikidata match" response for the whole POST suite.
+- Caught in review, before it shipped: the first version of the inline
+  candidates-route fame check hardcoded `aliases: []` when calling
+  `checkAndWriteEntityFame`. That's correct for a fresh insert (which
+  genuinely starts empty) but wrong for the `ON CONFLICT` "entity already
+  existed" path — `mergeAliases` would merge Wikidata/dictionary aliases
+  against an empty existing set and the write would clobber whatever real
+  aliases that pre-existing entity already had. Fixed by having
+  `acceptCandidate`/`resolveConflictedCandidate` return the entity's actual
+  current aliases alongside its id, not just the id.
+- Full suite (44 files, 685 tests, including the real-Postgres integration
+  layer against a fresh application of migrations 001-006) plus
+  `npx tsc --noEmit` and `npm run build` all green before pushing.
+
 ## 2026-07-22 — Signals watchlist cleanup: delete unearned-ranking surfaces, fix warm-up/pluralization honesty bugs
 
 **What changed**: Deleted the "Watchlist — Top 12" block from the Signals
