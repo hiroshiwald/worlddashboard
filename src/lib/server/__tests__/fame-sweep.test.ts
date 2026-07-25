@@ -88,7 +88,7 @@ function mockNotFamousLookup() {
 }
 
 describe("selectSweepBatch (via runFameSweep's SELECT query shape)", () => {
-  it("scopes to tracked status, the unknown/not_famous recheck windows, and orders never-checked first then newest first_seen_at, capped at 10", async () => {
+  it("scopes to tracked status, the unknown/not_famous recheck windows, and orders never-checked first then newest first_seen_at, capped at 40", async () => {
     const { sql, calls } = makeMockSql((call) => (call.query.includes("FROM entities") ? [] : []));
     await runFameSweep(sql);
 
@@ -104,6 +104,7 @@ describe("selectSweepBatch (via runFameSweep's SELECT query shape)", () => {
     expect(q).not.toContain("'famous'"); // famous is permanent, never re-swept
     expect(q).toContain("ORDER BY (fame_checked_at IS NULL) DESC, first_seen_at DESC");
     expect(q).toContain("LIMIT");
+    expect(selectCall!.values).toEqual([40]); // BATCH_LIMIT
   });
 });
 
@@ -173,7 +174,7 @@ describe("runFameSweep: failure path", () => {
 });
 
 describe("runFameSweep: wall-clock budget", () => {
-  it("stops early once the deadline has passed, checked between entities", async () => {
+  it("stops early once the deadline has passed, checked between chunks", async () => {
     mockFamousLookup();
     const { sql } = makeMockSql((call) => {
       if (call.query.includes("SELECT id, canonical_name, aliases")) {
@@ -195,6 +196,75 @@ describe("runFameSweep: wall-clock budget", () => {
     });
     const stats = await runFameSweep(sql, new Date(), Date.now() + 60_000);
     expect(stats.checked).toBe(1);
+  });
+});
+
+describe("runFameSweep: chunking", () => {
+  it("processes a 40-entity batch in chunks of CHUNK_SIZE (3), running each chunk's entities concurrently", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const fetchMock = vi.fn(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return errorResponse(503);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const entities = Array.from({ length: 40 }, (_, i) => entityRow(i + 1, `Entity ${i + 1}`));
+    const { sql } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats).toEqual({ checked: 40, succeeded: 0, failed: 40 });
+    expect(fetchMock).toHaveBeenCalledTimes(40); // one search call per entity, each failing immediately
+    // Never exceeds CHUNK_SIZE concurrent lookups, and reaches exactly that on every full chunk.
+    expect(maxInFlight).toBe(3);
+  });
+});
+
+describe("runFameSweep: deadline between chunks", () => {
+  it("finishes an in-flight chunk when the deadline expires mid-chunk, then skips the remaining chunks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return errorResponse(503);
+      }),
+    );
+
+    // 7 entities -> chunks of [3, 3, 1]. The deadline expires 50ms in, well
+    // before chunk 1's 300ms (concurrent) lookup finishes — proving the
+    // in-flight chunk is never pre-empted, only the chunks queued after it.
+    const entities = Array.from({ length: 7 }, (_, i) => entityRow(i + 1, `Entity ${i + 1}`));
+    const { sql } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
+
+    const stats = await runFameSweep(sql, NOW, Date.now() + 50);
+
+    expect(stats).toEqual({ checked: 3, succeeded: 0, failed: 3 });
+  });
+});
+
+describe("runFameSweep: mixed outcomes within one chunk", () => {
+  it("aggregates success and failure correctly when a chunk's entities resolve differently", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("search=FailingCo")) return errorResponse(503);
+        if (url.includes("search=NoMatchOne") || url.includes("search=NoMatchTwo")) return okResponse({ search: [] });
+        throw new Error(`unexpected fetch url in test: ${url}`);
+      }),
+    );
+
+    const entities = [entityRow(1, "NoMatchOne"), entityRow(2, "FailingCo"), entityRow(3, "NoMatchTwo")];
+    const { sql } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    // NoMatchOne/Two: a clean "nothing matched" is still a success (not_famous).
+    // FailingCo: a network failure. All three land in the same concurrent chunk.
+    expect(stats).toEqual({ checked: 3, succeeded: 2, failed: 1 });
   });
 });
 

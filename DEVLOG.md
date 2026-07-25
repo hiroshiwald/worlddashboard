@@ -1,5 +1,48 @@
 # World Dashboard Development Log
 
+## 2026-07-25 — Fame sweep throughput: 40-entity batches, chunked concurrency
+
+**What changed**: `fame-sweep.ts`'s per-tick batch was draining the ~700-entity
+tracked backlog at roughly 11 entities per 18 hours — weeks to clear at
+`BATCH_LIMIT=10` run strictly sequentially. `BATCH_LIMIT` raised 10 → 40;
+`runFameSweep` now processes the batch in chunks of `CHUNK_SIZE` (3) entities,
+each chunk's entities running concurrently via `Promise.all` — bounded
+parallelism, polite to Wikimedia's APIs, deliberately simple chunked
+parallelism rather than a streaming pool. `SWEEP_WALL_CLOCK_BUDGET_MS` raised
+8000 → 12000, checked between chunks (never pre-empting one already in
+flight — the same convention as before, one level up from per-entity to
+per-chunk). Worst case is now the 12s budget plus one in-flight chunk
+(bounded by its slowest entity: ≤3 sequential Wikidata calls × 4s timeout =
+12s) ≈ 24s absolute worst — ~4s more than the previous 8s+12s=20s ceiling,
+still safely inside Vercel's 60s function ceiling alongside ingest's other
+budgets (FABLE-ROADMAP.md §14b). `checkAndWriteEntityFame` is untouched —
+same per-entity semantics, including the failure-writes-only-`fame_checked_at`
+rule. Stats stay accurate under concurrency: each chunk's outcomes are
+collected via `Promise.all` and reduced into `FameSweepStats` afterward, never
+through a counter mutated inside the concurrent section.
+
+**What it affected**: `src/lib/server/fame-sweep.ts` (modified);
+`src/lib/server/__tests__/fame-sweep.test.ts` (three new tests: chunking with
+an in-flight/max-in-flight counter proving concurrency never exceeds
+`CHUNK_SIZE`; a deadline expiring mid-chunk that still lets the in-flight
+chunk finish before skipping the rest; mixed success/failure aggregation
+within one concurrent chunk — plus the pre-existing LIMIT/deadline-naming
+assertions updated for 40/chunks). `MANIFEST.md` rows updated to match.
+
+**Gotchas**:
+- Wikidata concurrency is proven via a stubbed `fetch` with an
+  inFlight/maxInFlight counter (mirrors `entity-ingest.test.ts`'s LLM-wave
+  concurrency test) rather than mocking `lookupWikidataFame` directly, to
+  match this file's existing all-stub-at-fetch-level convention.
+- The mixed-outcome test routes responses by URL content (matching each
+  entity's own search URL) rather than by call order — call order across a
+  concurrent chunk isn't guaranteed to match entity order, so a
+  `mockResolvedValueOnce` chain would have been fragile.
+- The mid-chunk-deadline test uses a real (small) `setTimeout` delay rather
+  than fake timers, since it's testing relative scheduling (the chunk
+  finishes after the deadline elapses) rather than a specific timeout
+  duration.
+
 ## 2026-07-24 — M006: Wikidata/Wikipedia fame layer + alias enrichment
 
 **What changed**: Added a Wikidata/Wikipedia fame layer answering "was the
