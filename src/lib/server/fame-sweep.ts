@@ -4,12 +4,22 @@ import { computeWikiFameVerdict } from "./fame";
 import { normalizeName } from "./extract-v2";
 import { COUNTRY_DICT, ORG_DICT, REGION_DICT, DictEntry } from "../entity-dictionaries";
 
-const BATCH_LIMIT = 10;
+const BATCH_LIMIT = 40;
+const CHUNK_SIZE = 3;
 const MAX_ALIASES = 24;
 // Wall-clock budget for one whole sweep tick — mirrors entity-ingest.ts's
-// LLM_TIME_BUDGET_MS pattern: checked between units of work (entities here,
-// LLM batches there), never pre-empting one already in flight.
-const SWEEP_WALL_CLOCK_BUDGET_MS = 8000;
+// LLM_TIME_BUDGET_MS pattern: checked between chunks of CHUNK_SIZE entities
+// (LLM batches there), never pre-empting a chunk already in flight — the
+// same convention as before, one level up from per-entity to per-chunk.
+// Ceiling math: this budget (12s) plus one in-flight chunk's worst case —
+// bounded by its slowest entity, since a chunk's entities run concurrently
+// rather than stacked, so up to 3 sequential Wikidata calls at 4s timeout
+// each (12s) — is ~24s absolute worst, ~4s more than the previous
+// 8s-budget/20s-worst ceiling. Still safely inside Vercel's 60s function
+// ceiling alongside ingest's other budgets (FABLE-ROADMAP.md §14b): the LLM
+// extraction stage's own timeout plus feed fetch/persist/detect-signals all
+// share that same 60s invocation.
+const SWEEP_WALL_CLOCK_BUDGET_MS = 12000;
 
 const ALL_DICT_ENTRIES: DictEntry[] = [...COUNTRY_DICT, ...ORG_DICT, ...REGION_DICT];
 
@@ -37,7 +47,7 @@ function parseSweepCandidateRow(row: SqlRow): FameCheckEntity {
  * fame='famous' is permanent and never appears here. Never-checked entities
  * sort first, then newest first_seen_at — both the freshest unchecked
  * arrivals and, within the recheck group, the newest entities are
- * prioritized over older ones once the batch is capped at 10. */
+ * prioritized over older ones once the batch is capped at 40. */
 async function selectSweepBatch(sql: Sql): Promise<FameCheckEntity[]> {
   const rows = await sql`
     SELECT id, canonical_name, aliases
@@ -144,24 +154,43 @@ export interface FameSweepStats {
   failed: number;
 }
 
-/** Per-tick background sweep: (re)checks up to 10 tracked entities against
- * Wikidata/Wikipedia. Runs within an ~8s wall-clock budget checked between
- * entities (never pre-empting one mid-lookup) — a batch that runs long
- * simply processes fewer entities this tick and picks up the rest next
- * time, the same degrade entity-ingest.ts's LLM wall-clock budget uses. */
+function chunkEntities(entities: FameCheckEntity[], size: number): FameCheckEntity[][] {
+  const chunks: FameCheckEntity[][] = [];
+  for (let i = 0; i < entities.length; i += size) chunks.push(entities.slice(i, i + size));
+  return chunks;
+}
+
+function tallyOutcomes(outcomes: Array<"success" | "failure">): FameSweepStats {
+  const stats: FameSweepStats = { checked: 0, succeeded: 0, failed: 0 };
+  for (const outcome of outcomes) {
+    stats.checked += 1;
+    stats[outcome === "success" ? "succeeded" : "failed"] += 1;
+  }
+  return stats;
+}
+
+/** Per-tick background sweep: (re)checks up to 40 tracked entities against
+ * Wikidata/Wikipedia, CHUNK_SIZE (3) at a time — each chunk's entities run
+ * concurrently via Promise.all, bounded parallelism that stays polite to
+ * Wikimedia's APIs without the complexity of a streaming pool. Runs within
+ * a ~12s wall-clock budget checked between chunks (never pre-empting one
+ * already in flight) — a sweep that runs long simply processes fewer
+ * chunks this tick and picks up the rest next time, the same degrade
+ * entity-ingest.ts's LLM wall-clock budget uses. Each chunk's outcomes are
+ * collected via Promise.all and reduced into stats afterward — never a
+ * counter mutated from inside the concurrent section. */
 export async function runFameSweep(
   sql: Sql,
   now: Date = new Date(),
   deadline: number = Date.now() + SWEEP_WALL_CLOCK_BUDGET_MS,
 ): Promise<FameSweepStats> {
   const batch = await selectSweepBatch(sql);
-  const stats: FameSweepStats = { checked: 0, succeeded: 0, failed: 0 };
+  const outcomes: Array<"success" | "failure"> = [];
 
-  for (const entity of batch) {
+  for (const chunk of chunkEntities(batch, CHUNK_SIZE)) {
     if (Date.now() >= deadline) break;
-    const outcome = await checkAndWriteEntityFame(sql, entity, now);
-    stats.checked += 1;
-    stats[outcome === "success" ? "succeeded" : "failed"] += 1;
+    const chunkOutcomes = await Promise.all(chunk.map((entity) => checkAndWriteEntityFame(sql, entity, now)));
+    outcomes.push(...chunkOutcomes);
   }
-  return stats;
+  return tallyOutcomes(outcomes);
 }
