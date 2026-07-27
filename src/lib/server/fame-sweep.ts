@@ -119,33 +119,58 @@ async function writeSuccess(
   `;
 }
 
-/** One entity's lookup + write — shared by runFameSweep's batch loop and
- * the candidates route's inline post-accept check. A lookup failure writes
- * ONLY fame_checked_at (plus the alias merge, which never depends on the
- * network) — fame itself stays whatever it already was ('unknown' stays
- * unknown), and fame_checked_at still advances so the retry queue rotates
- * to the next-due entity instead of head-of-line blocking on a
- * persistently-unreachable one. */
-export async function checkAndWriteEntityFame(sql: Sql, entity: FameCheckEntity, now: Date = new Date()): Promise<"success" | "failure"> {
-  const result = await lookupWikidataFame(entity.canonicalName, now);
-  const wikidataAliases = result.ok ? result.lookup.aliases : [];
-  const aliases = mergeAliases(entity.aliases, wikidataAliases, entity.canonicalName);
+/** Minimal rescue write for an entity whose check threw — stamps
+ * fame_checked_at ONLY, never touching fame/aliases/wiki_* columns. Whatever
+ * threw (bad data, a transient DB blip) might throw again on a fuller write,
+ * so this is deliberately the smallest possible query. If THIS throws too,
+ * it propagates — that means the database itself is down, which the sweep
+ * must abort on rather than spin through. */
+async function writeRescueStamp(sql: Sql, entityId: number): Promise<void> {
+  await sql`UPDATE entities SET fame_checked_at = now() WHERE id = ${entityId}`;
+}
 
-  if (!result.ok) {
-    await writeFailure(sql, entity.id, aliases);
+/** One entity's lookup + write — shared by runFameSweep's batch loop and
+ * the candidates route's inline post-accept check. Never throws for an
+ * entity-scoped problem: a RETURNED lookup failure writes ONLY
+ * fame_checked_at (plus the alias merge, which never depends on the
+ * network) — fame itself stays whatever it already was ('unknown' stays
+ * unknown). Anything that THROWS instead — a transient DB-query failure,
+ * response parsing, the verdict, the alias merge, or the write itself — is
+ * caught here and degrades the same way: one loud log line identifying the
+ * entity and the error, then the same fame_checked_at-only rescue write.
+ * Either path advances fame_checked_at so the retry queue rotates to the
+ * next-due entity instead of head-of-line blocking on one that keeps
+ * failing — and, since every per-entity path now resolves instead of
+ * rejecting, a chunk's Promise.all can never take the whole sweep down with
+ * it. Only the rescue write itself throwing propagates out (see
+ * writeRescueStamp) — an infrastructure-wide failure should still abort the
+ * sweep loudly rather than be swallowed here. */
+export async function checkAndWriteEntityFame(sql: Sql, entity: FameCheckEntity, now: Date = new Date()): Promise<"success" | "failure"> {
+  try {
+    const result = await lookupWikidataFame(entity.canonicalName, now);
+    const wikidataAliases = result.ok ? result.lookup.aliases : [];
+    const aliases = mergeAliases(entity.aliases, wikidataAliases, entity.canonicalName);
+
+    if (!result.ok) {
+      await writeFailure(sql, entity.id, aliases);
+      return "failure";
+    }
+
+    const fame = computeWikiFameVerdict({
+      matched: result.lookup.matched,
+      sitelinks: result.lookup.sitelinks,
+      medianMonthlyPageviews: result.lookup.medianMonthlyPageviews,
+    });
+    // wiki_title/wiki_sitelinks are stored whenever a match occurred,
+    // regardless of the computed verdict — a wrong match (name collision with
+    // someone famous) must stay visible and human-correctable later.
+    await writeSuccess(sql, entity.id, aliases, fame, result.lookup.wikiTitle, result.lookup.sitelinks, result.lookup.medianMonthlyPageviews);
+    return "success";
+  } catch (err) {
+    console.error(`[fame-sweep] entity check threw id=${entity.id} name=${JSON.stringify(entity.canonicalName)}`, err);
+    await writeRescueStamp(sql, entity.id);
     return "failure";
   }
-
-  const fame = computeWikiFameVerdict({
-    matched: result.lookup.matched,
-    sitelinks: result.lookup.sitelinks,
-    medianMonthlyPageviews: result.lookup.medianMonthlyPageviews,
-  });
-  // wiki_title/wiki_sitelinks are stored whenever a match occurred,
-  // regardless of the computed verdict — a wrong match (name collision with
-  // someone famous) must stay visible and human-correctable later.
-  await writeSuccess(sql, entity.id, aliases, fame, result.lookup.wikiTitle, result.lookup.sitelinks, result.lookup.medianMonthlyPageviews);
-  return "success";
 }
 
 export interface FameSweepStats {

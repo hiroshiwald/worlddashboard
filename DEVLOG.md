@@ -1,5 +1,60 @@
 # World Dashboard Development Log
 
+## 2026-07-27 — Hotfix: per-entity throw during fame sweep was killing the entire sweep
+
+**What changed**: `checkAndWriteEntityFame` handled a RETURNED lookup failure
+correctly (stamp `fame_checked_at` only, so the retry queue rotates), but
+anything that THREW instead — a transient Neon HTTP query failure, response
+parsing, the verdict, the alias merge, or the write itself — bypassed that
+stamp entirely and rejected the chunk's `Promise.all`, killing the whole
+sweep (`run-ingest.ts`'s `runFameSweepStage` catches it and reports
+`fameSweep: null`). Live impact: cron ingest reported `fameSweep: null` on
+almost every run, ~1 entity check persisting per run (only the chunk-mates
+whose writes raced ahead of the crash), ~700 tracked entities stuck unswept
+for days — the crashing entities were ordinary (Bill Clinton, U.N.,
+Stanford), pointing at transient Neon HTTP driver failures under the
+sweep's dozens-of-small-rapid-queries tail-of-ingest load rather than one
+poisonous row. Fix: the whole lookup+write body now runs inside a
+try/catch. On catch, one loud `console.error` line (`[fame-sweep] entity
+check threw`, the entity id, `JSON.stringify`'d canonical name, and the
+caught error) makes the real root cause greppable in prod logs, then a new
+minimal rescue write (`writeRescueStamp`) stamps ONLY `fame_checked_at` —
+deliberately not `fame`/`aliases`/`wiki_*`, since whatever crashed the
+fuller write would likely crash it again — and the function returns
+`"failure"`. Only the rescue write itself throwing propagates out uncaught,
+so a genuinely dead database still aborts the sweep loudly instead of
+spinning. `runFameSweep`'s chunking/deadline/stats logic needed no changes:
+with every per-entity path now resolving instead of ever rejecting, each
+chunk's `Promise.all` always resolves on its own.
+
+**What it affected**: `src/lib/server/fame-sweep.ts` (`checkAndWriteEntityFame`
+wrapped in try/catch, new private `writeRescueStamp`, docstring rewritten
+for the new returned-vs-thrown contract); `src/lib/server/__tests__/fame-sweep.test.ts`
+(three new tests under a "poison guard" block, `../wikidata` mocked so a
+canonical name containing `"POISON"` makes `lookupWikidataFame` reject
+instead of its normal never-throws contract — every other name still
+delegates to the real implementation, so no existing test's behavior
+changes); `MANIFEST.md` rows updated to match.
+
+**Gotchas**:
+- `lookupWikidataFame` never throws by its own contract (every failure
+  degrades to `{ok:false}`), so there was no existing seam to make it throw
+  in a test without either mocking the module or reaching into `fetch` in a
+  way that would also break `wikidata.ts`'s own guarantees. Reused
+  `entity-ingest.test.ts`'s POISON-sentinel `vi.mock` pattern (wrap the real
+  module, special-case one marker string) rather than inventing a new
+  mocking convention.
+- The rescue write's SQL had to be verified by exact query text
+  (`not.toContain("wiki_title")`/`not.toContain("aliases")`), not just by
+  asserting the return value — the whole point of the bug was a write path
+  that looked right but wasn't reached.
+- Postgres 16 wasn't running in this sandbox and no `test`/`test` role or
+  database existed yet; both had to be created (`CREATE ROLE test LOGIN
+  PASSWORD 'test' SUPERUSER; CREATE DATABASE test OWNER test;`) before the
+  real-Postgres integration suite (`TEST_DATABASE_URL`-gated) would run at
+  all — worth remembering this is sandbox setup, not a project dependency
+  change.
+
 ## 2026-07-25 — Fame sweep throughput: 40-entity batches, chunked concurrency
 
 **What changed**: `fame-sweep.ts`'s per-tick batch was draining the ~700-entity
