@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
+import { Pool } from "pg";
 import { runFameSweep, mergeAliases } from "../fame-sweep";
 import { computeWindowMonths } from "../wikidata";
+import { makePgSql, freshSchema } from "./helpers/pg-sql";
 import type { Sql, SqlRow } from "../db";
 
 // A "POISON" canonical name makes lookupWikidataFame reject outright (a
@@ -114,13 +116,100 @@ describe("selectSweepBatch (via runFameSweep's SELECT query shape)", () => {
     expect(q).toContain("status = 'tracked'");
     expect(q).toContain("fame = 'unknown'");
     expect(q).toContain("fame_checked_at IS NULL");
-    expect(q).toContain("7 days");
+    expect(q).toContain("make_interval(hours =>");
     expect(q).toContain("fame = 'not_famous'");
     expect(q).toContain("30 days");
     expect(q).not.toContain("'famous'"); // famous is permanent, never re-swept
     expect(q).toContain("ORDER BY (fame_checked_at IS NULL) DESC, first_seen_at DESC");
     expect(q).toContain("LIMIT");
-    expect(selectCall!.values).toEqual([40]); // BATCH_LIMIT
+    expect(selectCall!.values).toEqual([6, 40]); // UNKNOWN_RETRY_HOURS, BATCH_LIMIT
+  });
+});
+
+// Real-Postgres boundary tests: the mock above can only prove the SQL text
+// looks right, not that now() - make_interval(...) actually filters
+// correctly at the hour/day boundary — that requires executing the real
+// query against seeded timestamps.
+const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
+const TEST_SCHEMA = "wd_test_fame_sweep";
+const pgPool = TEST_DATABASE_URL
+  ? new Pool({ connectionString: TEST_DATABASE_URL, options: `-c search_path=${TEST_SCHEMA}` })
+  : null;
+const pgSql: Sql | null = pgPool ? makePgSql(pgPool) : null;
+
+/** Seeds one tracked entity with fame_checked_at hoursAgo hours before
+ * Postgres's own now() (null means never checked, i.e. NULL) — computed in
+ * SQL so it lines up exactly with what selectSweepBatch's WHERE clause
+ * evaluates against. */
+async function seedFameEntity(name: string, fame: string, hoursAgo: number | null): Promise<number> {
+  const rows =
+    hoursAgo === null
+      ? await pgSql!`
+          INSERT INTO entities (canonical_name, type, status, fame, fame_checked_at, first_seen_at, last_seen_at)
+          VALUES (${name}, 'country', 'tracked', ${fame}, NULL, now(), now())
+          RETURNING id
+        `
+      : await pgSql!`
+          INSERT INTO entities (canonical_name, type, status, fame, fame_checked_at, first_seen_at, last_seen_at)
+          VALUES (${name}, 'country', 'tracked', ${fame}, now() - make_interval(hours => ${hoursAgo}::int), now(), now())
+          RETURNING id
+        `;
+  const [{ id }] = rows as [{ id: number }];
+  return Number(id);
+}
+
+async function loadFameCheckedAt(id: number): Promise<Date | null> {
+  const rows = await pgSql!`SELECT fame_checked_at FROM entities WHERE id = ${id}`;
+  return (rows[0]?.fame_checked_at as Date | null) ?? null;
+}
+
+describe.skipIf(!TEST_DATABASE_URL)("selectSweepBatch retry-window boundaries (real Postgres)", () => {
+  beforeEach(async () => {
+    await freshSchema(pgPool!, TEST_SCHEMA);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(errorResponse(503)));
+  });
+
+  afterAll(async () => {
+    await pgPool?.end();
+  });
+
+  it("does not re-check an unknown entity checked 5h ago", async () => {
+    const id = await seedFameEntity("Unknown5h", "unknown", 5);
+    const before = await loadFameCheckedAt(id);
+    await runFameSweep(pgSql!);
+    expect(await loadFameCheckedAt(id)).toEqual(before);
+  });
+
+  it("re-checks an unknown entity checked 7h ago", async () => {
+    const id = await seedFameEntity("Unknown7h", "unknown", 7);
+    await runFameSweep(pgSql!);
+    expect((await loadFameCheckedAt(id))!.getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it("re-checks a never-checked unknown entity", async () => {
+    const id = await seedFameEntity("NeverChecked", "unknown", null);
+    await runFameSweep(pgSql!);
+    expect((await loadFameCheckedAt(id))!.getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it("does not re-check a not_famous entity checked 29 days ago", async () => {
+    const id = await seedFameEntity("NotFamous29d", "not_famous", 29 * 24);
+    const before = await loadFameCheckedAt(id);
+    await runFameSweep(pgSql!);
+    expect(await loadFameCheckedAt(id)).toEqual(before);
+  });
+
+  it("re-checks a not_famous entity checked 31 days ago", async () => {
+    const id = await seedFameEntity("NotFamous31d", "not_famous", 31 * 24);
+    await runFameSweep(pgSql!);
+    expect((await loadFameCheckedAt(id))!.getTime()).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  it("never re-checks a famous entity, regardless of age", async () => {
+    const id = await seedFameEntity("FamousOld", "famous", 365 * 24);
+    const before = await loadFameCheckedAt(id);
+    await runFameSweep(pgSql!);
+    expect(await loadFameCheckedAt(id)).toEqual(before);
   });
 });
 
