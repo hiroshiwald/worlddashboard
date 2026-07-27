@@ -3,6 +3,22 @@ import { runFameSweep, mergeAliases } from "../fame-sweep";
 import { computeWindowMonths } from "../wikidata";
 import type { Sql, SqlRow } from "../db";
 
+// A "POISON" canonical name makes lookupWikidataFame reject outright (a
+// THROWN failure, as opposed to its normal never-throws {ok:false} return)
+// — every other name delegates to the real implementation, so this doesn't
+// change any other test's behavior. Same POISON-sentinel technique as
+// entity-ingest.test.ts's extract-v2 mock.
+vi.mock("../wikidata", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../wikidata")>();
+  return {
+    ...actual,
+    lookupWikidataFame: (name: string, now?: Date) => {
+      if (name.includes("POISON")) return Promise.reject(new Error("simulated lookup crash"));
+      return actual.lookupWikidataFame(name, now);
+    },
+  };
+});
+
 const NOW = new Date("2026-07-24T00:00:00Z");
 
 interface RecordedCall {
@@ -265,6 +281,79 @@ describe("runFameSweep: mixed outcomes within one chunk", () => {
     // NoMatchOne/Two: a clean "nothing matched" is still a success (not_famous).
     // FailingCo: a network failure. All three land in the same concurrent chunk.
     expect(stats).toEqual({ checked: 3, succeeded: 2, failed: 1 });
+  });
+});
+
+describe("runFameSweep: thrown per-entity failures (poison guard)", () => {
+  it("a lookup that throws degrades to failure, stamps only fame_checked_at, logs once, and the sweep continues past it", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("search=Alpha") || url.includes("search=Beta") || url.includes("search=Gamma")) {
+          return okResponse({ search: [] });
+        }
+        throw new Error(`unexpected fetch url in test: ${url}`);
+      }),
+    );
+
+    // CHUNK_SIZE 3: chunk1 = [Alpha, POISON Co, Beta], chunk2 = [Gamma].
+    // POISON Co's thrown lookup must not affect its chunk-mates, and the
+    // sweep must still reach chunk 2 rather than dying with the chunk.
+    const entities = [entityRow(1, "Alpha"), entityRow(2, "POISON Co"), entityRow(3, "Beta"), entityRow(4, "Gamma")];
+    const { sql, calls } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
+
+    const stats = await runFameSweep(sql, NOW);
+    expect(stats).toEqual({ checked: 4, succeeded: 3, failed: 1 });
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [message, err] = errorSpy.mock.calls[0];
+    expect(message).toContain("[fame-sweep] entity check threw");
+    expect(message).toContain("id=2");
+    expect(message).toContain(JSON.stringify("POISON Co"));
+    expect(err).toBeInstanceOf(Error);
+
+    const poisonWrite = calls.find((c) => c.query.includes("UPDATE entities") && c.values.includes(2));
+    expect(poisonWrite!.query).not.toContain("wiki_title");
+    expect(poisonWrite!.query).not.toContain("aliases");
+    expect(poisonWrite!.query).toContain("fame_checked_at = now()");
+  });
+
+  it("a successful lookup whose full write throws still degrades to a stamp-only failure", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockFamousLookup();
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("SELECT id, canonical_name, aliases")) return [entityRow(5, "Crashy Writer")];
+      if (call.query.includes("wiki_title")) throw new Error("write failed: connection reset");
+      return [];
+    });
+
+    const stats = await runFameSweep(sql, NOW);
+    expect(stats).toEqual({ checked: 1, succeeded: 0, failed: 1 });
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    const [message] = errorSpy.mock.calls[0];
+    expect(message).toContain("[fame-sweep] entity check threw");
+    expect(message).toContain("id=5");
+    expect(message).toContain(JSON.stringify("Crashy Writer"));
+
+    const rescueWrite = calls.filter((c) => c.query.includes("UPDATE entities")).pop();
+    expect(rescueWrite!.query).not.toContain("wiki_title");
+    expect(rescueWrite!.query).not.toContain("aliases");
+    expect(rescueWrite!.query).toContain("fame_checked_at = now()");
+  });
+
+  it("propagates when the rescue write itself throws — an infrastructure-wide failure, not an entity-scoped one", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("SELECT id, canonical_name, aliases")) return [entityRow(6, "POISON Corp")];
+      if (call.query.includes("fame_checked_at = now()") && !call.query.includes("aliases")) {
+        throw new Error("database unreachable");
+      }
+      return [];
+    });
+
+    await expect(runFameSweep(sql, NOW)).rejects.toThrow("database unreachable");
   });
 });
 
