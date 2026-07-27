@@ -3,8 +3,7 @@ name: Hourly ingest
 on:
   schedule:
     - cron: "*/10 * * * *"
-    workflow_dispatch:
-
+  workflow_dispatch:
 jobs:
   ingest:
     runs-on: ubuntu-latest
