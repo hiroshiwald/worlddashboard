@@ -1,5 +1,57 @@
 # World Dashboard Development Log
 
+## 2026-07-27 — Fame sweep: unknown retry window 7 days → 6 hours
+
+**What changed**: `selectSweepBatch`'s unknown-recheck interval was 7 days,
+sized back when we believed lookup failures would be rare. Production's
+first full pass (745 tracked entities) completed tonight and parked 351 of
+them (47%) as `fame='unknown'` with `fame_checked_at` set — every one a
+TRANSIENT lookup failure (network/API blips; a clean "Wikidata has no
+match" is a `not_famous` verdict, never a failure), each now waiting a full
+week to retry. High-value entities (Putin, Xi Jinping, Antonio Guterres,
+Goldman Sachs) are stuck in that pool, still leaking onto Developments
+cards. Per-attempt success is ~50-60%, so a short retry window converges
+the whole pool in a handful of passes. New `UNKNOWN_RETRY_HOURS = 6`
+replaces the interval. Unlike the pre-existing `INTERVAL '7 days'`/`INTERVAL
+'30 days'` literals, this one has to carry a real constant's value into the
+query, so it's written as `now() - make_interval(hours =>
+${UNKNOWN_RETRY_HOURS}::int)` — the same pattern `tick.ts`'s
+`tryAcquireLock` already uses for `LOCK_THRESHOLD_MINUTES`. That pattern is
+required, not stylistic: interpolating a value directly inside a quoted SQL
+literal (`INTERVAL '${x} hours'`) produces `INTERVAL '$1 hours'` in the
+query text, and Postgres's parser never looks for `$N` placeholders inside
+string literals, so the parameter is silently never substituted —
+confirmed against a real local Postgres, not just reasoned from docs.
+`not_famous`'s 30-day window and `famous`'s permanence are unchanged.
+Docstring rewritten: `fame='unknown'` means never checked or the last
+attempt failed (transient) — not "possibly still famous, needs a week."
+
+**What it affected**: `src/lib/server/fame-sweep.ts` (`UNKNOWN_RETRY_HOURS`
+constant; `selectSweepBatch`'s query and docstring). `src/lib/server/__tests__/fame-sweep.test.ts`:
+the existing mocked query-shape test updated for the new interval
+expression and its now-two-element `values` array (`[6, 40]`); a new
+`TEST_DATABASE_URL`-gated real-Postgres suite added in the same file
+(reusing the existing `helpers/pg-sql.ts` fixtures) since a mocked-SQL
+text assertion can only prove the query *looks* right, not that
+`now() - make_interval(...)` actually filters correctly at the boundary —
+covers unknown checked 5h ago (not reselected) vs. 7h ago (reselected),
+not_famous checked 29d ago (not reselected) vs. 31d ago (reselected),
+famous never reselected regardless of age, and a never-checked row still
+reselected. `MANIFEST.md` rows updated to match.
+
+**Gotchas**:
+- The new real-Postgres tests live inside `fame-sweep.test.ts` itself
+  rather than a new `__tests__/integration/*.integration.test.ts` file,
+  breaking from that naming convention on purpose — creating a new file
+  wasn't an option here, and `vitest.config.ts`'s
+  `include: ["src/**/__tests__/**/*.test.{ts,tsx}"]` glob picks up a
+  `describe.skipIf(!TEST_DATABASE_URL)` block the same way regardless of
+  which file it lives in, so nothing is lost by keeping it here.
+- This sandbox's Postgres 16 cluster existed but was stopped; started via
+  `pg_ctlcluster 16 main start`, then `ALTER ROLE postgres WITH PASSWORD
+  'test'` + `CREATE DATABASE test` to match `.github/workflows/test.yml`'s
+  `postgresql://postgres:test@localhost:5432/test` exactly.
+
 ## 2026-07-27 — Hotfix: per-entity throw during fame sweep was killing the entire sweep
 
 **What changed**: `checkAndWriteEntityFame` handled a RETURNED lookup failure

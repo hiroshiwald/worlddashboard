@@ -7,6 +7,7 @@ import { COUNTRY_DICT, ORG_DICT, REGION_DICT, DictEntry } from "../entity-dictio
 const BATCH_LIMIT = 40;
 const CHUNK_SIZE = 3;
 const MAX_ALIASES = 24;
+const UNKNOWN_RETRY_HOURS = 6;
 // Wall-clock budget for one whole sweep tick — mirrors entity-ingest.ts's
 // LLM_TIME_BUDGET_MS pattern: checked between chunks of CHUNK_SIZE entities
 // (LLM batches there), never pre-empting a chunk already in flight — the
@@ -40,21 +41,24 @@ function parseSweepCandidateRow(row: SqlRow): FameCheckEntity {
   return { id: Number(row.id), canonicalName: String(row.canonical_name), aliases: toStringArray(row.aliases) };
 }
 
-/** Tracked entities needing a (re)check: fame='unknown' never checked or
- * checked >7 days ago (retry window for a prior lookup failure, which
- * leaves fame='unknown' — see checkAndWriteEntityFame); fame='not_famous'
- * checked >30 days ago (a rising entity can graduate to famous).
- * fame='famous' is permanent and never appears here. Never-checked entities
- * sort first, then newest first_seen_at — both the freshest unchecked
- * arrivals and, within the recheck group, the newest entities are
- * prioritized over older ones once the batch is capped at 40. */
+/** Tracked entities needing a (re)check: fame='unknown' means never checked
+ * or the last attempt failed (a transient lookup failure — see
+ * checkAndWriteEntityFame); a failed attempt retries after
+ * UNKNOWN_RETRY_HOURS (6h) — frequent enough to converge a
+ * transient-failure pool in about a day, infrequent enough to stay polite
+ * to Wikimedia for an entity that keeps failing. fame='not_famous' checked
+ * >30 days ago (a rising entity can graduate to famous). fame='famous' is
+ * permanent and never appears here. Never-checked entities sort first, then
+ * newest first_seen_at — both the freshest unchecked arrivals and, within
+ * the recheck group, the newest entities are prioritized over older ones
+ * once the batch is capped at 40. */
 async function selectSweepBatch(sql: Sql): Promise<FameCheckEntity[]> {
   const rows = await sql`
     SELECT id, canonical_name, aliases
     FROM entities
     WHERE status = 'tracked'
       AND (
-        (fame = 'unknown' AND (fame_checked_at IS NULL OR fame_checked_at < now() - INTERVAL '7 days'))
+        (fame = 'unknown' AND (fame_checked_at IS NULL OR fame_checked_at < now() - make_interval(hours => ${UNKNOWN_RETRY_HOURS}::int)))
         OR (fame = 'not_famous' AND fame_checked_at < now() - INTERVAL '30 days')
       )
     ORDER BY (fame_checked_at IS NULL) DESC, first_seen_at DESC
