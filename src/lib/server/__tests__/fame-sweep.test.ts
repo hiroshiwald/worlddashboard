@@ -114,6 +114,7 @@ describe("selectSweepBatch (via runFameSweep's SELECT query shape)", () => {
     expect(selectCall).toBeDefined();
     const q = selectCall!.query;
     expect(q).toContain("status = 'tracked'");
+    expect(q).toContain("fame_locked = false");
     expect(q).toContain("fame = 'unknown'");
     expect(q).toContain("fame_checked_at IS NULL");
     expect(q).toContain("make_interval(hours =>");
@@ -140,18 +141,19 @@ const pgSql: Sql | null = pgPool ? makePgSql(pgPool) : null;
 /** Seeds one tracked entity with fame_checked_at hoursAgo hours before
  * Postgres's own now() (null means never checked, i.e. NULL) — computed in
  * SQL so it lines up exactly with what selectSweepBatch's WHERE clause
- * evaluates against. */
-async function seedFameEntity(name: string, fame: string, hoursAgo: number | null): Promise<number> {
+ * evaluates against. `locked` seeds fame_locked (migrations/007), default
+ * false. */
+async function seedFameEntity(name: string, fame: string, hoursAgo: number | null, locked = false): Promise<number> {
   const rows =
     hoursAgo === null
       ? await pgSql!`
-          INSERT INTO entities (canonical_name, type, status, fame, fame_checked_at, first_seen_at, last_seen_at)
-          VALUES (${name}, 'country', 'tracked', ${fame}, NULL, now(), now())
+          INSERT INTO entities (canonical_name, type, status, fame, fame_checked_at, fame_locked, first_seen_at, last_seen_at)
+          VALUES (${name}, 'country', 'tracked', ${fame}, NULL, ${locked}, now(), now())
           RETURNING id
         `
       : await pgSql!`
-          INSERT INTO entities (canonical_name, type, status, fame, fame_checked_at, first_seen_at, last_seen_at)
-          VALUES (${name}, 'country', 'tracked', ${fame}, now() - make_interval(hours => ${hoursAgo}::int), now(), now())
+          INSERT INTO entities (canonical_name, type, status, fame, fame_checked_at, fame_locked, first_seen_at, last_seen_at)
+          VALUES (${name}, 'country', 'tracked', ${fame}, now() - make_interval(hours => ${hoursAgo}::int), ${locked}, now(), now())
           RETURNING id
         `;
   const [{ id }] = rows as [{ id: number }];
@@ -207,6 +209,20 @@ describe.skipIf(!TEST_DATABASE_URL)("selectSweepBatch retry-window boundaries (r
 
   it("never re-checks a famous entity, regardless of age", async () => {
     const id = await seedFameEntity("FamousOld", "famous", 365 * 24);
+    const before = await loadFameCheckedAt(id);
+    await runFameSweep(pgSql!);
+    expect(await loadFameCheckedAt(id)).toEqual(before);
+  });
+
+  it("never re-checks a locked never-checked unknown entity (a human verdict overrides the never-checked-first rule)", async () => {
+    const id = await seedFameEntity("LockedNeverChecked", "unknown", null, true);
+    const before = await loadFameCheckedAt(id);
+    await runFameSweep(pgSql!);
+    expect(await loadFameCheckedAt(id)).toEqual(before);
+  });
+
+  it("never re-checks a locked not_famous entity checked 31 days ago, though the same row unlocked would be re-checked", async () => {
+    const id = await seedFameEntity("LockedNotFamous31d", "not_famous", 31 * 24, true);
     const before = await loadFameCheckedAt(id);
     await runFameSweep(pgSql!);
     expect(await loadFameCheckedAt(id)).toEqual(before);

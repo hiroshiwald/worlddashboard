@@ -2,8 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/server/db";
 import type { SqlRow } from "@/lib/server/db";
 import { normalizeName } from "@/lib/server/extract-v2";
+import { searchEntities, ValidationError } from "@/lib/server/entity-admin";
 
 export const dynamic = "force-dynamic";
+
+// Two-mode contract: ?name=<n> resolves a single entity by exact
+// (normalized) canonical name or alias match — {id, canonicalName, type,
+// status}, unchanged since before this file existed. Any OTHER request
+// (name entirely absent from the query string) is list/search mode,
+// backed by entity-admin.ts's searchEntities: ?q=&status=&fame=&limit=&
+// offset= -> {entities: [...], total}. The two modes never overlap: a
+// request with ?name= (even blank) always takes the single-lookup path.
 
 const MAX_NAME_LEN = 200;
 
@@ -37,12 +46,40 @@ function findByNormalizedName(rows: EntityRow[], norm: string): EntityRow | null
   return null;
 }
 
+function parseNumberParam(raw: string | null): number | undefined {
+  return raw === null ? undefined : Number(raw);
+}
+
+async function listEntities(params: URLSearchParams): Promise<NextResponse> {
+  const sql = getSql();
+  try {
+    const result = await searchEntities(sql, {
+      q: params.get("q") ?? undefined,
+      status: params.get("status") ?? undefined,
+      fame: params.get("fame") ?? undefined,
+      limit: parseNumberParam(params.get("limit")),
+      offset: parseNumberParam(params.get("offset")),
+    });
+    return NextResponse.json({ entities: result.entities, total: result.total });
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+    throw err;
+  }
+}
+
 export async function GET(req: NextRequest) {
   if (!process.env.DATABASE_URL) {
     return NextResponse.json({ error: "DATABASE_URL is not configured" }, { status: 503 });
   }
 
-  const name = new URL(req.url).searchParams.get("name");
+  const params = new URL(req.url).searchParams;
+  const name = params.get("name");
+  if (name === null) {
+    return listEntities(params);
+  }
+
   if (!name || name.trim().length === 0 || name.length > MAX_NAME_LEN) {
     return NextResponse.json({ error: "name query parameter is required" }, { status: 400 });
   }

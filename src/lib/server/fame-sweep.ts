@@ -48,15 +48,19 @@ function parseSweepCandidateRow(row: SqlRow): FameCheckEntity {
  * transient-failure pool in about a day, infrequent enough to stay polite
  * to Wikimedia for an entity that keeps failing. fame='not_famous' checked
  * >30 days ago (a rising entity can graduate to famous). fame='famous' is
- * permanent and never appears here. Never-checked entities sort first, then
- * newest first_seen_at — both the freshest unchecked arrivals and, within
- * the recheck group, the newest entities are prioritized over older ones
- * once the batch is capped at 40. */
+ * permanent and never appears here. fame_locked=true (a human verdict via
+ * PATCH /api/entities/[id] — migrations/007) is excluded regardless of
+ * which branch would otherwise match, since a human correction must never
+ * be silently overwritten by the automated sweep. Never-checked entities
+ * sort first, then newest first_seen_at — both the freshest unchecked
+ * arrivals and, within the recheck group, the newest entities are
+ * prioritized over older ones once the batch is capped at 40. */
 async function selectSweepBatch(sql: Sql): Promise<FameCheckEntity[]> {
   const rows = await sql`
     SELECT id, canonical_name, aliases
     FROM entities
     WHERE status = 'tracked'
+      AND fame_locked = false
       AND (
         (fame = 'unknown' AND (fame_checked_at IS NULL OR fame_checked_at < now() - make_interval(hours => ${UNKNOWN_RETRY_HOURS}::int)))
         OR (fame = 'not_famous' AND fame_checked_at < now() - INTERVAL '30 days')

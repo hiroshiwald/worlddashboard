@@ -22,6 +22,18 @@ function getRequest(name: string | null): NextRequest {
   return new NextRequest(url);
 }
 
+function listRequest(query: string): NextRequest {
+  return new NextRequest(`http://localhost/api/entities${query}`);
+}
+
+function entityRow(id: number, canonicalName: string): SqlRow {
+  return {
+    id, canonical_name: canonicalName, type: "person", status: "tracked", aliases: [],
+    fame: "unknown", fame_locked: false, wiki_title: null, wiki_sitelinks: null,
+    wiki_pageviews_monthly: null, fame_checked_at: null, first_seen_at: "2026-07-01T00:00:00Z",
+  };
+}
+
 const { GET } = await import("../route");
 
 describe("GET /api/entities", () => {
@@ -35,12 +47,7 @@ describe("GET /api/entities", () => {
     expect(res.status).toBe(503);
   });
 
-  it("400s when name is missing", async () => {
-    const res = await GET(getRequest(null));
-    expect(res.status).toBe(400);
-  });
-
-  it("400s when name is blank", async () => {
+  it("400s when name is blank (present but empty)", async () => {
     const res = await GET(getRequest("   "));
     expect(res.status).toBe(400);
   });
@@ -78,5 +85,49 @@ describe("GET /api/entities", () => {
     currentSql = mock.sql;
     await GET(getRequest("Russia"));
     expect(mock.calls[0]).toContain("ORDER BY id ASC");
+  });
+});
+
+describe("GET /api/entities — list mode (?name= absent)", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+
+  it("returns {entities, total} when name is entirely absent from the query string", async () => {
+    currentSql = makeMockSql([entityRow(1, "Russia"), entityRow(2, "Ukraine")]).sql;
+    const res = await GET(listRequest(""));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.total).toBe(2);
+    expect(body.entities).toHaveLength(2);
+    expect(body.entities[0]).toMatchObject({ id: 1, canonicalName: "Russia" });
+  });
+
+  it("returns the zero-results shape", async () => {
+    currentSql = makeMockSql([]).sql;
+    const res = await GET(listRequest(""));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ entities: [], total: 0 });
+  });
+
+  it("filters by q", async () => {
+    currentSql = makeMockSql([entityRow(1, "Russia"), entityRow(2, "Ukraine")]).sql;
+    const res = await GET(listRequest("?q=ukr"));
+    const body = await res.json();
+    expect(body.total).toBe(1);
+    expect(body.entities[0].canonicalName).toBe("Ukraine");
+  });
+
+  it("400s on a malformed limit rather than coercing it", async () => {
+    currentSql = makeMockSql([]).sql;
+    const res = await GET(listRequest("?limit=abc"));
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on an invalid status filter", async () => {
+    currentSql = makeMockSql([]).sql;
+    const res = await GET(listRequest("?status=bogus"));
+    expect(res.status).toBe(400);
   });
 });
