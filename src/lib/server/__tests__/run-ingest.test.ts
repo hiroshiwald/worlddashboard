@@ -39,7 +39,7 @@ beforeEach(() => {
   vi.mocked(runDetectors).mockResolvedValue([]);
   vi.mocked(computeWarmupState).mockReturnValue({ active: false, daysRemaining: 0 });
   vi.mocked(persistSignals).mockResolvedValue({ created: 0, refreshed: 0, suppressed: 0 });
-  vi.mocked(runFameSweep).mockResolvedValue({ checked: 0, succeeded: 0, failed: 0 });
+  vi.mocked(runFameSweep).mockResolvedValue({ checked: 0, succeeded: 0, failed: 0, failureReasons: {} });
 });
 
 describe("runIngest: fame sweep stage", () => {
@@ -51,14 +51,34 @@ describe("runIngest: fame sweep stage", () => {
     });
     vi.mocked(runFameSweep).mockImplementation(async () => {
       order.push("fame-sweep");
-      return { checked: 5, succeeded: 4, failed: 1 };
+      return { checked: 5, succeeded: 4, failed: 1, failureReasons: { search_http_403: 1 } };
     });
 
     const result = await runIngest();
 
     expect(result.status).toBe(200);
-    expect(result.body.fameSweep).toEqual({ checked: 5, succeeded: 4, failed: 1 });
+    // The failureReasons tally must reach the ingest response body — this is
+    // the diagnostic the 24h 100%-failure incident lacked (see DEVLOG): with
+    // Vercel's runtime logs gone after an hour, this JSON body (surfaced in
+    // the GitHub Actions job log) is the only durable record of *why* a
+    // sweep failed, not just that it did.
+    expect(result.body.fameSweep).toEqual({ checked: 5, succeeded: 4, failed: 1, failureReasons: { search_http_403: 1 } });
     expect(order).toEqual(["signals", "fame-sweep"]);
+  });
+
+  it("an aborted (rate-limited) sweep's marker also reaches the ingest response body", async () => {
+    vi.mocked(runFameSweep).mockResolvedValue({
+      checked: 3,
+      succeeded: 0,
+      failed: 3,
+      failureReasons: { search_http_429: 3 },
+      abortedReason: "rate_limited",
+    });
+
+    const result = await runIngest();
+
+    expect(result.status).toBe(200);
+    expect(result.body.fameSweep).toMatchObject({ abortedReason: "rate_limited" });
   });
 
   it("a fame-sweep failure logs loudly and does not abort the run — other stages' counts still return with status 200", async () => {
