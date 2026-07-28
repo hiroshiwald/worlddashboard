@@ -82,12 +82,22 @@ function onePageviewsBody(yyyymm: string, views: number) {
   return { items: [{ timestamp: `${yyyymm}0100`, views }] };
 }
 
-// A full famous-verdict fetch sequence: search -> entities (enwiki, high
-// sitelinks) -> pageviews (huge, sustained across the whole window).
+// Every runFameSweep call now issues one resolveNamesBatch call (wbgetentities
+// by title) BEFORE the per-entity chunk loop — this response is that call's
+// "nothing matched" answer, so the per-name search/entities/pageviews
+// sequence below it runs exactly as it did before batching existed.
+function noBatchMatchResponse() {
+  return okResponse({ entities: {} });
+}
+
+// A full famous-verdict fetch sequence: batch (no match) -> search ->
+// entities (enwiki, high sitelinks) -> pageviews (huge, sustained across the
+// whole window).
 function mockFamousLookup() {
   vi.stubGlobal(
     "fetch",
     vi.fn()
+      .mockResolvedValueOnce(noBatchMatchResponse())
       .mockResolvedValueOnce(okResponse(searchHit("Q1")))
       .mockResolvedValueOnce(okResponse(entitiesBody("Q1", { enwiki: { site: "enwiki", title: "Famous Person" } })))
       .mockResolvedValueOnce(okResponse(sustainedPageviewsBody(1_000_000))),
@@ -99,6 +109,7 @@ function mockNotFamousLookup() {
   vi.stubGlobal(
     "fetch",
     vi.fn()
+      .mockResolvedValueOnce(noBatchMatchResponse())
       .mockResolvedValueOnce(okResponse(searchHit("Q2")))
       .mockResolvedValueOnce(okResponse(entitiesBody("Q2", { enwiki: { site: "enwiki", title: "Minor Person" } })))
       .mockResolvedValueOnce(okResponse(onePageviewsBody(computeWindowMonths(NOW)[11], 10))),
@@ -238,7 +249,7 @@ describe("runFameSweep: success path", () => {
     });
 
     const stats = await runFameSweep(sql, NOW);
-    expect(stats).toEqual({ checked: 1, succeeded: 1, failed: 0 });
+    expect(stats).toEqual({ checked: 1, succeeded: 1, failed: 0, failureReasons: {} });
 
     const updateCall = calls.find((c) => c.query.includes("UPDATE entities"));
     expect(updateCall!.query).toContain("fame = ");
@@ -257,20 +268,22 @@ describe("runFameSweep: success path", () => {
       return [];
     });
     const stats = await runFameSweep(sql, NOW);
-    expect(stats).toEqual({ checked: 1, succeeded: 1, failed: 0 });
+    expect(stats).toEqual({ checked: 1, succeeded: 1, failed: 0, failureReasons: {} });
   });
 });
 
 describe("runFameSweep: failure path", () => {
   it("writes ONLY fame_checked_at (plus aliases) on a lookup failure — fame column untouched", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(errorResponse(503)));
+    // Persistent (not "Once"): the batch resolution call ALSO hits this mock
+    // first, so both it and the per-entity fallback search call need an answer.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(errorResponse(503)));
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("SELECT id, canonical_name, aliases")) return [entityRow(3, "Unreachable Co")];
       return [];
     });
 
     const stats = await runFameSweep(sql, NOW);
-    expect(stats).toEqual({ checked: 1, succeeded: 0, failed: 1 });
+    expect(stats).toEqual({ checked: 1, succeeded: 0, failed: 1, failureReasons: { search_http_503: 1 } });
 
     const updateCall = calls.find((c) => c.query.includes("UPDATE entities"));
     expect(updateCall!.query).not.toContain("fame = ");
@@ -280,7 +293,9 @@ describe("runFameSweep: failure path", () => {
   });
 
   it("dictionary aliases still merge in on a network failure (the Ukraine/Kyiv fix applies even offline)", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("network down")));
+    // Persistent (not "Once"): same reasoning as above — the upfront batch
+    // call needs an answer too, not just the per-entity fallback call.
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("SELECT id, canonical_name, aliases")) return [entityRow(4, "Ukraine", [])];
       return [];
@@ -306,7 +321,7 @@ describe("runFameSweep: wall-clock budget", () => {
 
     // Deadline already passed before the loop starts — zero entities processed.
     const stats = await runFameSweep(sql, new Date(), Date.now() - 1);
-    expect(stats).toEqual({ checked: 0, succeeded: 0, failed: 0 });
+    expect(stats).toEqual({ checked: 0, succeeded: 0, failed: 0, failureReasons: {} });
   });
 
   it("processes entities normally when comfortably inside the budget", async () => {
@@ -338,8 +353,10 @@ describe("runFameSweep: chunking", () => {
 
     const stats = await runFameSweep(sql, NOW);
 
-    expect(stats).toEqual({ checked: 40, succeeded: 0, failed: 40 });
-    expect(fetchMock).toHaveBeenCalledTimes(40); // one search call per entity, each failing immediately
+    expect(stats).toEqual({ checked: 40, succeeded: 0, failed: 40, failureReasons: { search_http_503: 40 } });
+    // 1 upfront batch-resolution call (also 503, so nothing resolves via the
+    // shortcut) + one search call per entity, each failing immediately.
+    expect(fetchMock).toHaveBeenCalledTimes(41);
     // Never exceeds CHUNK_SIZE concurrent lookups, and reaches exactly that on every full chunk.
     expect(maxInFlight).toBe(3);
   });
@@ -349,7 +366,11 @@ describe("runFameSweep: deadline between chunks", () => {
   it("finishes an in-flight chunk when the deadline expires mid-chunk, then skips the remaining chunks", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => {
+      vi.fn(async (url: string) => {
+        // The upfront batch-resolution call must resolve near-instantly (no
+        // matches) so it doesn't itself eat the 50ms deadline below — only
+        // the per-entity search calls are slow here.
+        if (url.includes("sites=enwiki")) return noBatchMatchResponse();
         await new Promise((resolve) => setTimeout(resolve, 300));
         return errorResponse(503);
       }),
@@ -363,7 +384,7 @@ describe("runFameSweep: deadline between chunks", () => {
 
     const stats = await runFameSweep(sql, NOW, Date.now() + 50);
 
-    expect(stats).toEqual({ checked: 3, succeeded: 0, failed: 3 });
+    expect(stats).toEqual({ checked: 3, succeeded: 0, failed: 3, failureReasons: { search_http_503: 3 } });
   });
 });
 
@@ -372,6 +393,7 @@ describe("runFameSweep: mixed outcomes within one chunk", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes("sites=enwiki")) return noBatchMatchResponse();
         if (url.includes("search=FailingCo")) return errorResponse(503);
         if (url.includes("search=NoMatchOne") || url.includes("search=NoMatchTwo")) return okResponse({ search: [] });
         throw new Error(`unexpected fetch url in test: ${url}`);
@@ -385,7 +407,7 @@ describe("runFameSweep: mixed outcomes within one chunk", () => {
 
     // NoMatchOne/Two: a clean "nothing matched" is still a success (not_famous).
     // FailingCo: a network failure. All three land in the same concurrent chunk.
-    expect(stats).toEqual({ checked: 3, succeeded: 2, failed: 1 });
+    expect(stats).toEqual({ checked: 3, succeeded: 2, failed: 1, failureReasons: { search_http_503: 1 } });
   });
 });
 
@@ -395,6 +417,7 @@ describe("runFameSweep: thrown per-entity failures (poison guard)", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
+        if (url.includes("sites=enwiki")) return noBatchMatchResponse();
         if (url.includes("search=Alpha") || url.includes("search=Beta") || url.includes("search=Gamma")) {
           return okResponse({ search: [] });
         }
@@ -409,7 +432,7 @@ describe("runFameSweep: thrown per-entity failures (poison guard)", () => {
     const { sql, calls } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
 
     const stats = await runFameSweep(sql, NOW);
-    expect(stats).toEqual({ checked: 4, succeeded: 3, failed: 1 });
+    expect(stats).toEqual({ checked: 4, succeeded: 3, failed: 1, failureReasons: { unexpected_exception: 1 } });
 
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [message, err] = errorSpy.mock.calls[0];
@@ -434,7 +457,7 @@ describe("runFameSweep: thrown per-entity failures (poison guard)", () => {
     });
 
     const stats = await runFameSweep(sql, NOW);
-    expect(stats).toEqual({ checked: 1, succeeded: 0, failed: 1 });
+    expect(stats).toEqual({ checked: 1, succeeded: 0, failed: 1, failureReasons: { unexpected_exception: 1 } });
 
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [message] = errorSpy.mock.calls[0];
@@ -458,7 +481,147 @@ describe("runFameSweep: thrown per-entity failures (poison guard)", () => {
       return [];
     });
 
+    // No fetch mock needed: "POISON Corp" makes the mocked lookupWikidataFame
+    // reject directly (no network call), and the upfront resolveNamesBatch
+    // call hits this file's default synchronous-throw fetch guard, which
+    // fetchJson's own try/catch absorbs as a plain network_error (not a
+    // rate-limit reason) — so it never reaches or affects the poison entity.
     await expect(runFameSweep(sql, NOW)).rejects.toThrow("database unreachable");
+  });
+});
+
+describe("runFameSweep: failureReasons tally", () => {
+  it("aggregates distinct failure reasons across a mixed batch, without tripping the circuit breaker", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("sites=enwiki")) return noBatchMatchResponse();
+      if (url.includes("search=ServerErrorOne") || url.includes("search=ServerErrorTwo")) return errorResponse(500);
+      if (url.includes("search=Healthy")) return okResponse({ search: [] });
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const entities = [entityRow(1, "ServerErrorOne"), entityRow(2, "ServerErrorTwo"), entityRow(3, "Healthy")];
+    const { sql } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats).toEqual({ checked: 3, succeeded: 1, failed: 2, failureReasons: { search_http_500: 2 } });
+    expect(stats.abortedReason).toBeUndefined(); // 500 isn't a rate-limit signal
+  });
+});
+
+describe("runFameSweep: circuit breaker (429/403 aborts the rest of the run)", () => {
+  it("a 429 partway through a chunk aborts remaining chunks; already-processed entities keep their outcomes; unattempted entities are never written", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("sites=enwiki")) return noBatchMatchResponse();
+      if (url.includes("search=RateLimited")) return errorResponse(429);
+      if (url.includes("search=")) return okResponse({ search: [] }); // everyone else: a clean no-match
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // CHUNK_SIZE 3: chunk1 = [A, RateLimited, B] (mixed, one 429),
+    // chunk2 = [C, D] — must never be attempted at all.
+    const entities = [entityRow(1, "A"), entityRow(2, "RateLimited"), entityRow(3, "B"), entityRow(4, "C"), entityRow(5, "D")];
+    const { sql, calls } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats.checked).toBe(3); // only chunk 1 ran
+    expect(stats.succeeded).toBe(2); // A and B, still processed and written
+    expect(stats.failed).toBe(1);
+    expect(stats.failureReasons).toEqual({ search_http_429: 1 });
+    expect(stats.abortedReason).toBe("rate_limited");
+
+    // Chunk 2's entities (ids 4, 5) were never passed to checkAndWriteEntityFame
+    // at all — no UPDATE of any kind was ever issued for them, so their
+    // fame_checked_at is left completely untouched for the normal retry schedule.
+    const chunk2Writes = calls.filter((c) => c.query.includes("UPDATE entities") && (c.values.includes(4) || c.values.includes(5)));
+    expect(chunk2Writes).toHaveLength(0);
+  });
+
+  it("a 403 partway through a chunk also aborts the rest of the run", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("sites=enwiki")) return noBatchMatchResponse();
+      if (url.includes("search=Blocked")) return errorResponse(403);
+      if (url.includes("search=")) return okResponse({ search: [] });
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const entities = [entityRow(1, "A"), entityRow(2, "Blocked"), entityRow(3, "B"), entityRow(4, "C")];
+    const { sql, calls } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats.checked).toBe(3);
+    expect(stats.abortedReason).toBe("rate_limited");
+    expect(stats.failureReasons).toEqual({ search_http_403: 1 });
+    const chunk2Writes = calls.filter((c) => c.query.includes("UPDATE entities") && c.values.includes(4));
+    expect(chunk2Writes).toHaveLength(0);
+  });
+
+  it("a 429 on the upfront batch-resolution call itself aborts before any entity is attempted", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("sites=enwiki")) return errorResponse(429);
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const entities = [entityRow(1, "A"), entityRow(2, "B")];
+    const { sql, calls } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats).toEqual({
+      checked: 0,
+      succeeded: 0,
+      failed: 0,
+      failureReasons: { batch_entities_http_429: 1 },
+      abortedReason: "rate_limited",
+    });
+    expect(calls.some((c) => c.query.includes("UPDATE entities"))).toBe(false); // nothing was ever written
+    expect(fetchMock).toHaveBeenCalledTimes(1); // only the batch call — no per-entity fallback attempted
+  });
+});
+
+describe("runFameSweep: batched resolution path", () => {
+  it("an entity whose canonical name is an exact Wikipedia title skips straight to pageviews", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("sites=enwiki")) {
+        return okResponse({
+          entities: { Q1: { id: "Q1", sitelinks: { enwiki: { site: "enwiki", title: "Famous Person" } }, labels: {}, aliases: {} } },
+        });
+      }
+      if (url.includes("pageviews/per-article")) return okResponse(sustainedPageviewsBody(1_000_000));
+      throw new Error(`unexpected fetch url in test (expected only batch + pageviews): ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { sql } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? [entityRow(1, "Famous Person")] : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats).toEqual({ checked: 1, succeeded: 1, failed: 0, failureReasons: {} });
+    expect(fetchMock).toHaveBeenCalledTimes(2); // batch + pageviews only — no search, no per-id entities call
+  });
+
+  it("a name the batch does not resolve falls through to the full per-name search path", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("sites=enwiki")) return noBatchMatchResponse(); // "Putin" isn't an exact enwiki title
+      if (url.includes("wbsearchentities")) return okResponse(searchHit("Q1"));
+      if (url.includes("wbgetentities")) return okResponse(entitiesBody("Q1", { enwiki: { site: "enwiki", title: "Vladimir Putin" } }));
+      if (url.includes("pageviews/per-article")) return okResponse(sustainedPageviewsBody(1_000_000));
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { sql } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? [entityRow(1, "Putin")] : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats).toEqual({ checked: 1, succeeded: 1, failed: 0, failureReasons: {} });
+    expect(fetchMock).toHaveBeenCalledTimes(4); // batch + search + entities + pageviews
   });
 });
 

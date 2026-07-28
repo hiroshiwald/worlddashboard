@@ -1,5 +1,5 @@
 import type { Sql, SqlRow } from "./db";
-import { lookupWikidataFame } from "./wikidata";
+import { lookupWikidataFame, lookupFameFromMatch, resolveNamesBatch, EntityDetails } from "./wikidata";
 import { computeWikiFameVerdict } from "./fame";
 import { normalizeName } from "./extract-v2";
 import { COUNTRY_DICT, ORG_DICT, REGION_DICT, DictEntry } from "../entity-dictionaries";
@@ -16,10 +16,13 @@ const UNKNOWN_RETRY_HOURS = 6;
 // bounded by its slowest entity, since a chunk's entities run concurrently
 // rather than stacked, so up to 3 sequential Wikidata calls at 4s timeout
 // each (12s) — is ~24s absolute worst, ~4s more than the previous
-// 8s-budget/20s-worst ceiling. Still safely inside Vercel's 60s function
-// ceiling alongside ingest's other budgets (FABLE-ROADMAP.md §14b): the LLM
-// extraction stage's own timeout plus feed fetch/persist/detect-signals all
-// share that same 60s invocation.
+// 8s-budget/20s-worst ceiling. runFameSweep's one upfront resolveNamesBatch
+// call (before the chunk loop, so not itself deadline-gated — same
+// unaccounted-for-but-bounded treatment as selectSweepBatch's own query
+// time) adds up to one more 4s-timeout call on top, ~28s absolute worst.
+// Still safely inside Vercel's 60s function ceiling alongside ingest's other
+// budgets (FABLE-ROADMAP.md §14b): the LLM extraction stage's own timeout
+// plus feed fetch/persist/detect-signals all share that same 60s invocation.
 const SWEEP_WALL_CLOCK_BUDGET_MS = 12000;
 
 const ALL_DICT_ENTRIES: DictEntry[] = [...COUNTRY_DICT, ...ORG_DICT, ...REGION_DICT];
@@ -137,31 +140,45 @@ async function writeRescueStamp(sql: Sql, entityId: number): Promise<void> {
   await sql`UPDATE entities SET fame_checked_at = now() WHERE id = ${entityId}`;
 }
 
+export type FameCheckOutcome = { outcome: "success" } | { outcome: "failure"; reason: string };
+
 /** One entity's lookup + write — shared by runFameSweep's batch loop and
- * the candidates route's inline post-accept check. Never throws for an
- * entity-scoped problem: a RETURNED lookup failure writes ONLY
- * fame_checked_at (plus the alias merge, which never depends on the
+ * the candidates route's inline post-accept check. `batchMatch`, when
+ * given, is a name this tick's one resolveNamesBatch call already resolved
+ * — the search+entities requests are skipped entirely and only the
+ * per-article pageviews call remains (see lookupFameFromMatch). Never
+ * throws for an entity-scoped problem: a RETURNED lookup failure writes
+ * ONLY fame_checked_at (plus the alias merge, which never depends on the
  * network) — fame itself stays whatever it already was ('unknown' stays
- * unknown). Anything that THROWS instead — a transient DB-query failure,
- * response parsing, the verdict, the alias merge, or the write itself — is
- * caught here and degrades the same way: one loud log line identifying the
- * entity and the error, then the same fame_checked_at-only rescue write.
- * Either path advances fame_checked_at so the retry queue rotates to the
- * next-due entity instead of head-of-line blocking on one that keeps
- * failing — and, since every per-entity path now resolves instead of
- * rejecting, a chunk's Promise.all can never take the whole sweep down with
- * it. Only the rescue write itself throwing propagates out (see
- * writeRescueStamp) — an infrastructure-wide failure should still abort the
- * sweep loudly rather than be swallowed here. */
-export async function checkAndWriteEntityFame(sql: Sql, entity: FameCheckEntity, now: Date = new Date()): Promise<"success" | "failure"> {
+ * unknown) — and its specific reason string comes back to the caller for
+ * runFameSweep's failureReasons tally and rate-limit circuit breaker.
+ * Anything that THROWS instead — a transient DB-query failure, response
+ * parsing, the verdict, the alias merge, or the write itself — is caught
+ * here and degrades the same way: one loud log line identifying the entity
+ * and the error, then the same fame_checked_at-only rescue write, tagged
+ * with the generic "unexpected_exception" reason (it's not a Wikidata
+ * signal, so it never trips the circuit breaker). Either path advances
+ * fame_checked_at so the retry queue rotates to the next-due entity instead
+ * of head-of-line blocking on one that keeps failing — and, since every
+ * per-entity path now resolves instead of rejecting, a chunk's Promise.all
+ * can never take the whole sweep down with it. Only the rescue write itself
+ * throwing propagates out (see writeRescueStamp) — an infrastructure-wide
+ * failure should still abort the sweep loudly rather than be swallowed
+ * here. */
+export async function checkAndWriteEntityFame(
+  sql: Sql,
+  entity: FameCheckEntity,
+  now: Date = new Date(),
+  batchMatch?: EntityDetails,
+): Promise<FameCheckOutcome> {
   try {
-    const result = await lookupWikidataFame(entity.canonicalName, now);
+    const result = batchMatch ? await lookupFameFromMatch(batchMatch, now) : await lookupWikidataFame(entity.canonicalName, now);
     const wikidataAliases = result.ok ? result.lookup.aliases : [];
     const aliases = mergeAliases(entity.aliases, wikidataAliases, entity.canonicalName);
 
     if (!result.ok) {
       await writeFailure(sql, entity.id, aliases);
-      return "failure";
+      return { outcome: "failure", reason: result.reason };
     }
 
     const fame = computeWikiFameVerdict({
@@ -173,11 +190,11 @@ export async function checkAndWriteEntityFame(sql: Sql, entity: FameCheckEntity,
     // regardless of the computed verdict — a wrong match (name collision with
     // someone famous) must stay visible and human-correctable later.
     await writeSuccess(sql, entity.id, aliases, fame, result.lookup.wikiTitle, result.lookup.sitelinks, result.lookup.medianMonthlyPageviews);
-    return "success";
+    return { outcome: "success" };
   } catch (err) {
     console.error(`[fame-sweep] entity check threw id=${entity.id} name=${JSON.stringify(entity.canonicalName)}`, err);
     await writeRescueStamp(sql, entity.id);
-    return "failure";
+    return { outcome: "failure", reason: "unexpected_exception" };
   }
 }
 
@@ -185,6 +202,15 @@ export interface FameSweepStats {
   checked: number;
   succeeded: number;
   failed: number;
+  /** reason string (see wikidata.ts's fetchFailureReason) -> count, across
+   * every failure this run — the diagnostic this module lacked during the
+   * 24h 100%-failure incident (see DEVLOG): this is what actually lands in
+   * the ingest endpoint's JSON response and, from there, the GitHub Actions
+   * job log, since Vercel's own runtime logs only retain for an hour. */
+  failureReasons: Record<string, number>;
+  /** Present only when the circuit breaker (see runFameSweep) cut a run
+   * short after a 429/403 — currently always "rate_limited". */
+  abortedReason?: string;
 }
 
 function chunkEntities(entities: FameCheckEntity[], size: number): FameCheckEntity[][] {
@@ -193,37 +219,89 @@ function chunkEntities(entities: FameCheckEntity[], size: number): FameCheckEnti
   return chunks;
 }
 
-function tallyOutcomes(outcomes: Array<"success" | "failure">): FameSweepStats {
-  const stats: FameSweepStats = { checked: 0, succeeded: 0, failed: 0 };
+function tallyOutcomes(outcomes: FameCheckOutcome[]): FameSweepStats {
+  const stats: FameSweepStats = { checked: 0, succeeded: 0, failed: 0, failureReasons: {} };
   for (const outcome of outcomes) {
     stats.checked += 1;
-    stats[outcome === "success" ? "succeeded" : "failed"] += 1;
+    if (outcome.outcome === "success") {
+      stats.succeeded += 1;
+    } else {
+      stats.failed += 1;
+      stats.failureReasons[outcome.reason] = (stats.failureReasons[outcome.reason] ?? 0) + 1;
+    }
   }
   return stats;
 }
 
+// HTTP 429 (Too Many Requests) or 403 (Forbidden) from ANY stage, at ANY
+// point in a run, means Wikidata/Wikimedia is actively refusing us — not a
+// one-off blip like a 500 or a timeout. Matches wikidata.ts's
+// "<stage>_http_<status>" reason shape regardless of which stage or call
+// (single-name search/entities/pageviews, or the batch resolution call)
+// produced it.
+function isRateLimitReason(reason: string): boolean {
+  return reason.endsWith("_http_429") || reason.endsWith("_http_403");
+}
+
 /** Per-tick background sweep: (re)checks up to 40 tracked entities against
- * Wikidata/Wikipedia, CHUNK_SIZE (3) at a time — each chunk's entities run
- * concurrently via Promise.all, bounded parallelism that stays polite to
- * Wikimedia's APIs without the complexity of a streaming pool. Runs within
- * a ~12s wall-clock budget checked between chunks (never pre-empting one
- * already in flight) — a sweep that runs long simply processes fewer
- * chunks this tick and picks up the rest next time, the same degrade
- * entity-ingest.ts's LLM wall-clock budget uses. Each chunk's outcomes are
- * collected via Promise.all and reduced into stats afterward — never a
- * counter mutated from inside the concurrent section. */
+ * Wikidata/Wikipedia. Tries resolveNamesBatch first — ONE wbgetentities
+ * call for the whole batch's names — so entities whose canonical name is an
+ * exact Wikipedia title skip straight to pageviews; everything the batch
+ * didn't resolve falls back to the full per-name lookupWikidataFame path,
+ * CHUNK_SIZE (3) at a time, each chunk's entities running concurrently via
+ * Promise.all — bounded parallelism that stays polite to Wikimedia's APIs
+ * without the complexity of a streaming pool. Runs within a ~12s wall-clock
+ * budget checked between chunks (never pre-empting one already in flight)
+ * — a sweep that runs long simply processes fewer chunks this tick and
+ * picks up the rest next time, the same degrade entity-ingest.ts's LLM
+ * wall-clock budget uses. Each chunk's outcomes are collected via
+ * Promise.all and reduced into stats afterward — never a counter mutated
+ * from inside the concurrent section.
+ *
+ * Circuit breaker: continuing to hammer a service that just told us "no"
+ * both sustains whatever block triggered it and is simply impolite to a
+ * free public API. One 429/403 is enough signal for one run — abort the
+ * rest immediately and let the next run (another ~30 minutes away, per the
+ * ingest cron schedule) try again with a clean slate. Entities in chunks
+ * never reached are simply never passed to checkAndWriteEntityFame, so
+ * their fame_checked_at is left completely untouched and they retry on the
+ * normal schedule next time — the same "never stamp what you didn't
+ * attempt" invariant the wall-clock budget above already relies on. */
 export async function runFameSweep(
   sql: Sql,
   now: Date = new Date(),
   deadline: number = Date.now() + SWEEP_WALL_CLOCK_BUDGET_MS,
 ): Promise<FameSweepStats> {
   const batch = await selectSweepBatch(sql);
-  const outcomes: Array<"success" | "failure"> = [];
+
+  const batchResolution = await resolveNamesBatch(batch.map((entity) => entity.canonicalName));
+  if (!batchResolution.ok && isRateLimitReason(batchResolution.reason)) {
+    // Blocked on the very first request of this tick — abort before
+    // touching a single entity.
+    return { checked: 0, succeeded: 0, failed: 0, failureReasons: { [batchResolution.reason]: 1 }, abortedReason: "rate_limited" };
+  }
+  // A non-rate-limit batch failure (timeout, 500, malformed body) just means
+  // no names get the shortcut this tick — every entity falls back to its
+  // own per-name lookup below, exactly as if resolveNamesBatch didn't exist.
+  const matchesByName = batchResolution.ok ? batchResolution.matches : new Map<string, EntityDetails>();
+
+  const outcomes: FameCheckOutcome[] = [];
+  let abortedReason: string | undefined;
 
   for (const chunk of chunkEntities(batch, CHUNK_SIZE)) {
     if (Date.now() >= deadline) break;
-    const chunkOutcomes = await Promise.all(chunk.map((entity) => checkAndWriteEntityFame(sql, entity, now)));
+    const chunkOutcomes = await Promise.all(
+      chunk.map((entity) => checkAndWriteEntityFame(sql, entity, now, matchesByName.get(entity.canonicalName))),
+    );
     outcomes.push(...chunkOutcomes);
+
+    const rateLimited = chunkOutcomes.some((o) => o.outcome === "failure" && isRateLimitReason(o.reason));
+    if (rateLimited) {
+      abortedReason = "rate_limited";
+      break;
+    }
   }
-  return tallyOutcomes(outcomes);
+
+  const stats = tallyOutcomes(outcomes);
+  return abortedReason ? { ...stats, abortedReason } : stats;
 }
