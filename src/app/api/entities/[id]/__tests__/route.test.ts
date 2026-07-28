@@ -25,7 +25,20 @@ function makeMockSql(handler: (call: RecordedCall) => SqlRow[]) {
 
 const req = new NextRequest("http://localhost/api/entities/1");
 
-const { GET } = await import("../route");
+function patchRequest(body: unknown): NextRequest {
+  return new NextRequest("http://localhost/api/entities/1", { method: "PATCH", body: JSON.stringify(body) });
+}
+
+function entityRow(overrides: Partial<SqlRow> = {}): SqlRow {
+  return {
+    id: "1", canonical_name: "Russia", type: "country", status: "tracked", aliases: [],
+    fame: "unknown", fame_locked: false, wiki_title: null, wiki_sitelinks: null,
+    wiki_pageviews_monthly: null, fame_checked_at: null, first_seen_at: "2026-07-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+const { GET, PATCH } = await import("../route");
 
 describe("GET /api/entities/[id]", () => {
   beforeEach(() => {
@@ -159,5 +172,123 @@ describe("GET /api/entities/[id]", () => {
 
     const relationsCalls = calls.filter((c) => c.query.includes("FROM entity_relations"));
     expect(relationsCalls).toHaveLength(2);
+  });
+});
+
+describe("PATCH /api/entities/[id]", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+
+  it("returns 503 when DATABASE_URL is unset", async () => {
+    delete process.env.DATABASE_URL;
+    const res = await PATCH(patchRequest({ status: "dismissed" }), { params: { id: "1" } });
+    expect(res.status).toBe(503);
+  });
+
+  it("400s on a non-positive id", async () => {
+    const res = await PATCH(patchRequest({ status: "dismissed" }), { params: { id: "0" } });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on invalid JSON", async () => {
+    const res = await PATCH(new NextRequest("http://localhost/api/entities/1", { method: "PATCH", body: "not json" }), { params: { id: "1" } });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on an empty patch body", async () => {
+    const res = await PATCH(patchRequest({}), { params: { id: "1" } });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on an invalid type", async () => {
+    const res = await PATCH(patchRequest({ type: "planet" }), { params: { id: "1" } });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on an invalid status", async () => {
+    const res = await PATCH(patchRequest({ status: "archived" }), { params: { id: "1" } });
+    expect(res.status).toBe(400);
+  });
+
+  it("400s on an invalid fame value", async () => {
+    const res = await PATCH(patchRequest({ fame: "legendary" }), { params: { id: "1" } });
+    expect(res.status).toBe(400);
+  });
+
+  it("404s on an unknown id", async () => {
+    currentSql = makeMockSql(() => []).sql;
+    const res = await PATCH(patchRequest({ status: "dismissed" }), { params: { id: "999" } });
+    expect(res.status).toBe(404);
+  });
+
+  it("updates type independently, leaving fame_locked untouched (COALESCE null)", async () => {
+    const { sql, calls } = makeMockSql(() => [entityRow({ type: "company" })]);
+    currentSql = sql;
+    const res = await PATCH(patchRequest({ type: "company" }), { params: { id: "1" } });
+    expect(res.status).toBe(200);
+    const call = calls[0];
+    expect(call.values).toContain("company");
+    // status/fame absent from the patch -> COALESCE(null, column): null present in values, not the literal.
+    expect(call.values.filter((v) => v === null).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("status round-trips both ways: tracked -> dismissed", async () => {
+    currentSql = makeMockSql(() => [entityRow({ status: "dismissed" })]).sql;
+    const res = await PATCH(patchRequest({ status: "dismissed" }), { params: { id: "1" } });
+    const body = await res.json();
+    expect(body.status).toBe("dismissed");
+  });
+
+  it("status round-trips both ways: dismissed -> tracked", async () => {
+    currentSql = makeMockSql(() => [entityRow({ status: "tracked" })]).sql;
+    const res = await PATCH(patchRequest({ status: "tracked" }), { params: { id: "1" } });
+    const body = await res.json();
+    expect(body.status).toBe("tracked");
+  });
+
+  it("setting fame also sets fame_locked=true", async () => {
+    const { sql, calls } = makeMockSql(() => [entityRow({ fame: "famous", fame_locked: true })]);
+    currentSql = sql;
+    const res = await PATCH(patchRequest({ fame: "famous" }), { params: { id: "1" } });
+    const body = await res.json();
+    expect(body.fame).toBe("famous");
+    expect(body.fameLocked).toBe(true);
+    expect(calls[0].values).toContain("famous");
+    expect(calls[0].values).toContain(true);
+  });
+
+  it("{fameLocked: false} releases an override back to the sweep, without requiring fame", async () => {
+    const { sql, calls } = makeMockSql(() => [entityRow({ fame: "famous", fame_locked: false })]);
+    currentSql = sql;
+    const res = await PATCH(patchRequest({ fameLocked: false }), { params: { id: "1" } });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.fameLocked).toBe(false);
+    expect(calls[0].values).toContain(false);
+  });
+
+  it("an explicit fameLocked wins even when fame is set in the same request", async () => {
+    const { sql, calls } = makeMockSql(() => [entityRow({ fame: "famous", fame_locked: false })]);
+    currentSql = sql;
+    await PATCH(patchRequest({ fame: "famous", fameLocked: false }), { params: { id: "1" } });
+    // fameLocked explicitly false must be the bound value, not the fame-implied true.
+    expect(calls[0].values).toContain(false);
+    expect(calls[0].values).not.toContain(true);
+  });
+
+  it("returns the updated row including its fame evidence fields", async () => {
+    const { sql } = makeMockSql(() => [
+      entityRow({ fame: "famous", fame_locked: true, wiki_title: "Russia", wiki_sitelinks: 200, wiki_pageviews_monthly: 500000, fame_checked_at: "2026-07-20T00:00:00Z" }),
+    ]);
+    currentSql = sql;
+    const res = await PATCH(patchRequest({ fame: "famous" }), { params: { id: "1" } });
+    const body = await res.json();
+    expect(body).toEqual({
+      id: 1, canonicalName: "Russia", type: "country", status: "tracked", aliases: [],
+      fame: "famous", fameLocked: true, wikiTitle: "Russia", wikiSitelinks: 200,
+      wikiPageviewsMonthly: 500000, fameCheckedAt: "2026-07-20T00:00:00.000Z",
+      firstSeenAt: "2026-07-01T00:00:00.000Z",
+    });
   });
 });

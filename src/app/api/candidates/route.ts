@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/server/db";
 import type { Sql, SqlRow } from "@/lib/server/db";
-import { checkAndWriteEntityFame } from "@/lib/server/fame-sweep";
+import {
+  TYPES,
+  isBoundedNonEmpty,
+  type CandidateSnapshot,
+  loadCandidate,
+  deleteCandidate,
+  acceptCandidate,
+  dismissCandidate,
+  inlineFameCheck,
+  CONFLICT_MESSAGE,
+} from "@/lib/server/candidate-actions";
 
 export const dynamic = "force-dynamic";
 
 const ACTIONS = new Set(["accept", "merge", "dismiss"]);
-const TYPES = new Set([
-  "person", "company", "organization", "government_body", "armed_group",
-  "political_party", "country", "region", "city", "product", "technology",
-  "financial_asset", "disease", "infrastructure", "other",
-]);
-const MAX_STRING_LEN = 200;
 
 // ---- GET: promotable candidates (>=3 distinct sources, >=2 distinct days, seen within 14d) ----
 
@@ -69,10 +73,6 @@ interface CandidateAction {
   mergeInto?: string;
 }
 
-function isBoundedNonEmpty(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value.length <= MAX_STRING_LEN;
-}
-
 function parseAction(body: unknown): CandidateAction | null {
   if (typeof body !== "object" || body === null) return null;
   const b = body as Record<string, unknown>;
@@ -87,107 +87,6 @@ function parseAction(body: unknown): CandidateAction | null {
     type: b.type as string | undefined,
     mergeInto: b.mergeInto as string | undefined,
   };
-}
-
-interface CandidateSnapshot {
-  nameNorm: string;
-  displayName: string;
-  typeHint: string;
-  firstSeenAt: unknown;
-  lastSeenAt: unknown;
-}
-
-async function loadCandidate(sql: Sql, nameNorm: string): Promise<CandidateSnapshot | null> {
-  const rows = await sql`
-    SELECT name_norm, display_name, type_hint, first_seen_at, last_seen_at
-    FROM entity_candidates
-    WHERE name_norm = ${nameNorm}
-  `;
-  if (rows.length === 0) return null;
-  const row = rows[0];
-  return {
-    nameNorm: String(row.name_norm),
-    displayName: String(row.display_name),
-    typeHint: String(row.type_hint),
-    firstSeenAt: row.first_seen_at,
-    lastSeenAt: row.last_seen_at,
-  };
-}
-
-async function deleteCandidate(sql: Sql, nameNorm: string): Promise<void> {
-  await sql`DELETE FROM entity_candidates WHERE name_norm = ${nameNorm}`;
-}
-
-// ON CONFLICT (canonical_name) can only no-op for one reason: an entity with
-// that name already exists. So on zero returned rows we check for it
-// explicitly and, if found, treat the name as resolved and clean up the
-// candidate anyway — otherwise a candidate an hourly ingest re-inserted
-// between the reviewer's page load and their click would 409 forever and
-// sit stranded for the full 14-day retention window. Read-then-delete below
-// isn't transactional; a single-writer app accepts that as a rare, bounded
-// undercount rather than added complexity, never data corruption.
-interface AcceptedEntity {
-  id: number;
-  aliases: string[];
-}
-
-function toAcceptedEntity(row: SqlRow): AcceptedEntity {
-  return { id: Number(row.id), aliases: Array.isArray(row.aliases) ? row.aliases.map(String) : [] };
-}
-
-/** Returns the resolved entity (id + its REAL current aliases — this
- * pre-existing entity may already have accumulated some) on success, null
- * when the conflicting entity genuinely doesn't exist (caller 409s). */
-async function resolveConflictedCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<AcceptedEntity | null> {
-  const existing = await sql`SELECT id, aliases FROM entities WHERE canonical_name = ${candidate.displayName}`;
-  if (existing.length === 0) return null;
-  await deleteCandidate(sql, candidate.nameNorm);
-  return toAcceptedEntity(existing[0]);
-}
-
-/** Returns the newly-tracked (or conflict-resolved existing) entity, or
- * null on an unresolvable conflict. A fresh insert always starts with
- * empty aliases (the INSERT below never sets that column); the
- * conflict-resolved branch fetches whatever the pre-existing entity
- * already has, so inlineFameCheck's alias merge never clobbers it. */
-async function acceptCandidate(sql: Sql, candidate: CandidateSnapshot, type: string): Promise<AcceptedEntity | null> {
-  const result = await sql`
-    INSERT INTO entities (canonical_name, type, status, first_seen_at, last_seen_at)
-    VALUES (${candidate.displayName}, ${type}, 'tracked', ${candidate.firstSeenAt}, ${candidate.lastSeenAt})
-    ON CONFLICT (canonical_name) DO NOTHING
-    RETURNING id
-  `;
-  if (result.length > 0) {
-    await deleteCandidate(sql, candidate.nameNorm);
-    return { id: Number(result[0].id), aliases: [] };
-  }
-  return resolveConflictedCandidate(sql, candidate);
-}
-
-// A lookup/write failure here must never surface as a route-level error —
-// the entity is already successfully tracked and its candidate row already
-// deleted by this point, so a Wikidata hiccup only means fame stays
-// 'unknown' until fame-sweep.ts's periodic sweep retries it.
-async function inlineFameCheck(sql: Sql, entity: AcceptedEntity, canonicalName: string): Promise<void> {
-  try {
-    await checkAndWriteEntityFame(sql, { id: entity.id, canonicalName, aliases: entity.aliases });
-  } catch (err) {
-    console.error("candidates accept: inline fame check failed (non-fatal, sweep will retry)", err);
-  }
-}
-
-async function dismissCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<boolean> {
-  const result = await sql`
-    INSERT INTO entities (canonical_name, type, status, first_seen_at, last_seen_at)
-    VALUES (${candidate.displayName}, ${candidate.typeHint}, 'dismissed', ${candidate.firstSeenAt}, ${candidate.lastSeenAt})
-    ON CONFLICT (canonical_name) DO NOTHING
-    RETURNING id
-  `;
-  if (result.length > 0) {
-    await deleteCandidate(sql, candidate.nameNorm);
-    return true;
-  }
-  return (await resolveConflictedCandidate(sql, candidate)) !== null;
 }
 
 /** Returns false if mergeInto doesn't name an existing entity (caller 404s). */
@@ -208,8 +107,6 @@ function validateActionFields(action: CandidateAction): string | null {
   if (action.action === "merge" && !action.mergeInto) return "mergeInto is required for merge";
   return null;
 }
-
-const CONFLICT_MESSAGE = "Could not resolve a naming conflict for this candidate — please retry";
 
 async function dispatchAction(sql: Sql, candidate: CandidateSnapshot, action: CandidateAction): Promise<NextResponse> {
   if (action.action === "accept") {

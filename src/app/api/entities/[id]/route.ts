@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/server/db";
 import type { Sql, SqlRow } from "@/lib/server/db";
+import { toEntityAdminJson } from "@/lib/server/entity-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -143,4 +144,102 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     edges,
     relations: { incoming, outgoing },
   });
+}
+
+// ---- PATCH: partial update of {type, status, fame, fameLocked} ----
+
+const VALID_TYPES = new Set([
+  "person", "company", "organization", "government_body", "armed_group",
+  "political_party", "country", "region", "city", "product", "technology",
+  "financial_asset", "disease", "infrastructure", "other",
+]);
+const VALID_STATUSES = new Set(["tracked", "dismissed"]);
+const VALID_FAME = new Set(["unknown", "not_famous", "famous"]);
+
+interface EntityPatch {
+  type?: string;
+  status?: string;
+  fame?: string;
+  fameLocked?: boolean;
+}
+
+function parseEntityPatch(body: unknown): EntityPatch | null {
+  if (typeof body !== "object" || body === null) return null;
+  const b = body as Record<string, unknown>;
+  const patch: EntityPatch = {};
+
+  if ("type" in b) {
+    if (typeof b.type !== "string" || !VALID_TYPES.has(b.type)) return null;
+    patch.type = b.type;
+  }
+  if ("status" in b) {
+    if (typeof b.status !== "string" || !VALID_STATUSES.has(b.status)) return null;
+    patch.status = b.status;
+  }
+  if ("fame" in b) {
+    if (typeof b.fame !== "string" || !VALID_FAME.has(b.fame)) return null;
+    patch.fame = b.fame;
+  }
+  if ("fameLocked" in b) {
+    if (typeof b.fameLocked !== "boolean") return null;
+    patch.fameLocked = b.fameLocked;
+  }
+  return patch;
+}
+
+/** An explicit fameLocked always wins. Otherwise setting fame implies
+ * fame_locked=true (a human verdict is final until a human changes it —
+ * migrations/007's whole reason to exist); with neither field present, the
+ * column is left untouched. */
+function resolveFameLocked(patch: EntityPatch): boolean | null {
+  if (patch.fameLocked !== undefined) return patch.fameLocked;
+  if (patch.fame !== undefined) return true;
+  return null;
+}
+
+/** Partial update via COALESCE: each column is set to its new value or, for
+ * a field absent from the patch, left unchanged — a single query rather
+ * than building a dynamic SET clause. */
+async function applyEntityPatch(sql: Sql, id: number, patch: EntityPatch): Promise<SqlRow | null> {
+  const rows = await sql`
+    UPDATE entities SET
+      type = COALESCE(${patch.type ?? null}, type),
+      status = COALESCE(${patch.status ?? null}, status),
+      fame = COALESCE(${patch.fame ?? null}, fame),
+      fame_locked = COALESCE(${resolveFameLocked(patch)}, fame_locked)
+    WHERE id = ${id}
+    RETURNING id, canonical_name, type, status, aliases, fame, fame_locked,
+              wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at, first_seen_at
+  `;
+  return rows[0] ?? null;
+}
+
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  if (!process.env.DATABASE_URL) {
+    return NextResponse.json({ error: "DATABASE_URL is not configured" }, { status: 503 });
+  }
+
+  const id = Number(params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ error: "Invalid entity id" }, { status: 400 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const patch = parseEntityPatch(body);
+  if (patch === null) return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  }
+
+  const sql = getSql();
+  const updated = await applyEntityPatch(sql, id, patch);
+  if (updated === null) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
+
+  return NextResponse.json(toEntityAdminJson(updated));
 }
