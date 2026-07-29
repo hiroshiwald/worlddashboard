@@ -8,6 +8,8 @@ const BATCH_LIMIT = 40;
 const CHUNK_SIZE = 3;
 const MAX_ALIASES = 24;
 const UNKNOWN_RETRY_HOURS = 6;
+const MAX_EXCEPTION_MESSAGE_LEN = 160;
+const MAX_EXCEPTION_SAMPLES = 3;
 // Wall-clock budget for one whole sweep tick — mirrors entity-ingest.ts's
 // LLM_TIME_BUDGET_MS pattern: checked between chunks of CHUNK_SIZE entities
 // (LLM batches there), never pre-empting a chunk already in flight — the
@@ -140,7 +142,36 @@ async function writeRescueStamp(sql: Sql, entityId: number): Promise<void> {
   await sql`UPDATE entities SET fame_checked_at = now() WHERE id = ${entityId}`;
 }
 
-export type FameCheckOutcome = { outcome: "success" } | { outcome: "failure"; reason: string };
+// A thrown error's message can quote the connection string the Neon driver
+// was using — DATABASE_URL, password and all. Anything derived from it
+// travels into FameSweepStats, then the ingest endpoint's JSON response,
+// then a PUBLIC repository's Actions log, so every URL-shaped substring is
+// redacted before it goes anywhere. Deliberately blunt: over-redacting a
+// harmless api.wikidata.org URL costs nothing, under-redacting once leaks a
+// production credential permanently.
+function redactSecrets(text: string): string {
+  return text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<redacted-url>");
+}
+
+/** A caught exception as a bounded, secret-safe pair: a LOW-CARDINALITY
+ * reason key (the error's own name, so 34 identical crashes tally as one
+ * row rather than 34 unique ones) plus one sanitized, length-capped sample
+ * message. The plain "unexpected_exception" tag this replaces proved
+ * useless in a real incident — it said an exception happened, never which,
+ * and the console line carrying the detail expired with Vercel's one-hour
+ * log retention before anyone could read it. Pure, so the redaction and the
+ * caps are directly testable. */
+export function describeException(err: unknown): { reason: string; sample: string } {
+  const rawName = err instanceof Error && err.name ? err.name : typeof err;
+  const name = rawName.replace(/[^A-Za-z0-9_]/g, "").slice(0, 40) || "Unknown";
+  const rawMessage = err instanceof Error ? err.message : String(err);
+  const message = redactSecrets(rawMessage).slice(0, MAX_EXCEPTION_MESSAGE_LEN);
+  return { reason: `exception_${name}`, sample: `${name}: ${message}` };
+}
+
+export type FameCheckOutcome =
+  | { outcome: "success" }
+  | { outcome: "failure"; reason: string; sample?: string };
 
 /** One entity's lookup + write — shared by runFameSweep's batch loop and
  * the candidates route's inline post-accept check. `batchMatch`, when
@@ -156,9 +187,10 @@ export type FameCheckOutcome = { outcome: "success" } | { outcome: "failure"; re
  * parsing, the verdict, the alias merge, or the write itself — is caught
  * here and degrades the same way: one loud log line identifying the entity
  * and the error, then the same fame_checked_at-only rescue write, tagged
- * with the generic "unexpected_exception" reason (it's not a Wikidata
- * signal, so it never trips the circuit breaker). Either path advances
- * fame_checked_at so the retry queue rotates to the next-due entity instead
+ * with describeException's `exception_<ErrorName>` reason and a sanitized
+ * sample message (it's not a Wikidata signal, so it never trips the circuit
+ * breaker). Either path advances fame_checked_at so the retry queue rotates
+ * to the next-due entity instead
  * of head-of-line blocking on one that keeps failing — and, since every
  * per-entity path now resolves instead of rejecting, a chunk's Promise.all
  * can never take the whole sweep down with it. Only the rescue write itself
@@ -192,9 +224,10 @@ export async function checkAndWriteEntityFame(
     await writeSuccess(sql, entity.id, aliases, fame, result.lookup.wikiTitle, result.lookup.sitelinks, result.lookup.medianMonthlyPageviews);
     return { outcome: "success" };
   } catch (err) {
+    const { reason, sample } = describeException(err);
     console.error(`[fame-sweep] entity check threw id=${entity.id} name=${JSON.stringify(entity.canonicalName)}`, err);
     await writeRescueStamp(sql, entity.id);
-    return { outcome: "failure", reason: "unexpected_exception" };
+    return { outcome: "failure", reason, sample };
   }
 }
 
@@ -208,6 +241,13 @@ export interface FameSweepStats {
    * the ingest endpoint's JSON response and, from there, the GitHub Actions
    * job log, since Vercel's own runtime logs only retain for an hour. */
   failureReasons: Record<string, number>;
+  /** Up to MAX_EXCEPTION_SAMPLES distinct sanitized exception messages (see
+   * describeException), present only when something actually threw. The
+   * reason keys above say WHICH error class and how often; these say what it
+   * said. Capped so one pathological error can't flood the ingest response,
+   * and redacted so a driver error quoting DATABASE_URL can't leak a
+   * credential into a public Actions log. */
+  exceptionSamples?: string[];
   /** Present only when the circuit breaker (see runFameSweep) cut a run
    * short after a 429/403 — currently always "rate_limited". */
   abortedReason?: string;
@@ -221,15 +261,20 @@ function chunkEntities(entities: FameCheckEntity[], size: number): FameCheckEnti
 
 function tallyOutcomes(outcomes: FameCheckOutcome[]): FameSweepStats {
   const stats: FameSweepStats = { checked: 0, succeeded: 0, failed: 0, failureReasons: {} };
+  const samples = new Set<string>();
   for (const outcome of outcomes) {
     stats.checked += 1;
     if (outcome.outcome === "success") {
       stats.succeeded += 1;
-    } else {
-      stats.failed += 1;
-      stats.failureReasons[outcome.reason] = (stats.failureReasons[outcome.reason] ?? 0) + 1;
+      continue;
     }
+    stats.failed += 1;
+    stats.failureReasons[outcome.reason] = (stats.failureReasons[outcome.reason] ?? 0) + 1;
+    // Distinct messages only, and only while under the cap — 34 copies of
+    // one crash should cost one line, not 34.
+    if (outcome.sample && samples.size < MAX_EXCEPTION_SAMPLES) samples.add(outcome.sample);
   }
+  if (samples.size > 0) stats.exceptionSamples = Array.from(samples);
   return stats;
 }
 

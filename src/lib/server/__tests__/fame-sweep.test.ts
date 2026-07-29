@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { Pool } from "pg";
-import { runFameSweep, mergeAliases } from "../fame-sweep";
+import { runFameSweep, mergeAliases, describeException } from "../fame-sweep";
 import { computeWindowMonths } from "../wikidata";
 import { makePgSql, freshSchema } from "./helpers/pg-sql";
 import type { Sql, SqlRow } from "../db";
@@ -432,7 +432,13 @@ describe("runFameSweep: thrown per-entity failures (poison guard)", () => {
     const { sql, calls } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
 
     const stats = await runFameSweep(sql, NOW);
-    expect(stats).toEqual({ checked: 4, succeeded: 3, failed: 1, failureReasons: { unexpected_exception: 1 } });
+    expect(stats).toEqual({
+      checked: 4,
+      succeeded: 3,
+      failed: 1,
+      failureReasons: { exception_Error: 1 },
+      exceptionSamples: ["Error: simulated lookup crash"],
+    });
 
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [message, err] = errorSpy.mock.calls[0];
@@ -457,7 +463,13 @@ describe("runFameSweep: thrown per-entity failures (poison guard)", () => {
     });
 
     const stats = await runFameSweep(sql, NOW);
-    expect(stats).toEqual({ checked: 1, succeeded: 0, failed: 1, failureReasons: { unexpected_exception: 1 } });
+    expect(stats).toEqual({
+      checked: 1,
+      succeeded: 0,
+      failed: 1,
+      failureReasons: { exception_Error: 1 },
+      exceptionSamples: ["Error: write failed: connection reset"],
+    });
 
     expect(errorSpy).toHaveBeenCalledTimes(1);
     const [message] = errorSpy.mock.calls[0];
@@ -487,6 +499,116 @@ describe("runFameSweep: thrown per-entity failures (poison guard)", () => {
     // fetchJson's own try/catch absorbs as a plain network_error (not a
     // rate-limit reason) — so it never reaches or affects the poison entity.
     await expect(runFameSweep(sql, NOW)).rejects.toThrow("database unreachable");
+  });
+});
+
+describe("runFameSweep: exceptionSamples", () => {
+  it("collapses many identical crashes into one sample line", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // No fetch mock: POISON names reject inside the mocked lookupWikidataFame
+    // before any network call, and the upfront resolveNamesBatch call hits
+    // this file's default throwing fetch guard, which fetchJson absorbs.
+    const entities = Array.from({ length: 5 }, (_, i) => entityRow(i + 1, `POISON ${i + 1}`));
+    const { sql } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? entities : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats.failed).toBe(5);
+    expect(stats.failureReasons).toEqual({ exception_Error: 5 });
+    expect(stats.exceptionSamples).toEqual(["Error: simulated lookup crash"]);
+  });
+
+  it("caps distinct sample messages at 3 while still counting every failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("sites=enwiki")) return noBatchMatchResponse();
+        if (url.includes("wbsearchentities")) return okResponse(searchHit("Q1"));
+        if (url.includes("wbgetentities")) return okResponse(entitiesBody("Q1", { enwiki: { site: "enwiki", title: "Famous Person" } }));
+        if (url.includes("pageviews/per-article")) return okResponse(sustainedPageviewsBody(1_000_000));
+        throw new Error(`unexpected fetch url in test: ${url}`);
+      }),
+    );
+
+    // Every lookup succeeds; every full write throws a DIFFERENT message, so
+    // five distinct samples compete for three slots.
+    const entities = Array.from({ length: 5 }, (_, i) => entityRow(i + 1, `Writer ${i + 1}`));
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("SELECT id, canonical_name, aliases")) return entities;
+      if (call.query.includes("wiki_title")) throw new Error(`write failed for entity ${call.values[call.values.length - 1]}`);
+      return [];
+    });
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats).toEqual({
+      checked: 5,
+      succeeded: 0,
+      failed: 5,
+      failureReasons: { exception_Error: 5 },
+      exceptionSamples: [
+        "Error: write failed for entity 1",
+        "Error: write failed for entity 2",
+        "Error: write failed for entity 3",
+      ],
+    });
+  });
+
+  it("omits the field entirely when nothing threw", async () => {
+    mockNotFamousLookup();
+    const { sql } = makeMockSql((call) => (call.query.includes("SELECT id, canonical_name, aliases") ? [entityRow(1, "Minor Person")] : []));
+
+    const stats = await runFameSweep(sql, NOW);
+
+    expect(stats.exceptionSamples).toBeUndefined();
+    expect("exceptionSamples" in stats).toBe(false);
+  });
+});
+
+describe("describeException", () => {
+  it("keys the reason on the error's own name, so identical crashes tally as one row", () => {
+    expect(describeException(new Error("boom")).reason).toBe("exception_Error");
+    expect(describeException(new TypeError("bad type")).reason).toBe("exception_TypeError");
+  });
+
+  it("returns the message as a sample, prefixed with the error name", () => {
+    expect(describeException(new Error("connection reset")).sample).toBe("Error: connection reset");
+  });
+
+  it("redacts every URL-shaped substring — a driver error can quote DATABASE_URL", () => {
+    const err = new Error("connect failed: postgresql://neondb_owner:npg_S3cret@ep-x.neon.tech/neondb?sslmode=require");
+    const { sample } = describeException(err);
+    expect(sample).not.toContain("npg_S3cret");
+    expect(sample).not.toContain("neon.tech");
+    expect(sample).toBe("Error: connect failed: <redacted-url>");
+  });
+
+  it("redacts a URL that is not the whole message, keeping the surrounding words", () => {
+    const { sample } = describeException(new Error("GET https://api.wikidata.org/w/api.php?x=1 returned 500"));
+    expect(sample).toBe("Error: GET <redacted-url> returned 500");
+  });
+
+  it("caps the message at 160 characters so one error cannot flood the ingest response", () => {
+    const { sample } = describeException(new Error("x".repeat(500)));
+    expect(sample).toBe(`Error: ${"x".repeat(160)}`);
+  });
+
+  it("handles a thrown non-Error value", () => {
+    expect(describeException("plain string")).toEqual({ reason: "exception_string", sample: "string: plain string" });
+    expect(describeException(null)).toEqual({ reason: "exception_object", sample: "object: null" });
+  });
+
+  it("strips punctuation from an exotic error name, keeping the reason key a safe identifier", () => {
+    const err = new Error("boom");
+    err.name = "Weird Name!/*";
+    expect(describeException(err).reason).toBe("exception_WeirdName");
+  });
+
+  it("falls back to Unknown when the sanitized name is empty", () => {
+    const err = new Error("boom");
+    err.name = "!!!";
+    expect(describeException(err).reason).toBe("exception_Unknown");
   });
 });
 
