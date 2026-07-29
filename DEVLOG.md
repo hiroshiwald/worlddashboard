@@ -1,5 +1,47 @@
 # World Dashboard Development Log
 
+## 2026-07-29 — M009: name the exception the fame sweep keeps swallowing
+
+**What changed**: M008 gave every RETURNED lookup failure a specific reason
+(`search_http_403`, `pageviews_timeout`, ...), but left every THROWN one
+tagged with a single opaque string, `"unexpected_exception"`. The first
+production run on M008's code came back
+`{checked: 40, succeeded: 6, failed: 34, failureReasons: {unexpected_exception: 34}}`
+— which settled one question (Wikidata answers us; the rate-limit theory
+was wrong) and left the real one untouched: 34 crashes inside our own code,
+class unknown. The `console.error` line that carries the actual error is
+written, but Vercel Hobby retains runtime logs for one hour and nobody read
+it in time. New pure `describeException(err)` returns
+`{reason: "exception_<ErrorName>", sample: "<Name>: <message>"}`; the reason
+is keyed on the error's own class name deliberately — low cardinality, so 34
+identical crashes stay ONE tally row instead of 34 unique ones — and
+`FameSweepStats` gains an optional `exceptionSamples`: up to 3 DISTINCT
+sample strings, absent entirely when nothing threw. Nothing else in the
+sweep's control flow changed; a thrown exception still degrades to the
+rescue stamp and still never trips the rate-limit circuit breaker.
+
+**What it affected**: `src/lib/server/fame-sweep.ts` (`describeException` +
+private `redactSecrets`, `MAX_EXCEPTION_MESSAGE_LEN`/`MAX_EXCEPTION_SAMPLES`
+constants, `FameCheckOutcome.sample`, `FameSweepStats.exceptionSamples`,
+`checkAndWriteEntityFame`'s catch block, `tallyOutcomes`). No caller changes:
+`run-ingest.ts` already threads the whole stats object into the ingest JSON
+response, and from there into the GitHub Actions job log — which, unlike
+Vercel's runtime logs, is permanent. `fame-sweep.test.ts`: two existing
+poison-guard assertions updated from `unexpected_exception` to
+`exception_Error` + sample; new blocks for sample aggregation and for
+`describeException` itself. MANIFEST.md rows for both files.
+
+**Gotchas**: the samples are NOT free-form error text — they travel into a
+public repository's Actions log, and a Neon driver error can quote
+`DATABASE_URL` (password included) verbatim in its message. Every sample is
+passed through `redactSecrets` first, which replaces any `scheme://…`
+substring with `<redacted-url>`, and is then capped at 160 characters. The
+regex is deliberately blunt and over-redacts: losing a harmless
+`api.wikidata.org` URL from a diagnostic costs one debugging round-trip;
+under-redacting once puts a production credential in public git history
+permanently. Distinct-only + capped-at-3 for the same reason a tally beats a
+list — one pathological error must not flood the ingest response.
+
 ## 2026-07-27 — Fame sweep: unknown retry window 7 days → 6 hours
 
 **What changed**: `selectSweepBatch`'s unknown-recheck interval was 7 days,
