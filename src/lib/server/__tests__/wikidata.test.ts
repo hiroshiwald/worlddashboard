@@ -165,6 +165,31 @@ describe("computeMedianPageviews — the spike-immunity linchpin", () => {
     // sorted [10k, 20k, 999999] -> middle = 20k
     expect(computeMedianPageviews(viewsByMonth, windowMonths)).toBe(20_000);
   });
+
+  it("even-length 12-month window: middle values differing by an odd amount round to a whole number (production regression — wiki_pageviews_monthly is INT)", () => {
+    const windowMonths = [
+      "202501", "202502", "202503", "202504", "202505", "202506",
+      "202507", "202508", "202509", "202510", "202511", "202512",
+    ];
+    const viewsByMonth = new Map([
+      ["202501", 10_000],
+      ["202502", 20_000],
+      ["202503", 30_000],
+      ["202504", 40_000],
+      ["202505", 50_000],
+      ["202506", 60_000],
+      ["202507", 60_001],
+      ["202508", 70_000],
+      ["202509", 80_000],
+      ["202510", 90_000],
+      ["202511", 100_000],
+      ["202512", 110_000],
+    ]);
+    // sorted middle two values are 60_000 and 60_001 -> raw average 60_000.5
+    const median = computeMedianPageviews(viewsByMonth, windowMonths);
+    expect(median).toBe(60_001);
+    expect(Number.isInteger(median)).toBe(true);
+  });
 });
 
 describe("parseSearchResponse", () => {
