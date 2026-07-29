@@ -83,11 +83,15 @@ export function computeWindowMonths(now: Date): string[] {
  * (article too young to have existed, or Wikimedia has no data) counts as 0,
  * not "missing" — the median is always taken over exactly
  * `windowMonths.length` values. A 3-month-old article with huge recent views
- * still produces a low median, because most of the window is real zeros. */
+ * still produces a low median, because most of the window is real zeros.
+ * Always returns a whole number: `windowMonths.length` is even (12), so the
+ * median is an average of two values and can land on a half-integer, but
+ * `entities.wiki_pageviews_monthly` is INT — a fractional write throws. */
 export function computeMedianPageviews(viewsByMonth: Map<string, number>, windowMonths: string[]): number {
   const values = windowMonths.map((month) => viewsByMonth.get(month) ?? 0).sort((a, b) => a - b);
   const mid = Math.floor(values.length / 2);
-  return values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
+  const median = values.length % 2 === 0 ? (values[mid - 1] + values[mid]) / 2 : values[mid];
+  return Math.round(median);
 }
 
 /** wbsearchentities's top hit id, or null when nothing matched (a clean

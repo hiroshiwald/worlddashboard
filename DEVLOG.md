@@ -1,5 +1,38 @@
 # World Dashboard Development Log
 
+## 2026-07-29 — round computeMedianPageviews so it never poisons an INT write
+
+**What changed**: `computeMedianPageviews` (`src/lib/server/wikidata.ts`) now
+wraps its result in `Math.round()`. `PAGEVIEWS_WINDOW_MONTHS` is 12 (even), so
+the median averages the two middle sorted values; when those two differ by an
+odd amount the average is a half-integer (e.g. `412345.5`). That value was
+written straight to `entities.wiki_pageviews_monthly`, which
+`migrations/006_fame_layer.sql` declares `INT` — Postgres rejected the write,
+`checkAndWriteEntityFame` caught the thrown `NeonDbError` and fell back to the
+`fame_checked_at`-only rescue stamp, and the entity's `fame` stayed `'unknown'`
+forever. Production log: 24 of 27 fame-sweep failures that tick were this
+exact `NeonDbError: invalid input syntax for type integer: "N.5"`. An entity
+with no Wikipedia match returns `medianMonthlyPageviews: 0` and writes fine,
+so this bug preferentially discarded verdicts for entities with real Wikipedia
+traffic — the exact population the sweep exists to identify.
+
+**What it affected**: `src/lib/server/wikidata.ts` (`computeMedianPageviews`
+return value and doc comment only — window computation, zero-fill for missing
+months, and the 12-month/2-month-lag window itself are unchanged).
+`src/lib/server/__tests__/wikidata.test.ts` gains a 12-month regression case
+reproducing the production shape (middle values summing to an odd number);
+confirmed it fails against the pre-fix code (`60000.5` !== `60001`) and passes
+after. No consumer changes: the rounded value only ever feeds
+`computeWikiFameVerdict`'s integer threshold comparisons in `fame.ts`, so
+rounding cannot flip a verdict except on an exact half-unit boundary.
+
+**Gotcha**: an even-length median window silently produces half-integers, and
+every existing test case happened to use middle values that summed to an even
+number (25,000 and 20,000 both came out whole), so the bug was invisible in
+tests and only surfaced against production data via a Postgres `INT` column
+constraint. When testing a "midpoint of an even list" function, deliberately
+include a case where the two middle values differ by an odd amount.
+
 ## 2026-07-29 — M009: name the exception the fame sweep keeps swallowing
 
 **What changed**: M008 gave every RETURNED lookup failure a specific reason
