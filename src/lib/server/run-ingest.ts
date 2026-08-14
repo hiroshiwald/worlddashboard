@@ -91,14 +91,14 @@ export async function runIngest(): Promise<IngestResult> {
     counts.inserted = inserted;
     counts.duplicates = duplicates;
 
-    await runStage("sweep-retention", () => sweepRetention(sql));
+    const retentionResult = await runStage("sweep-retention", () => sweepRetention(sql));
     const entityStats = await runStage("process-entities", () => processNewArticles(sql));
     counts.entities = entityStats;
     counts.llm = entityStats.llm;
     counts.signals = await runStage("detect-signals", async () => {
       const settings = await getSettings(sql);
       const candidates = await runDetectors(sql, settings);
-      return persistSignals(sql, candidates, settings);
+      return persistSignals(sql, candidates, settings, retentionResult?.expired ?? 0);
     });
     counts.fameSweep = await runFameSweepStage(sql);
     counts.warmup = await runStage("compute-warmup", () => getIngestWarmupState(sql));

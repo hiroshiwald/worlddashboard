@@ -299,6 +299,7 @@ function makeRichMockSql(responses: Partial<Record<string, SqlRow[]>>): Sql {
     const q = strings.join(" ? ");
     if (q.includes("source_breadth")) return responses.breadth ?? [];
     if (q.includes("aliases_a")) return responses.novelEdges ?? [];
+    if (q.includes("canonical_name, aliases, fame")) return responses.subjectFame ?? [];
     if (q.includes("MIN(ee.first_seen_at)")) return responses.edgeGlobalMin ?? [];
     if (q.includes("v.a AS entity_a, v.b AS entity_b")) return responses.edgeArticles ?? [];
     if (q.includes("MIN(first_seen_at)") && q.includes("FROM articles")) return responses.epoch ?? [];
@@ -444,5 +445,54 @@ describe("runDetectors — novel-edge fame suppression (L2A)", () => {
     const signals = await runDetectors(sql, DEFAULTS);
     const novelEdgeKeys = signals.filter((s) => s.type === "novel_edge").map((s) => s.dedupeKey).sort();
     expect(novelEdgeKeys).toEqual(["novel_edge:101:103"]);
+  });
+});
+
+// ---- L2B: fame gate on single-entity detector subjects ----
+describe("runDetectors — single-entity subject fame gate (L2B)", () => {
+  it("drops a famous-subject surge candidate, keeps non-famous sentiment/cross_category/first_seen candidates", async () => {
+    const sql = makeRichMockSql({
+      ...baseRichResponses(),
+      subjectFame: [{ id: 6, canonical_name: "SurgeEntity", aliases: [], fame: "famous" }],
+    });
+
+    const signals = await runDetectors(sql, DEFAULTS);
+
+    expect(signals.find((s) => s.dedupeKey === "surge:6")).toBeUndefined();
+    expect(signals.find((s) => s.dedupeKey === "sentiment:7")).toBeDefined();
+    expect(signals.find((s) => s.dedupeKey === "cross_category:8")).toBeDefined();
+    expect(signals.find((s) => s.dedupeKey === "first_seen:9")).toBeDefined();
+  });
+
+  it("a non-famous subject (low baseline, no dictionary/breadth/stored match) survives the gate untouched", async () => {
+    // SentimentEntity's own baseline (20/14 ≈ 1.43/day) sits well under this
+    // tiny population's volume threshold — unlike SurgeEntity above, whose
+    // baseline alone clears it, this one only clears an explicit not_famous
+    // stored verdict, proving that verdict never vetoes but also never
+    // fabricates fame on its own.
+    const sql = makeRichMockSql({
+      ...baseRichResponses(),
+      subjectFame: [{ id: 7, canonical_name: "SentimentEntity", aliases: [], fame: "not_famous" }],
+    });
+
+    const signals = await runDetectors(sql, DEFAULTS);
+    expect(signals.find((s) => s.dedupeKey === "sentiment:7")).toBeDefined();
+  });
+
+  it("novel_edge's own famous-famous rule is unaffected by the single-entity gate", async () => {
+    const famousFamousEdge = {
+      entity_a: 1, entity_b: 2, name_a: "Russia", name_b: "China",
+      aliases_a: [], aliases_b: [], first_seen_at: RECENT, article_count: 2,
+    };
+    const sql = makeRichMockSql({
+      ...baseRichResponses(),
+      subjectFame: [{ id: 6, canonical_name: "SurgeEntity", aliases: [], fame: "famous" }],
+      novelEdges: [famousFamousEdge],
+      edgeArticles: [],
+    });
+
+    const signals = await runDetectors(sql, DEFAULTS);
+    expect(signals.find((s) => s.dedupeKey === "surge:6")).toBeUndefined();
+    expect(signals.find((s) => s.type === "novel_edge")).toBeUndefined(); // famous-famous, suppressed by its own rule
   });
 });

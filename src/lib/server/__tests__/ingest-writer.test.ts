@@ -125,11 +125,11 @@ describe("persistArticles", () => {
 });
 
 describe("sweepRetention", () => {
-  it("issues the four expected deletes with correct intervals", async () => {
+  it("issues the five expected deletes with correct intervals", async () => {
     const { sql, calls } = makeMockSql(() => []);
     await sweepRetention(sql);
 
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(5);
     expect(calls[0].query).toContain("DELETE FROM articles");
     expect(calls[0].query).toContain("30 days");
     expect(calls[1].query).toContain("DELETE FROM entity_mentions_hourly");
@@ -139,5 +139,39 @@ describe("sweepRetention", () => {
     expect(calls[2].query).toContain("90 days");
     expect(calls[3].query).toContain("DELETE FROM entity_candidates");
     expect(calls[3].query).toContain("14 days");
+  });
+
+  it("returns { expired: 0 } when nothing matches", async () => {
+    const { sql } = makeMockSql(() => []);
+    const result = await sweepRetention(sql);
+    expect(result).toEqual({ expired: 0 });
+  });
+
+  it("expiry delete targets state='new', the four moment types, last_evidence_at, and make_interval (not a parameterized INTERVAL literal)", async () => {
+    const { sql, calls } = makeMockSql(() => []);
+    await sweepRetention(sql);
+
+    const expiryCall = calls[4];
+    expect(expiryCall.query).toContain("DELETE FROM signals");
+    expect(expiryCall.query).toContain("state = 'new'");
+    expect(expiryCall.query).toContain("last_evidence_at");
+    expect(expiryCall.query).toContain("make_interval(days =>");
+    expect(expiryCall.values).toEqual([["surge", "first_seen", "cross_category", "sentiment"], 7]);
+  });
+
+  it("novel_edge is exempt from expiry — the type list never includes it", async () => {
+    const { sql, calls } = makeMockSql(() => []);
+    await sweepRetention(sql);
+    const expiryCall = calls[4];
+    expect(expiryCall.values[0]).not.toContain("novel_edge");
+  });
+
+  it("counts the rows the expiry DELETE actually returns", async () => {
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("last_evidence_at")) return [{ id: "1" }, { id: "2" }, { id: "3" }];
+      return [];
+    });
+    const result = await sweepRetention(sql);
+    expect(result).toEqual({ expired: 3 });
   });
 });
