@@ -94,7 +94,7 @@ describe.skipIf(!TEST_DATABASE_URL)("warm-up gate integration (real Postgres)", 
   it("post-warm-up: an old system epoch lets first_seen fire at warning (not critical) for 3 sources, and surge uses the correct effective-days denominator", async () => {
     // Establishes an old system epoch (9 days ago) so the warm-up gate has
     // cleared, and doubles as an old tracked entity clearing the separate
-    // 72h entities-table bootstrap-cohort guard for Russia below.
+    // 72h entities-table bootstrap-cohort guard for the new entity below.
     await sql!`
       INSERT INTO articles (content_hash, title_signature, title, link, published_at, first_seen_at, source_name, source_category, source_tier)
       VALUES ('epoch-seed', 'epoch-seed-sig', 'Epoch seed article', 'https://x.example.com/epoch-seed',
@@ -106,17 +106,26 @@ describe.skipIf(!TEST_DATABASE_URL)("warm-up gate integration (real Postgres)", 
       RETURNING id
     `) as [{ id: number }];
 
-    // A genuinely new entity, arriving today, mentioned by 3 distinct sources.
-    const russiaArticles = [0, 1, 2].map((i) =>
-      makeItem({
-        title: `Russia announces new trade policy ${["One", "Two", "Three"][i]}`,
-        sourceName: `Source R${i}`,
-        link: `https://x.example.com/russia-${i}`,
-        published: new Date(Date.now() - i * 3600 * 1000).toISOString(),
-      }),
-    );
-    await persistArticles(sql!, russiaArticles);
-    await processNewArticles(sql!);
+    // A genuinely new, non-famous entity, arriving today, mentioned by 3
+    // distinct sources. Constructed via direct insert (not persistArticles +
+    // processNewArticles) because a fictional name isn't a dictionary term
+    // and so wouldn't be auto-tracked — first_seen only fires for tracked
+    // entities, and this fixture must stay non-famous under every fame prong.
+    const [{ id: kaldoriaId }] = (await sql!`
+      INSERT INTO entities (canonical_name, type, status, first_seen_at, last_seen_at)
+      VALUES ('Kaldoria', 'country', 'tracked', now(), now())
+      RETURNING id
+    `) as [{ id: number }];
+    for (const [i, label] of ["One", "Two", "Three"].entries()) {
+      const publishedAt = new Date(Date.now() - i * 3600 * 1000).toISOString();
+      const [{ id: articleId }] = (await sql!`
+        INSERT INTO articles (content_hash, title_signature, title, link, published_at, first_seen_at, source_name, source_category, source_tier)
+        VALUES (${`kaldoria-${i}`}, ${`kaldoria-sig-${i}`}, ${`Kaldoria announces new trade policy ${label}`},
+          ${`https://x.example.com/kaldoria-${i}`}, ${publishedAt}, now(), ${`Source K${i}`}, 'world', '1')
+        RETURNING id
+      `) as [{ id: number }];
+      await sql!`INSERT INTO article_entities (article_id, entity_id) VALUES (${articleId}, ${Number(kaldoriaId)})`;
+    }
 
     // A separate entity with a real (if modest) baseline plus a 10x spike.
     for (let day = 5; day <= 8; day++) {
@@ -133,8 +142,7 @@ describe.skipIf(!TEST_DATABASE_URL)("warm-up gate integration (real Postgres)", 
     const settings = await getSettings(sql!);
     const candidates = await runDetectors(sql!, settings);
 
-    const [russia] = await sql!`SELECT id FROM entities WHERE canonical_name = 'Russia'`;
-    const firstSeen = candidates.find((c) => c.dedupeKey === `first_seen:${russia.id}`);
+    const firstSeen = candidates.find((c) => c.dedupeKey === `first_seen:${kaldoriaId}`);
     expect(firstSeen).toBeDefined();
     expect(firstSeen!.severity).toBe("warning"); // 3 sources: below the recalibrated critical threshold of 8
     expect(firstSeen!.evidence.sourceCount).toBe(3);
