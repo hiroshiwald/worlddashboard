@@ -109,9 +109,33 @@ export async function persistArticles(
   return { inserted, duplicates: items.length - inserted };
 }
 
-export async function sweepRetention(sql: Sql): Promise<void> {
+// Moment-type detectors (24-48h spike, refreshed every ~30min while still
+// true) vs. novel_edge (a connection, deliberately durable) — hardcoded
+// product decisions, not settings.
+const EXPIRING_SIGNAL_TYPES = ["surge", "first_seen", "cross_category", "sentiment"];
+const SIGNAL_EXPIRY_DAYS = 7;
+
+export interface RetentionResult {
+  expired: number;
+}
+
+export async function sweepRetention(sql: Sql): Promise<RetentionResult> {
   await sql`DELETE FROM articles WHERE first_seen_at < now() - INTERVAL '30 days'`;
   await sql`DELETE FROM entity_mentions_hourly WHERE bucket < now() - INTERVAL '180 days'`;
   await sql`DELETE FROM signals WHERE state = 'dismissed' AND state_changed_at < now() - INTERVAL '90 days'`;
   await sql`DELETE FROM entity_candidates WHERE last_seen_at < now() - INTERVAL '14 days'`;
+
+  // A moment-type 'new' signal silent for 7 days is long over. novel_edge is
+  // deliberately EXEMPT — operator decision: a novel connection stays until
+  // a human acts on it. The durable record lives in entity_edges regardless;
+  // deleting this alert never deletes that connection's history.
+  const expired = await sql`
+    DELETE FROM signals
+    WHERE state = 'new'
+      AND type = ANY(${EXPIRING_SIGNAL_TYPES}::text[])
+      AND last_evidence_at < now() - make_interval(days => ${SIGNAL_EXPIRY_DAYS}::int)
+    RETURNING id
+  `;
+
+  return { expired: expired.length };
 }

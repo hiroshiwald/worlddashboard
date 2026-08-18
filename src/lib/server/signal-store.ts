@@ -1,6 +1,9 @@
 import type { Sql, SqlRow } from "./db";
 import type { CandidateSignal } from "./detectors";
+import { loadFameBaselinePanel } from "./detectors";
 import type { Settings } from "./settings";
+import { isFamous, loadLifetimeSourceBreadth } from "./fame";
+import type { StoredFame } from "./fame";
 
 const ACTIVE_STATES = ["new", "seen", "promoted"];
 export type SignalAction = "seen" | "dismissed" | "promoted" | "reopen";
@@ -9,6 +12,8 @@ export interface PersistResult {
   created: number;
   refreshed: number;
   suppressed: number;
+  purged: number;
+  expired: number;
 }
 
 export interface EvidenceArticle {
@@ -42,6 +47,14 @@ function toIsoString(value: unknown): string {
 
 function toBigIntArray(value: unknown): number[] {
   return Array.isArray(value) ? value.map((v) => Number(v)) : [];
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
+function toStoredFame(value: unknown): StoredFame {
+  return value === "not_famous" || value === "famous" ? value : "unknown";
 }
 
 function evidenceArticleIds(evidence: Record<string, unknown>): number[] {
@@ -158,29 +171,96 @@ async function upsertCandidates(sql: Sql, candidates: CandidateSignal[]): Promis
   `;
 }
 
+const SINGLE_ENTITY_TYPES = new Set(["surge", "first_seen", "cross_category", "sentiment"]);
+
+async function loadEntityFameFacts(sql: Sql, entityIds: number[]): Promise<Map<number, { names: string[]; storedFame: StoredFame }>> {
+  const map = new Map<number, { names: string[]; storedFame: StoredFame }>();
+  if (entityIds.length === 0) return map;
+  const rows = await sql`SELECT id, canonical_name, aliases, fame FROM entities WHERE id = ANY(${entityIds}::bigint[])`;
+  for (const row of rows) {
+    map.set(Number(row.id), { names: [String(row.canonical_name), ...toStringArray(row.aliases)], storedFame: toStoredFame(row.fame) });
+  }
+  return map;
+}
+
+/** Applies detectors.ts's fame gate to the EXISTING pile instead of new
+ * candidates — same policy, same isFamous(...) test, reusing
+ * loadFameBaselinePanel/loadLifetimeSourceBreadth rather than a second fame
+ * implementation. Deletes 'new' rows where: a single-entity type's
+ * (surge/first_seen/cross_category/sentiment) subject is famous, or a
+ * novel_edge row's endpoints are BOTH famous (one-famous edges survive,
+ * matching detectNovelEdges's own rule). Only ever touches state='new' —
+ * 'seen'/'promoted'/'dismissed' are human choices, exempt from all
+ * automated management. */
+async function purgeFamousSignals(sql: Sql): Promise<number> {
+  const rows = await sql`SELECT id, type, entity_ids FROM signals WHERE state = 'new'`;
+  if (rows.length === 0) return 0;
+
+  const entityIds = Array.from(new Set(rows.flatMap((r) => toBigIntArray(r.entity_ids))));
+  const [factsById, breadthById, panel] = await Promise.all([
+    loadEntityFameFacts(sql, entityIds),
+    loadLifetimeSourceBreadth(sql, entityIds),
+    loadFameBaselinePanel(sql),
+  ]);
+
+  function entityIsFamous(id: number): boolean {
+    const facts = factsById.get(id);
+    if (!facts) return false;
+    return isFamous(
+      { names: facts.names, baselineDaily: panel.baselineDailyById.get(id) ?? 0, sourceBreadth: breadthById.get(id) ?? 0, storedFame: facts.storedFame },
+      panel.volumeThreshold,
+    );
+  }
+
+  const idsToDelete = rows
+    .filter((row) => {
+      const type = String(row.type);
+      const ids = toBigIntArray(row.entity_ids);
+      if (SINGLE_ENTITY_TYPES.has(type)) return ids.length > 0 && entityIsFamous(ids[0]);
+      if (type === "novel_edge") return ids.length === 2 && entityIsFamous(ids[0]) && entityIsFamous(ids[1]);
+      return false;
+    })
+    .map((row) => Number(row.id));
+  if (idsToDelete.length === 0) return 0;
+
+  await sql`DELETE FROM signals WHERE id = ANY(${idsToDelete}::bigint[]) AND state = 'new'`;
+  return idsToDelete.length;
+}
+
 /** Upserts detector output into `signals`. A candidate whose dedupe_key was
  * DISMISSED within settings.dismiss_cooldown_hours is suppressed entirely —
  * re-detection doesn't resurrect something the user just dismissed.
  * Everything else upserts against the active partial unique index; state is
- * never touched by re-detection (a 'seen' signal stays seen). */
+ * never touched by re-detection (a 'seen' signal stays seen). Every call
+ * also purges the existing 'new' pile against today's fame gate
+ * (purgeFamousSignals) and passes through the retention sweep's expired
+ * count, so the returned counts are the one place both are visible. */
 export async function persistSignals(
   sql: Sql,
   candidates: CandidateSignal[],
   settings: Settings,
+  expiredCount = 0,
 ): Promise<PersistResult> {
-  if (candidates.length === 0) return { created: 0, refreshed: 0, suppressed: 0 };
+  let created = 0;
+  let refreshed = 0;
+  let suppressed = 0;
 
-  const dedupeKeys = candidates.map((c) => c.dedupeKey);
-  const suppressedKeys = await loadDismissedWithinCooldown(sql, dedupeKeys, settings.dismiss_cooldown_hours);
-  const toPersist = candidates.filter((c) => !suppressedKeys.has(c.dedupeKey));
-  const suppressed = candidates.length - toPersist.length;
-  if (toPersist.length === 0) return { created: 0, refreshed: 0, suppressed };
+  if (candidates.length > 0) {
+    const dedupeKeys = candidates.map((c) => c.dedupeKey);
+    const suppressedKeys = await loadDismissedWithinCooldown(sql, dedupeKeys, settings.dismiss_cooldown_hours);
+    const toPersist = candidates.filter((c) => !suppressedKeys.has(c.dedupeKey));
+    suppressed = candidates.length - toPersist.length;
 
-  const existingActiveKeys = await loadActiveDedupeKeys(sql, toPersist.map((c) => c.dedupeKey));
-  await upsertCandidates(sql, toPersist);
+    if (toPersist.length > 0) {
+      const existingActiveKeys = await loadActiveDedupeKeys(sql, toPersist.map((c) => c.dedupeKey));
+      await upsertCandidates(sql, toPersist);
+      refreshed = toPersist.filter((c) => existingActiveKeys.has(c.dedupeKey)).length;
+      created = toPersist.length - refreshed;
+    }
+  }
 
-  const refreshed = toPersist.filter((c) => existingActiveKeys.has(c.dedupeKey)).length;
-  return { created: toPersist.length - refreshed, refreshed, suppressed };
+  const purged = await purgeFamousSignals(sql);
+  return { created, refreshed, suppressed, purged, expired: expiredCount };
 }
 
 const ALLOWED_ACTIONS = new Set<SignalAction>(["seen", "dismissed", "promoted", "reopen"]);

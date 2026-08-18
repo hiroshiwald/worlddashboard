@@ -30,7 +30,7 @@ beforeEach(() => {
   vi.mocked(fetchAllFeeds).mockResolvedValue({ items: [], feedsAttempted: 10, feedsSucceeded: 10, relayConfigured: false, feedDiagnostics: [] });
   vi.mocked(getSql).mockReturnValue((async () => []) as unknown as Sql);
   vi.mocked(persistArticles).mockResolvedValue({ inserted: 0, duplicates: 0 });
-  vi.mocked(sweepRetention).mockResolvedValue(undefined);
+  vi.mocked(sweepRetention).mockResolvedValue({ expired: 0 });
   vi.mocked(processNewArticles).mockResolvedValue({
     articlesProcessed: 0, mentionsWritten: 0, newEntities: 0, candidatesTouched: 0,
     llm: { used: false, articles: 0, monthCostUsd: 0 }, entities: { autoAccepted: 0 }, relations: { written: 0 },
@@ -38,7 +38,7 @@ beforeEach(() => {
   vi.mocked(getSettings).mockResolvedValue(FAKE_SETTINGS);
   vi.mocked(runDetectors).mockResolvedValue([]);
   vi.mocked(computeWarmupState).mockReturnValue({ active: false, daysRemaining: 0 });
-  vi.mocked(persistSignals).mockResolvedValue({ created: 0, refreshed: 0, suppressed: 0 });
+  vi.mocked(persistSignals).mockResolvedValue({ created: 0, refreshed: 0, suppressed: 0, purged: 0, expired: 0 });
   vi.mocked(runFameSweep).mockResolvedValue({ checked: 0, succeeded: 0, failed: 0, failureReasons: {} });
 });
 
@@ -47,7 +47,7 @@ describe("runIngest: fame sweep stage", () => {
     const order: string[] = [];
     vi.mocked(persistSignals).mockImplementation(async () => {
       order.push("signals");
-      return { created: 0, refreshed: 0, suppressed: 0 };
+      return { created: 0, refreshed: 0, suppressed: 0, purged: 0, expired: 0 };
     });
     vi.mocked(runFameSweep).mockImplementation(async () => {
       order.push("fame-sweep");
@@ -100,6 +100,26 @@ describe("runIngest: fame sweep stage", () => {
     vi.mocked(runFameSweep).mockRejectedValue(new Error("down"));
     const result = await runIngest();
     expect(result.body.warmup).toEqual({ active: false, daysRemaining: 0 });
+  });
+});
+
+describe("runIngest: signals stats (purged/expired observability)", () => {
+  it("passes sweepRetention's expired count through to persistSignals, and the result lands in body.signals", async () => {
+    vi.mocked(sweepRetention).mockResolvedValue({ expired: 4 });
+    vi.mocked(persistSignals).mockResolvedValue({ created: 0, refreshed: 0, suppressed: 0, purged: 2, expired: 4 });
+
+    const result = await runIngest();
+
+    expect(persistSignals).toHaveBeenCalledWith(expect.anything(), [], FAKE_SETTINGS, 4);
+    expect(result.body.signals).toEqual({ created: 0, refreshed: 0, suppressed: 0, purged: 2, expired: 4 });
+  });
+
+  it("defaults the expired count to 0 when sweepRetention resolves to undefined (a bare-mock consumer)", async () => {
+    vi.mocked(sweepRetention).mockResolvedValue(undefined as never);
+
+    await runIngest();
+
+    expect(persistSignals).toHaveBeenCalledWith(expect.anything(), [], FAKE_SETTINGS, 0);
   });
 });
 

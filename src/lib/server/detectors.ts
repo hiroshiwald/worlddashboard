@@ -528,8 +528,9 @@ async function loadRecentNovelEdges(sql: Sql): Promise<NovelEdgeRow[]> {
 /** max(3, 75th percentile) of baselineDaily over the hourly-agg panel — the
  * same population/percentile math fame.ts's computeFameVolumeThreshold
  * always takes, just assembled from detectors.ts's own already-loaded
- * panel instead of developments.ts's separate baseline query. */
-function computeNovelEdgeFameThreshold(aggRows: HourlyAggRow[], effectiveBaselineDays: number): number {
+ * panel instead of developments.ts's separate baseline query. Shared by
+ * both the novel-edge suppression below and the single-entity fame gate. */
+function computeFameThreshold(aggRows: HourlyAggRow[], effectiveBaselineDays: number): number {
   return computeFameVolumeThreshold(aggRows.map((row) => row.baselineSum / effectiveBaselineDays));
 }
 
@@ -550,7 +551,7 @@ async function suppressFamousEdges(
   const endpointIds = Array.from(new Set(edges.flatMap((e) => [e.entityA, e.entityB])));
   const breadthById = await loadLifetimeSourceBreadth(sql, endpointIds);
   const baselineById = new Map(aggRows.map((row) => [row.entityId, row.baselineSum / effectiveBaselineDays]));
-  const volumeThreshold = computeNovelEdgeFameThreshold(aggRows, effectiveBaselineDays);
+  const volumeThreshold = computeFameThreshold(aggRows, effectiveBaselineDays);
 
   function endpointIsFamous(id: number, name: string, aliases: string[], storedFame: StoredFame): boolean {
     return isFamous(
@@ -563,6 +564,59 @@ async function suppressFamousEdges(
     const bothFamous =
       endpointIsFamous(e.entityA, e.nameA, e.aliasesA, e.fameA) && endpointIsFamous(e.entityB, e.nameB, e.aliasesB, e.fameB);
     return !bothFamous;
+  });
+}
+
+/** Batched fame facts (name + aliases + stored verdict) for a bounded set of
+ * entity ids — same shape suppressFamousEdges reads off its edge join, just
+ * fetched directly since the four single-entity detectors don't already
+ * have it loaded. Bounded to this run's candidate subjects, never the whole
+ * tracked roster. */
+async function loadSubjectFameFacts(sql: Sql, entityIds: number[]): Promise<Map<number, { names: string[]; storedFame: StoredFame }>> {
+  const map = new Map<number, { names: string[]; storedFame: StoredFame }>();
+  if (entityIds.length === 0) return map;
+  const rows = await sql`
+    SELECT id, canonical_name, aliases, fame FROM entities WHERE id = ANY(${entityIds}::bigint[])
+  `;
+  for (const row of rows) {
+    map.set(Number(row.id), { names: [String(row.canonical_name), ...toStringArray(row.aliases)], storedFame: toStoredFame(row.fame) });
+  }
+  return map;
+}
+
+/** Drops any surge/first_seen/cross_category/sentiment candidate whose
+ * subject entity passes the shared fame test — the same isFamous(...)
+ * evaluation suppressFamousEdges already performs for novel_edge endpoints,
+ * REUSING the same plumbing (breadth loading, volume threshold), just
+ * applied to the union of this run's single-entity candidate subjects in
+ * one batched pass instead of edge endpoints. A famous name's surge is
+ * noise at any age; a non-famous novel connection is signal — this is the
+ * "flow" half of that rule (novel_edge's own famous-famous rule is
+ * unchanged and handles the connection case separately). */
+async function suppressFamousSubjects(
+  sql: Sql,
+  candidates: CandidateSignal[],
+  aggRows: HourlyAggRow[],
+  effectiveBaselineDays: number,
+): Promise<CandidateSignal[]> {
+  if (candidates.length === 0) return candidates;
+
+  const entityIds = Array.from(new Set(candidates.map((c) => c.entityIds[0])));
+  const [factsById, breadthById] = await Promise.all([
+    loadSubjectFameFacts(sql, entityIds),
+    loadLifetimeSourceBreadth(sql, entityIds),
+  ]);
+  const baselineById = new Map(aggRows.map((row) => [row.entityId, row.baselineSum / effectiveBaselineDays]));
+  const volumeThreshold = computeFameThreshold(aggRows, effectiveBaselineDays);
+
+  return candidates.filter((c) => {
+    const entityId = c.entityIds[0];
+    const facts = factsById.get(entityId);
+    if (!facts) return true;
+    return !isFamous(
+      { names: facts.names, baselineDaily: baselineById.get(entityId) ?? 0, sourceBreadth: breadthById.get(entityId) ?? 0, storedFame: facts.storedFame },
+      volumeThreshold,
+    );
   });
 }
 
@@ -687,5 +741,33 @@ export async function runDetectors(sql: Sql, settings: Settings): Promise<Candid
   );
   const crossCategory = detectCrossCategory(articlesByEntity, categoryBaseline, entityNames);
 
-  return [...surge, ...firstSeen, ...novelEdge, ...crossCategory, ...sentiment];
+  // L2B: fame gate on the four single-entity detectors — same rule
+  // novel_edge already applies to its endpoints, extended to these subjects.
+  const singleEntityCandidates = [...surge, ...firstSeen, ...crossCategory, ...sentiment];
+  const survivingSingleEntity = await suppressFamousSubjects(sql, singleEntityCandidates, aggRows, effectiveBaselineDays);
+  const survivingByType = new Set(survivingSingleEntity);
+  const survive = (arr: CandidateSignal[]) => arr.filter((c) => survivingByType.has(c));
+
+  return [...survive(surge), ...survive(firstSeen), ...novelEdge, ...survive(crossCategory), ...survive(sentiment)];
+}
+
+/** Tracked-entity baseline population (mentions/day, trailing 15 days) plus
+ * the fame volume threshold derived from it — same population/percentile
+ * math the gates above use, exported so signal-store.ts's stock-side purge
+ * (the same policy applied to the existing pile instead of new candidates)
+ * can apply the identical fame test without re-deriving any of it. */
+export interface FameBaselinePanel {
+  baselineDailyById: Map<number, number>;
+  volumeThreshold: number;
+}
+
+export async function loadFameBaselinePanel(sql: Sql): Promise<FameBaselinePanel> {
+  const epoch = await getSystemEpoch(sql);
+  const daysSinceEpoch = epoch ? computeDaysSinceEpoch(new Date(), epoch) : 0;
+  const effectiveBaselineDays = computeEffectiveBaselineDays(daysSinceEpoch);
+  const aggRows = await loadHourlyAgg(sql);
+  return {
+    baselineDailyById: new Map(aggRows.map((row) => [row.entityId, row.baselineSum / effectiveBaselineDays])),
+    volumeThreshold: computeFameThreshold(aggRows, effectiveBaselineDays),
+  };
 }

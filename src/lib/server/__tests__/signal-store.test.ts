@@ -30,11 +30,20 @@ const candidate: CandidateSignal = {
 };
 
 describe("persistSignals", () => {
-  it("returns all-zero counts for an empty candidate list without querying", async () => {
+  it("returns all-zero counts for an empty candidate list (still runs the purge pass every call)", async () => {
     const { sql, calls } = makeMockSql(() => []);
     const result = await persistSignals(sql, [], DEFAULTS);
-    expect(result).toEqual({ created: 0, refreshed: 0, suppressed: 0 });
-    expect(calls).toHaveLength(0);
+    expect(result).toEqual({ created: 0, refreshed: 0, suppressed: 0, purged: 0, expired: 0 });
+    // No candidate upsert queries — but purgeFamousSignals still queries the
+    // existing 'new' pile (finds none here), matching Change 2's "every run".
+    expect(calls.some((c) => c.query.includes("INSERT INTO signals"))).toBe(false);
+    expect(calls.some((c) => c.query.includes("SELECT id, type, entity_ids"))).toBe(true);
+  });
+
+  it("passes the expiredCount parameter straight through into the result (no recomputation)", async () => {
+    const { sql } = makeMockSql(() => []);
+    const result = await persistSignals(sql, [], DEFAULTS, 7);
+    expect(result.expired).toBe(7);
   });
 
   it("suppresses a candidate whose dedupe_key was dismissed within the cooldown window", async () => {
@@ -43,7 +52,7 @@ describe("persistSignals", () => {
       return [];
     });
     const result = await persistSignals(sql, [candidate], DEFAULTS);
-    expect(result).toEqual({ created: 0, refreshed: 0, suppressed: 1 });
+    expect(result).toEqual({ created: 0, refreshed: 0, suppressed: 1, purged: 0, expired: 0 });
     expect(calls.some((c) => c.query.includes("INSERT INTO signals"))).toBe(false);
   });
 
@@ -57,7 +66,7 @@ describe("persistSignals", () => {
   it("counts a brand-new dedupe_key as created", async () => {
     const { sql, calls } = makeMockSql(() => []);
     const result = await persistSignals(sql, [candidate], DEFAULTS);
-    expect(result).toEqual({ created: 1, refreshed: 0, suppressed: 0 });
+    expect(result).toEqual({ created: 1, refreshed: 0, suppressed: 0, purged: 0, expired: 0 });
     const insertCall = calls.find((c) => c.query.includes("INSERT INTO signals"));
     expect(insertCall).toBeDefined();
     expect(insertCall!.query).toContain("ON CONFLICT (dedupe_key) WHERE state IN ('new', 'seen', 'promoted')");
@@ -71,7 +80,92 @@ describe("persistSignals", () => {
       return [];
     });
     const result = await persistSignals(sql, [candidate], DEFAULTS);
-    expect(result).toEqual({ created: 0, refreshed: 1, suppressed: 0 });
+    expect(result).toEqual({ created: 0, refreshed: 1, suppressed: 0, purged: 0, expired: 0 });
+  });
+});
+
+describe("purgeFamousSignals (via persistSignals)", () => {
+  // Entities: 1=famous single-entity subject, 2=non-famous subject,
+  // 10/11=famous-famous edge endpoints, 20/21=one-famous edge endpoints.
+  function makeEntityRow(id: number, fame: string) {
+    return { id, canonical_name: `Entity${id}`, aliases: [], fame };
+  }
+
+  function routePurgeQueries(
+    signalsNewRows: SqlRow[],
+    entityRows: SqlRow[],
+    breadthRows: SqlRow[] = [],
+    aggRows: SqlRow[] = [],
+    epochRows: SqlRow[] = [{ min_first_seen: new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString() }],
+  ) {
+    return (call: RecordedCall): SqlRow[] => {
+      if (call.query.includes("SELECT id, type, entity_ids")) return signalsNewRows;
+      if (call.query.includes("canonical_name, aliases, fame")) return entityRows;
+      if (call.query.includes("source_breadth")) return breadthRows;
+      if (call.query.includes("MIN(first_seen_at)") && call.query.includes("FROM articles")) return epochRows;
+      if (call.query.includes("FROM entity_mentions_hourly")) return aggRows;
+      if (call.query.includes("DELETE FROM signals") && call.query.includes("id = ANY(")) return [];
+      return [];
+    };
+  }
+
+  it("deletes a 'new' surge row whose subject is famous, keeps a non-famous one", async () => {
+    const { sql, calls } = makeMockSql(
+      routePurgeQueries(
+        [
+          { id: 1, type: "surge", entity_ids: [1] },
+          { id: 2, type: "surge", entity_ids: [2] },
+        ],
+        [makeEntityRow(1, "famous"), makeEntityRow(2, "not_famous")],
+      ),
+    );
+
+    const result = await persistSignals(sql, [], DEFAULTS);
+    expect(result.purged).toBe(1);
+
+    const deleteCall = calls.find((c) => c.query.includes("DELETE FROM signals") && c.query.includes("id = ANY("));
+    expect(deleteCall).toBeDefined();
+    expect(deleteCall!.values[0]).toEqual([1]);
+    expect(deleteCall!.query).toContain("state = 'new'");
+  });
+
+  it("deletes a famous-famous novel_edge row, keeps a one-famous edge row", async () => {
+    const { sql } = makeMockSql(
+      routePurgeQueries(
+        [
+          { id: 10, type: "novel_edge", entity_ids: [10, 11] },
+          { id: 20, type: "novel_edge", entity_ids: [20, 21] },
+        ],
+        [
+          makeEntityRow(10, "famous"),
+          makeEntityRow(11, "famous"),
+          makeEntityRow(20, "famous"),
+          makeEntityRow(21, "not_famous"),
+        ],
+      ),
+    );
+
+    const result = await persistSignals(sql, [], DEFAULTS);
+    expect(result.purged).toBe(1);
+  });
+
+  it("never touches 'seen'/'promoted'/'dismissed' rows — only queries state='new'", async () => {
+    const { sql, calls } = makeMockSql(routePurgeQueries([], []));
+    await persistSignals(sql, [], DEFAULTS);
+    const selectCall = calls.find((c) => c.query.includes("SELECT id, type, entity_ids"));
+    expect(selectCall!.query).toContain("state = 'new'");
+  });
+
+  it("keeps non-famous rows of every type, and issues no DELETE when nothing violates the gate", async () => {
+    const { sql, calls } = makeMockSql(
+      routePurgeQueries(
+        [{ id: 1, type: "sentiment", entity_ids: [1] }],
+        [makeEntityRow(1, "not_famous")],
+      ),
+    );
+    const result = await persistSignals(sql, [], DEFAULTS);
+    expect(result.purged).toBe(0);
+    expect(calls.some((c) => c.query.includes("DELETE FROM signals") && c.query.includes("id = ANY("))).toBe(false);
   });
 });
 
