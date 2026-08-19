@@ -1,7 +1,19 @@
 import type { Sql, SqlRow } from "./db";
 import { extractCandidates, extractDictionaryOnlyCandidates, addCandidate, normalizeName, Candidate, TypeHint } from "./extract-v2";
 import { scoreSentiment } from "../entity-extractor";
-import { isLlmConfigured, extractEntitiesBatch, getLlmMonthStats, ExtractedRelation, RelationType, LlmExtractionResult } from "./llm-extract";
+import {
+  isLlmConfigured,
+  submitBatch,
+  pollBatch,
+  fetchBatchResults,
+  recordBatchUsage,
+  getLlmMonthStats,
+  currentUtcMonth,
+  MAX_BATCH_SIZE,
+  ExtractedRelation,
+  RelationType,
+  BatchResults,
+} from "./llm-extract";
 import { getSettings } from "./settings";
 
 const LOOKBACK_HOURS = 6;
@@ -9,22 +21,29 @@ const MAX_CANDIDATE_SOURCES = 10;
 const MAX_SAMPLE_TITLES = 3;
 const MAX_CONTEXTS = 3;
 const MAX_CO_ENTITIES = 5;
-const LLM_BATCH_SIZE = 25;
-// Batches dispatched to the LLM per wave — bounds concurrent Anthropic
-// calls under the 60s Vercel function ceiling without going fully serial.
-const LLM_WAVE_SIZE = 3;
-// Wall-clock budget for the whole LLM extraction phase of one ingest run.
-// Once exceeded, no further Anthropic calls are made this run — remaining
-// articles fall back to the (fast) heuristic stack instead of risking the
-// function running past its 60s ceiling on a catch-up backlog.
-const LLM_TIME_BUDGET_MS = 20_000;
+// A pending batch younger than this is polled and left pending; older than
+// this, it's abandoned (heuristic-processed instead) — the Batches API's
+// documented "most batches finish within an hour, hard max 24h" makes 6h a
+// generous wait before giving up on one tick's worth of articles.
+const PENDING_BATCH_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 export interface EntityIngestStats {
   articlesProcessed: number;
   mentionsWritten: number;
   newEntities: number;
   candidatesTouched: number;
-  llm: { used: boolean; articles: number; monthCostUsd: number };
+  llm: {
+    used: boolean;
+    articles: number;
+    monthCostUsd: number;
+    batch: { submittedArticles: number; retrievedArticles: number; pendingAgeMinutes: number | null };
+    /** Low-cardinality reason -> count for every non-success path this
+     * tick (submit/poll/results HTTP statuses, per-chunk errored/canceled/
+     * expired, abandoned_timeout, budget gate, malformed lines). Reason
+     * keys only, never free text — see llm-extract.ts's submit/poll/
+     * fetchBatchResults. */
+    failureReasons: Record<string, number>;
+  };
   /** Famous-prominence LLM candidates inserted straight into entities
    * (status 'tracked') instead of the review queue — see classifyCandidate.
    * A subset of newEntities above, broken out for visibility. */
@@ -40,6 +59,10 @@ function toDate(value: unknown): Date {
 
 function toStringArray(value: unknown): string[] {
   return Array.isArray(value) ? (value as string[]) : [];
+}
+
+function toNumberArray(value: unknown): number[] {
+  return Array.isArray(value) ? value.map(Number) : [];
 }
 
 // ---- cluster-head selection ----
@@ -72,15 +95,31 @@ function parseHeadRow(row: SqlRow): HeadArticle {
  * all unresolved candidates never gets an article_entities row, so under a
  * NOT EXISTS gate it would be re-selected — and its entity_candidates
  * sightings re-accumulated — every run for its whole lookback window. */
-async function selectUnprocessedHeads(sql: Sql): Promise<HeadArticle[]> {
+// excludeIds keeps a still-pending batch's own articles out of this tick's
+// selection (they're already spoken for) — see resolvePendingBatchStage.
+async function selectUnprocessedHeads(sql: Sql, excludeIds: number[] = []): Promise<HeadArticle[]> {
   const rows = await sql`
     SELECT a.id, a.title, a.summary, a.published_at, a.first_seen_at, a.source_name
     FROM articles a
     WHERE a.dup_group_id IS NULL
       AND a.first_seen_at >= now() - make_interval(hours => ${LOOKBACK_HOURS}::int)
       AND a.entities_processed_at IS NULL
+      AND NOT (a.id = ANY(${excludeIds}::bigint[]))
   `;
   return rows.map(parseHeadRow);
+}
+
+async function loadHeadsByIds(sql: Sql, ids: number[]): Promise<Map<number, HeadArticle>> {
+  if (ids.length === 0) return new Map();
+  // entities_processed_at IS NULL is the exactly-once guard: an id whose
+  // article was somehow already processed (or deleted) by the time a batch
+  // resolves is silently absent here, so applyBatchResults below just skips it.
+  const rows = await sql`
+    SELECT a.id, a.title, a.summary, a.published_at, a.first_seen_at, a.source_name
+    FROM articles a
+    WHERE a.id = ANY(${ids}::bigint[]) AND a.entities_processed_at IS NULL
+  `;
+  return new Map(rows.map(parseHeadRow).map((head) => [head.id, head] as const));
 }
 
 async function markArticlesProcessed(sql: Sql, articleIds: number[]): Promise<void> {
@@ -334,126 +373,209 @@ function extractAllHeuristic(heads: HeadArticle[]): Map<number, Candidate[] | nu
   return result;
 }
 
-interface CandidateExtractionResult {
+// ---- Batches API: pending-batch table (migrations/008_llm_batches.sql) ----
+// Invariant: at most one llm_batches row exists at any time. Each tick,
+// process-entities first resolves any pending row (poll -> apply/abandon),
+// then — only if none remains pending — selects fresh heads and submits a
+// new batch. Extraction-derived data (mentions, candidates, relations) can
+// therefore land one tick later than ingest arrival; articles.first_seen_at
+// (watch-time) is written at ingest and untouched here (DESIGN.md "honest
+// time").
+
+interface PendingBatch {
+  batchId: string;
+  submittedAt: Date;
+  articleIds: number[];
+}
+
+async function loadPendingBatch(sql: Sql): Promise<PendingBatch | null> {
+  const rows = await sql`SELECT batch_id, submitted_at, article_ids FROM llm_batches LIMIT 1`;
+  if (rows.length === 0) return null;
+  return { batchId: String(rows[0].batch_id), submittedAt: toDate(rows[0].submitted_at), articleIds: toNumberArray(rows[0].article_ids) };
+}
+
+async function insertPendingBatch(sql: Sql, batchId: string, articleIds: number[], submittedAt: Date): Promise<void> {
+  await sql`INSERT INTO llm_batches (batch_id, submitted_at, article_ids) VALUES (${batchId}, ${submittedAt.toISOString()}, ${articleIds}::bigint[])`;
+}
+
+async function deletePendingBatch(sql: Sql, batchId: string): Promise<void> {
+  await sql`DELETE FROM llm_batches WHERE batch_id = ${batchId}`;
+}
+
+interface PendingBatchOutcome {
+  headById: Map<number, HeadArticle>;
   candidatesByArticle: Map<number, Candidate[] | null>;
-  llmArticleCount: number;
   relationsByArticle: Map<number, ExtractedRelation[]>;
+  llmUsed: number;
+  /** Ids to keep out of this tick's fresh head selection — populated
+   * whenever a pending row existed, whichever branch handled it. */
+  excludeIds: number[];
+  /** True only when the batch is still in flight (in_progress, or a poll
+   * failure that leaves its status unknown) — step 2 (select+submit) is
+   * skipped entirely in that case, preserving the at-most-one-pending
+   * invariant. */
+  stillPending: boolean;
+  batch: { submittedArticles: number; retrievedArticles: number; pendingAgeMinutes: number | null };
 }
 
-// For an article whose batch returned an LLM result: LLM candidates UNION
-// the dictionary layer only (the dictionary stays the canonical anchor;
-// compromise/acronym/person-regex/product-pattern are skipped). For an
-// article with no LLM result (failed/unparseable batch, or the wall-clock
-// deadline ran out before its batch was dispatched): the full heuristic
-// stack.
-function resolveArticleCandidates(
-  article: HeadArticle,
-  llmCandidates: Candidate[] | undefined,
-): { candidates: Candidate[] | null; usedLlm: boolean } {
-  if (!llmCandidates) return { candidates: heuristicCandidatesForArticle(article), usedLlm: false };
-  try {
-    return { candidates: mergeLlmWithDictionary(llmCandidates, article.title, article.summary), usedLlm: true };
-  } catch (err) {
-    logArticleFailure(article.id, err);
-    return { candidates: null, usedLlm: false };
-  }
+function emptyPendingOutcome(): PendingBatchOutcome {
+  return {
+    headById: new Map(),
+    candidatesByArticle: new Map(),
+    relationsByArticle: new Map(),
+    llmUsed: 0,
+    excludeIds: [],
+    stillPending: false,
+    batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes: null },
+  };
 }
 
-// Heuristic-extracts every article in every batch from fromIndex onward —
-// used once the wall-clock deadline has passed, so none of these batches
-// ever call the LLM. Returns the count of articles it fell back for.
-function fallbackRemainingBatches(
-  batches: HeadArticle[][],
-  fromIndex: number,
-  candidatesByArticle: Map<number, Candidate[] | null>,
-): number {
-  let count = 0;
-  for (const batch of batches.slice(fromIndex)) {
-    for (const article of batch) {
-      candidatesByArticle.set(article.id, heuristicCandidatesForArticle(article));
-      count += 1;
-    }
-  }
-  return count;
-}
-
-// Resolves one wave's settled batch results into candidatesByArticle (and,
-// for articles that actually used the LLM, relationsByArticle). Returns how
-// many articles in this wave actually used the LLM.
-function applyWaveResults(
-  wave: HeadArticle[][],
-  waveResults: (LlmExtractionResult | null)[],
+// Applies each chunk's outcome (succeeded/errored/canceled/expired/
+// malformed) onto the pending batch's own articles, by chunk position — the
+// SAME chunking (over the stored article id order) used at submit time, so
+// custom_id alignment holds even when an id is missing from headById (the
+// exactly-once guard: already processed, or gone — silently skipped).
+function applyBatchResults(
+  idsPerChunk: number[][],
+  headById: Map<number, HeadArticle>,
+  results: BatchResults,
   candidatesByArticle: Map<number, Candidate[] | null>,
   relationsByArticle: Map<number, ExtractedRelation[]>,
+  tally: (reason: string) => void,
 ): number {
   let llmUsed = 0;
-  for (let batchIndex = 0; batchIndex < wave.length; batchIndex++) {
-    const batch = wave[batchIndex];
-    const llmResult = waveResults[batchIndex];
-    for (let i = 0; i < batch.length; i++) {
-      const article = batch[i];
-      const { candidates, usedLlm } = resolveArticleCandidates(article, llmResult?.candidates.get(i));
-      candidatesByArticle.set(article.id, candidates);
-      if (usedLlm) {
-        llmUsed += 1;
-        const relations = llmResult?.relations.get(i);
-        if (relations && relations.length > 0) relationsByArticle.set(article.id, relations);
+  for (let chunkIndex = 0; chunkIndex < idsPerChunk.length; chunkIndex++) {
+    const failure = results.chunkFailures.get(chunkIndex);
+    const chunkResult = results.byChunk.get(chunkIndex);
+    idsPerChunk[chunkIndex].forEach((id, j) => {
+      const head = headById.get(id);
+      if (!head) return; // exactly-once guard
+      if (failure) {
+        tally(`chunk_${failure}`);
+        candidatesByArticle.set(id, heuristicCandidatesForArticle(head));
+        return;
       }
-    }
+      const llmCandidates = chunkResult?.candidates.get(j);
+      if (!llmCandidates) {
+        tally("article_missing_from_batch_result");
+        candidatesByArticle.set(id, heuristicCandidatesForArticle(head));
+        return;
+      }
+      try {
+        candidatesByArticle.set(id, mergeLlmWithDictionary(llmCandidates, head.title, head.summary));
+        llmUsed += 1;
+        const relations = chunkResult?.relations.get(j);
+        if (relations && relations.length > 0) relationsByArticle.set(id, relations);
+      } catch (err) {
+        logArticleFailure(id, err);
+        candidatesByArticle.set(id, null);
+      }
+    });
   }
   return llmUsed;
 }
 
-// Runs LLM batches in waves of up to LLM_WAVE_SIZE concurrent Anthropic
-// calls, checking the wall-clock deadline before each wave. Once the
-// deadline has passed, no further API calls are made this run — every
-// remaining article falls back to heuristics, so a catch-up backlog
-// degrades gracefully instead of running /api/ingest past its 60s ceiling.
-// deadline defaults to now + LLM_TIME_BUDGET_MS, computed once per call;
-// the parameter exists so tests can pin it without real timers.
-async function extractAllWithLlm(
-  heads: HeadArticle[],
-  sql: Sql,
-  budgetUsd: number,
-  deadline: number = Date.now() + LLM_TIME_BUDGET_MS,
-): Promise<CandidateExtractionResult> {
+// Whole-batch heuristic fallback: no-key, abandoned-timeout, or a
+// results-fetch failure — every one of the pending batch's own articles
+// gets the full heuristic stack instead.
+async function resolveWithHeuristicFallback(sql: Sql, pending: PendingBatch): Promise<PendingBatchOutcome> {
+  const headById = await loadHeadsByIds(sql, pending.articleIds);
   const candidatesByArticle = new Map<number, Candidate[] | null>();
-  const relationsByArticle = new Map<number, ExtractedRelation[]>();
-  const batches = chunkArticles(heads, LLM_BATCH_SIZE);
-  let llmArticleCount = 0;
-  let fallbackCount = 0;
-
-  for (let i = 0; i < batches.length; i += LLM_WAVE_SIZE) {
-    if (Date.now() >= deadline) {
-      fallbackCount += fallbackRemainingBatches(batches, i, candidatesByArticle);
-      break;
-    }
-
-    const wave = batches.slice(i, i + LLM_WAVE_SIZE);
-    const waveResults = await Promise.all(
-      wave.map((batch) =>
-        extractEntitiesBatch(sql, budgetUsd, batch.map((article, j) => ({ index: j, title: article.title, summary: article.summary }))),
-      ),
-    );
-    llmArticleCount += applyWaveResults(wave, waveResults, candidatesByArticle, relationsByArticle);
-  }
-
-  if (fallbackCount > 0) {
-    console.warn(`processNewArticles: LLM wall-clock deadline exceeded, ${fallbackCount} article(s) fell back to heuristic extraction`);
-  }
-  return { candidatesByArticle, llmArticleCount, relationsByArticle };
+  for (const head of headById.values()) candidatesByArticle.set(head.id, heuristicCandidatesForArticle(head));
+  await deletePendingBatch(sql, pending.batchId);
+  return {
+    headById,
+    candidatesByArticle,
+    relationsByArticle: new Map(),
+    llmUsed: 0,
+    excludeIds: pending.articleIds,
+    stillPending: false,
+    batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes: null },
+  };
 }
 
-// isLlmConfigured() gates whether this run touches llm_usage/settings at
-// all — a deploy with no ANTHROPIC_API_KEY issues zero LLM-related queries.
-// llmDeadline threads through to extractAllWithLlm's wall-clock cutoff;
-// left undefined in production so it defaults to now + LLM_TIME_BUDGET_MS.
-async function extractAllCandidates(heads: HeadArticle[], sql: Sql, llmDeadline?: number): Promise<CandidateExtractionResult> {
-  if (!isLlmConfigured()) {
-    return { candidatesByArticle: extractAllHeuristic(heads), llmArticleCount: 0, relationsByArticle: new Map() };
+async function resolveEndedBatch(sql: Sql, pending: PendingBatch, resultsUrl: string, tally: (reason: string) => void): Promise<PendingBatchOutcome> {
+  const results = await fetchBatchResults(resultsUrl);
+  if ("reason" in results) {
+    tally(results.reason);
+    return resolveWithHeuristicFallback(sql, pending);
   }
+
+  const headById = await loadHeadsByIds(sql, pending.articleIds);
+  const candidatesByArticle = new Map<number, Candidate[] | null>();
+  const relationsByArticle = new Map<number, ExtractedRelation[]>();
+  const idsPerChunk = chunkArticles(pending.articleIds, MAX_BATCH_SIZE);
+  const llmUsed = applyBatchResults(idsPerChunk, headById, results, candidatesByArticle, relationsByArticle, tally);
+
+  await recordBatchUsage(sql, currentUtcMonth(new Date()), results.inputTokens, results.outputTokens);
+  await deletePendingBatch(sql, pending.batchId);
+
+  return {
+    headById,
+    candidatesByArticle,
+    relationsByArticle,
+    llmUsed,
+    excludeIds: pending.articleIds,
+    stillPending: false,
+    batch: { submittedArticles: 0, retrievedArticles: headById.size, pendingAgeMinutes: null },
+  };
+}
+
+// Step 1: resolve any pending batch row. isLlmConfigured() false with a
+// pending row present can't poll without a key, so it heuristic-processes
+// immediately — the one edge case where the key check happens AFTER (not
+// instead of) the pending-row read.
+async function resolvePendingBatchStage(sql: Sql, tally: (reason: string) => void): Promise<PendingBatchOutcome> {
+  const pending = await loadPendingBatch(sql);
+  if (!pending) return emptyPendingOutcome();
+
+  if (!isLlmConfigured()) {
+    tally("no_api_key_pending");
+    return resolveWithHeuristicFallback(sql, pending);
+  }
+
+  const ageMs = Date.now() - pending.submittedAt.getTime();
+  if (ageMs >= PENDING_BATCH_MAX_AGE_MS) {
+    tally("abandoned_timeout");
+    return resolveWithHeuristicFallback(sql, pending);
+  }
+
+  const pollResult = await pollBatch(pending.batchId);
+  const pendingAgeMinutes = Math.floor(ageMs / 60_000);
+  if (pollResult.status === "in_progress") {
+    return { ...emptyPendingOutcome(), excludeIds: pending.articleIds, stillPending: true, batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes } };
+  }
+  if (pollResult.status === "failed") {
+    tally(pollResult.reason);
+    return { ...emptyPendingOutcome(), excludeIds: pending.articleIds, stillPending: true, batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes } };
+  }
+  return resolveEndedBatch(sql, pending, pollResult.resultsUrl, tally);
+}
+
+// Step 2: only reached when no batch remains pending. Selects fresh
+// unprocessed heads and submits them as one new batch (budget-gated at
+// submit time); a submit failure heuristic-processes them this tick instead,
+// exactly like the old live-call failure path.
+async function submitNewBatchStage(
+  sql: Sql,
+  excludeIds: number[],
+  tally: (reason: string) => void,
+): Promise<{ headById: Map<number, HeadArticle>; candidatesByArticle: Map<number, Candidate[] | null>; submittedArticles: number }> {
+  const newHeads = await selectUnprocessedHeads(sql, excludeIds);
+  const headById = new Map(newHeads.map((h) => [h.id, h] as const));
+  if (newHeads.length === 0) return { headById, candidatesByArticle: new Map(), submittedArticles: 0 };
+  if (!isLlmConfigured()) return { headById, candidatesByArticle: extractAllHeuristic(newHeads), submittedArticles: 0 };
+
   const settings = await getSettings(sql);
-  return extractAllWithLlm(heads, sql, settings.llm_monthly_budget_usd, llmDeadline);
+  const chunks = chunkArticles(newHeads, MAX_BATCH_SIZE).map((chunk) => chunk.map((a, j) => ({ index: j, title: a.title, summary: a.summary })));
+  const submitResult = await submitBatch(sql, settings.llm_monthly_budget_usd, chunks);
+  if (!submitResult.ok) {
+    tally(submitResult.reason);
+    return { headById, candidatesByArticle: extractAllHeuristic(newHeads), submittedArticles: 0 };
+  }
+
+  await insertPendingBatch(sql, submitResult.batchId, newHeads.map((h) => h.id), new Date());
+  return { headById, candidatesByArticle: new Map(), submittedArticles: newHeads.length };
 }
 
 // The LLM month-cost read is purely informational for the ingest response —
@@ -1032,22 +1154,37 @@ async function persistCandidates(sql: Sql, sightings: CandidateSighting[]): Prom
 
 // ---- orchestrator ----
 
-export async function processNewArticles(sql: Sql, llmDeadline?: number): Promise<EntityIngestStats> {
-  const heads = await selectUnprocessedHeads(sql);
-  if (heads.length === 0) {
-    return {
-      articlesProcessed: 0,
-      mentionsWritten: 0,
-      newEntities: 0,
-      candidatesTouched: 0,
-      llm: { used: false, articles: 0, monthCostUsd: 0 },
-      entities: { autoAccepted: 0 },
-      relations: { written: 0 },
-    };
-  }
+function emptyEntityIngestStats(batch: EntityIngestStats["llm"]["batch"], failureReasons: Record<string, number>): EntityIngestStats {
+  return {
+    articlesProcessed: 0,
+    mentionsWritten: 0,
+    newEntities: 0,
+    candidatesTouched: 0,
+    llm: { used: false, articles: 0, monthCostUsd: 0, batch, failureReasons },
+    entities: { autoAccepted: 0 },
+    relations: { written: 0 },
+  };
+}
+
+export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
+  const failureReasons: Record<string, number> = {};
+  const tally = (reason: string) => {
+    failureReasons[reason] = (failureReasons[reason] ?? 0) + 1;
+  };
+
+  const pending = await resolvePendingBatchStage(sql, tally);
+  const submitted = pending.stillPending
+    ? { headById: new Map<number, HeadArticle>(), candidatesByArticle: new Map<number, Candidate[] | null>(), submittedArticles: 0 }
+    : await submitNewBatchStage(sql, pending.excludeIds, tally);
+
+  const headById = new Map([...pending.headById, ...submitted.headById]);
+  const candidatesByArticle = new Map([...pending.candidatesByArticle, ...submitted.candidatesByArticle]);
+  const batch = { ...pending.batch, submittedArticles: submitted.submittedArticles };
+
+  const heads = Array.from(candidatesByArticle.keys()).map((id) => headById.get(id)!);
+  if (heads.length === 0) return emptyEntityIngestStats(batch, failureReasons);
 
   const registry = await loadEntityRegistry(sql);
-  const { candidatesByArticle, llmArticleCount, relationsByArticle } = await extractAllCandidates(heads, sql, llmDeadline);
   const classified = classifyAll(heads, candidatesByArticle, registry);
 
   const insertedEntities = await upsertNewEntities(sql, classified.newEntities);
@@ -1059,7 +1196,7 @@ export async function processNewArticles(sql: Sql, llmDeadline?: number): Promis
   await upsertHourlyMentions(sql, rollupHourlyMentions(allMentions));
   await upsertEntityEdges(sql, rollupEntityEdges(allMentions));
   const candidatesTouched = await persistCandidates(sql, classified.candidateSightings);
-  const relationsWritten = await persistRelations(sql, registry, insertedEntities, heads, classified.processedArticleIds, relationsByArticle);
+  const relationsWritten = await persistRelations(sql, registry, insertedEntities, heads, classified.processedArticleIds, pending.relationsByArticle);
   // Marking processed is deliberately the LAST WRITE of a run: a crash
   // between the aggregate writes above and this UPDATE leaves this batch's
   // articles unmarked, so they retry next run — additive rollups (mentions,
@@ -1077,7 +1214,7 @@ export async function processNewArticles(sql: Sql, llmDeadline?: number): Promis
     mentionsWritten: allMentions.length,
     newEntities: insertedEntities.length,
     candidatesTouched,
-    llm: { used: llmArticleCount > 0, articles: llmArticleCount, monthCostUsd },
+    llm: { used: pending.llmUsed > 0, articles: pending.llmUsed, monthCostUsd, batch, failureReasons },
     entities: { autoAccepted: autoAcceptedCount },
     relations: { written: relationsWritten },
   };

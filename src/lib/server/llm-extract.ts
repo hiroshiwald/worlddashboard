@@ -3,22 +3,28 @@ import { Candidate, TypeHint, Prominence, addCandidate } from "./extract-v2";
 
 export const MODEL = "claude-haiku-4-5-20251001";
 
-const API_URL = "https://api.anthropic.com/v1/messages";
+const BATCHES_URL = "https://api.anthropic.com/v1/messages/batches";
 const ANTHROPIC_VERSION = "2023-06-01";
-const MAX_BATCH_SIZE = 25;
+export const MAX_BATCH_SIZE = 25;
 const MAX_SUMMARY_CHARS = 300;
 // Raised from 2000: the v2 schema adds a prominence field per entity and an
 // occasional relations array per article, both pushing a full 25-article
 // batch's output past the old ceiling (see DEVLOG cost note).
 const MAX_TOKENS = 4000;
-// A batch slower than this isn't worth waiting for under the 60s Vercel
-// function ceiling — its articles just fall back to heuristics this run.
+// Submit/poll/results-fetch are each bounded by this — one Vercel function
+// invocation makes at most one of these three calls per tick, so their sum
+// stays well inside the 60s ceiling regardless of which one runs.
 export const REQUEST_TIMEOUT_MS = 12_000;
 
-// Haiku 4.5 pricing as of writing, USD per million tokens — verify against
-// https://www.anthropic.com/pricing before changing either constant.
+// Haiku 4.5 live-call pricing as of writing, USD per million tokens — verify
+// against https://www.anthropic.com/pricing before changing either constant.
 const INPUT_USD_PER_MTOK = 1.0;
 const OUTPUT_USD_PER_MTOK = 5.0;
+// The Batches API bills 50% of the live per-token rate for an identical
+// request processed asynchronously — verify against
+// https://www.anthropic.com/pricing before changing either constant.
+const BATCH_INPUT_USD_PER_MTOK = 0.5;
+const BATCH_OUTPUT_USD_PER_MTOK = 2.5;
 
 // The working ontology (mirrors migrations/005_ontology_and_relations.sql's
 // entities_type_check) and the directed-relation vocabulary (mirrors that
@@ -63,24 +69,45 @@ export interface LlmMonthStats {
   month: string;
   inputTokens: number;
   outputTokens: number;
+  batchInputTokens: number;
+  batchOutputTokens: number;
   calls: number;
   costUsd: number;
 }
 
-function currentUtcMonth(now: Date): string {
+export function currentUtcMonth(now: Date): string {
   return now.toISOString().slice(0, 7); // YYYY-MM
 }
 
-export function estimateCostUsd(inputTokens: number, outputTokens: number): number {
-  return (inputTokens / 1_000_000) * INPUT_USD_PER_MTOK + (outputTokens / 1_000_000) * OUTPUT_USD_PER_MTOK;
+// Live tokens (August's already-recorded spend) price at the live rate;
+// batch tokens (everything recorded going forward) price at half that —
+// kept as separate arguments/columns so repricing the batch rate can never
+// silently reprice already-recorded live spend.
+export function estimateCostUsd(inputTokens: number, outputTokens: number, batchInputTokens = 0, batchOutputTokens = 0): number {
+  return (
+    (inputTokens / 1_000_000) * INPUT_USD_PER_MTOK +
+    (outputTokens / 1_000_000) * OUTPUT_USD_PER_MTOK +
+    (batchInputTokens / 1_000_000) * BATCH_INPUT_USD_PER_MTOK +
+    (batchOutputTokens / 1_000_000) * BATCH_OUTPUT_USD_PER_MTOK
+  );
 }
 
-async function loadMonthUsage(sql: Sql, month: string): Promise<{ inputTokens: number; outputTokens: number; calls: number }> {
-  const rows = await sql`SELECT input_tokens, output_tokens, calls FROM llm_usage WHERE month = ${month}`;
-  if (rows.length === 0) return { inputTokens: 0, outputTokens: 0, calls: 0 };
+interface MonthUsage {
+  inputTokens: number;
+  outputTokens: number;
+  batchInputTokens: number;
+  batchOutputTokens: number;
+  calls: number;
+}
+
+async function loadMonthUsage(sql: Sql, month: string): Promise<MonthUsage> {
+  const rows = await sql`SELECT input_tokens, output_tokens, batch_input_tokens, batch_output_tokens, calls FROM llm_usage WHERE month = ${month}`;
+  if (rows.length === 0) return { inputTokens: 0, outputTokens: 0, batchInputTokens: 0, batchOutputTokens: 0, calls: 0 };
   return {
     inputTokens: Number(rows[0].input_tokens),
     outputTokens: Number(rows[0].output_tokens),
+    batchInputTokens: Number(rows[0].batch_input_tokens),
+    batchOutputTokens: Number(rows[0].batch_output_tokens),
     calls: Number(rows[0].calls),
   };
 }
@@ -89,17 +116,26 @@ async function loadMonthUsage(sql: Sql, month: string): Promise<{ inputTokens: n
 export async function getLlmMonthStats(sql: Sql, now: Date = new Date()): Promise<LlmMonthStats> {
   const month = currentUtcMonth(now);
   const usage = await loadMonthUsage(sql, month);
-  return { month, ...usage, costUsd: estimateCostUsd(usage.inputTokens, usage.outputTokens) };
+  return {
+    month,
+    ...usage,
+    costUsd: estimateCostUsd(usage.inputTokens, usage.outputTokens, usage.batchInputTokens, usage.batchOutputTokens),
+  };
 }
 
-async function recordUsage(sql: Sql, month: string, inputTokens: number, outputTokens: number): Promise<void> {
+/** Records a batch's retrieved usage against the month it's recorded in
+ * (not necessarily the month it was submitted in, near a UTC month
+ * boundary). All future usage is batch usage — the legacy input_tokens/
+ * output_tokens columns are left untouched (they carry August's live
+ * spend). */
+export async function recordBatchUsage(sql: Sql, month: string, inputTokens: number, outputTokens: number): Promise<void> {
   await sql`
-    INSERT INTO llm_usage (month, input_tokens, output_tokens, calls)
-    VALUES (${month}, ${inputTokens}, ${outputTokens}, 1)
+    INSERT INTO llm_usage (month, input_tokens, output_tokens, calls, batch_input_tokens, batch_output_tokens)
+    VALUES (${month}, 0, 0, 1, ${inputTokens}, ${outputTokens})
     ON CONFLICT (month) DO UPDATE SET
-      input_tokens = llm_usage.input_tokens + EXCLUDED.input_tokens,
-      output_tokens = llm_usage.output_tokens + EXCLUDED.output_tokens,
-      calls = llm_usage.calls + EXCLUDED.calls
+      calls = llm_usage.calls + EXCLUDED.calls,
+      batch_input_tokens = llm_usage.batch_input_tokens + EXCLUDED.batch_input_tokens,
+      batch_output_tokens = llm_usage.batch_output_tokens + EXCLUDED.batch_output_tokens
   `;
 }
 
@@ -113,41 +149,65 @@ function buildUserMessage(articles: ArticleInput[]): string {
   return articles.map((a) => `[${a.index}] ${a.title} — ${truncateSummary(a.summary)}`).join("\n");
 }
 
+function buildRequestParams(articles: ArticleInput[]): Record<string, unknown> {
+  return {
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: "user", content: buildUserMessage(articles) }],
+  };
+}
+
 interface AnthropicMessageResponse {
   content: { type: string; text?: string }[];
   usage: { input_tokens: number; output_tokens: number };
 }
 
-// No retries by design: the next hourly ingest run is the retry. Any
-// failure (network, timeout, non-2xx) is logged and swallowed here so a
-// flaky LLM call can never fail the ingest.
-async function callAnthropic(userMessage: string): Promise<AnthropicMessageResponse | null> {
+// ---- transport: bounded fetch, never throws to its caller ----
+
+interface FetchOutcome<T> {
+  data: T | null;
+  httpStatus?: number;
+  networkError?: boolean;
+}
+
+function anthropicHeaders(): Record<string, string> {
+  return {
+    "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+    "anthropic-version": ANTHROPIC_VERSION,
+    "content-type": "application/json",
+  };
+}
+
+async function fetchJsonWithTimeout<T>(url: string, init: RequestInit): Promise<FetchOutcome<T>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: {
-        "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-        "anthropic-version": ANTHROPIC_VERSION,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userMessage }],
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      console.warn(`llm-extract: request failed with status ${res.status}`);
-      return null;
-    }
-    return (await res.json()) as AnthropicMessageResponse;
-  } catch (err) {
-    console.warn("llm-extract: request threw", err instanceof Error ? err.message : String(err));
-    return null;
+    const res = await fetch(url, { ...init, headers: anthropicHeaders(), signal: controller.signal });
+    if (!res.ok) return { data: null, httpStatus: res.status };
+    return { data: (await res.json()) as T };
+  } catch {
+    return { data: null, networkError: true };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+interface FetchTextOutcome {
+  text: string | null;
+  httpStatus?: number;
+  networkError?: boolean;
+}
+
+async function fetchTextWithTimeout(url: string, init: RequestInit): Promise<FetchTextOutcome> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { ...init, headers: anthropicHeaders(), signal: controller.signal });
+    if (!res.ok) return { text: null, httpStatus: res.status };
+    return { text: await res.text() };
+  } catch {
+    return { text: null, networkError: true };
   } finally {
     clearTimeout(timer);
   }
@@ -168,7 +228,8 @@ function extractResponseText(response: AnthropicMessageResponse): string {
   return block?.text ?? "";
 }
 
-// ---- defensive parsing ----
+// ---- defensive parsing (unchanged from the live-call shape: a batch
+// result's "message" field is byte-identical to a live /v1/messages response) ----
 
 // "place" is accepted only as a legacy fallback (mapped onto "region" by
 // TYPE_MAP below) in case the model drifts back to the pre-v2 vocabulary —
@@ -213,7 +274,7 @@ export interface ExtractedRelation {
 // source/target exactly match a name in this same article's parsed entities
 // list (the system prompt asks for this; re-checked here defensively).
 // Returns the count dropped specifically for an unrecognized relation type,
-// so the caller can warn once per batch instead of once per relation.
+// so the caller can warn once per article-batch instead of once per relation.
 function parseRawRelations(raw: unknown, entityNames: Set<string>): { relations: ExtractedRelation[]; unknownTypeDrops: number } {
   if (!Array.isArray(raw)) return { relations: [], unknownTypeDrops: 0 };
 
@@ -265,11 +326,11 @@ function extractJsonArrayText(text: string): string | null {
   return text.slice(start, end + 1);
 }
 
-/** Validates shape per article; returns null only when the whole batch is
- * unparseable (not valid JSON, or not a top-level array) — one malformed
- * article entry inside an otherwise-valid array is just skipped. Warns once
- * with the total count of relations dropped for an unrecognized relation
- * type across the whole batch. */
+/** Validates shape per article; returns null only when the whole chunk's
+ * output is unparseable (not valid JSON, or not a top-level array) — one
+ * malformed article entry inside an otherwise-valid array is just skipped.
+ * Warns once with the total count of relations dropped for an unrecognized
+ * relation type across the whole chunk. */
 function parseModelOutput(text: string): RawArticleResult[] | null {
   const jsonText = extractJsonArrayText(text);
   if (!jsonText) return null;
@@ -326,66 +387,14 @@ function buildCandidates(entities: RawEntity[]): Candidate[] {
   return Array.from(map.values());
 }
 
-// ---- public API ----
-
-export interface LlmExtractionResult {
+export interface ChunkExtractionResult {
   candidates: Map<number, Candidate[]>;
   relations: Map<number, ExtractedRelation[]>;
 }
 
-/** One Anthropic API call for a batch of up to 25 articles. Budget-gated:
- * reads llm_usage for the current UTC month before calling and skips
- * (returns null, warns) if the month's estimated cost is already at/over
- * budgetUsd. Any failure — budget, network, timeout, malformed response —
- * returns null so the caller falls back to heuristic extraction for this
- * batch; an LLM failure must never fail the ingest. */
-export async function extractEntitiesBatch(
-  sql: Sql,
-  budgetUsd: number,
-  articles: ArticleInput[],
-): Promise<LlmExtractionResult | null> {
-  if (articles.length === 0) return { candidates: new Map(), relations: new Map() };
-  if (articles.length > MAX_BATCH_SIZE) {
-    console.warn(`llm-extract: batch of ${articles.length} exceeds max ${MAX_BATCH_SIZE}, refusing to call`);
-    return null;
-  }
-
-  const now = new Date();
-  const month = currentUtcMonth(now);
-  let before: { inputTokens: number; outputTokens: number; calls: number };
-  try {
-    before = await loadMonthUsage(sql, month);
-  } catch (err) {
-    console.warn("llm-extract: failed to read monthly usage, skipping LLM extraction for this batch", err);
-    return null;
-  }
-  const spentUsd = estimateCostUsd(before.inputTokens, before.outputTokens);
-  if (spentUsd >= budgetUsd) {
-    console.warn(`llm-extract: monthly budget reached ($${spentUsd.toFixed(2)} >= $${budgetUsd}), skipping LLM extraction`);
-    return null;
-  }
-
-  const response = await callAnthropic(buildUserMessage(articles));
-  if (!response) return null;
-
-  const usage = extractUsage(response);
-  try {
-    await recordUsage(sql, month, usage.inputTokens, usage.outputTokens);
-  } catch (err) {
-    // The extraction itself succeeded (and was already paid for) — a ledger
-    // write hiccup must not discard already-good article results, and must
-    // never propagate: under concurrent wave dispatch (entity-ingest.ts), an
-    // uncaught rejection here would fail Promise.all and discard this call's
-    // already-completed siblings too.
-    console.warn("llm-extract: failed to record usage after a successful call", err);
-  }
-
-  const parsed = parseModelOutput(extractResponseText(response));
-  if (!parsed) {
-    console.warn("llm-extract: response was not parseable JSON, falling back to heuristics for this batch");
-    return null;
-  }
-
+function parseChunkMessage(message: AnthropicMessageResponse): ChunkExtractionResult | null {
+  const parsed = parseModelOutput(extractResponseText(message));
+  if (!parsed) return null;
   const candidates = new Map<number, Candidate[]>();
   const relations = new Map<number, ExtractedRelation[]>();
   for (const { index, entities, relations: articleRelations } of parsed) {
@@ -393,4 +402,168 @@ export async function extractEntitiesBatch(
     relations.set(index, articleRelations);
   }
   return { candidates, relations };
+}
+
+// ---- submit ----
+
+interface AnthropicBatchSubmitResponse {
+  id: string;
+  processing_status: string;
+}
+
+async function submitBatchRequest(chunks: ArticleInput[][]): Promise<FetchOutcome<AnthropicBatchSubmitResponse>> {
+  const body = { requests: chunks.map((chunk, i) => ({ custom_id: String(i), params: buildRequestParams(chunk) })) };
+  return fetchJsonWithTimeout<AnthropicBatchSubmitResponse>(BATCHES_URL, { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Submits one Batches API call covering every chunk (one request per
+ * chunk, custom_id = chunk index — keeps the 25-article packing so the
+ * system prompt is billed once per chunk, not once per article). Budget-
+ * gated the same way the old live call was: reads llm_usage for the
+ * current UTC month before submitting and refuses (returns a reason,
+ * never throws) if the month's estimated cost is already at/over
+ * budgetUsd. Any failure reason is a low-cardinality, credential-free
+ * string — see EntityIngestStats.llm.failureReasons. */
+export async function submitBatch(sql: Sql, budgetUsd: number, chunks: ArticleInput[][]): Promise<{ ok: true; batchId: string } | { ok: false; reason: string }> {
+  for (const chunk of chunks) {
+    if (chunk.length > MAX_BATCH_SIZE) {
+      console.warn(`llm-extract: chunk of ${chunk.length} exceeds max ${MAX_BATCH_SIZE}, refusing to submit`);
+      return { ok: false, reason: "chunk_too_large" };
+    }
+  }
+
+  const month = currentUtcMonth(new Date());
+  let usage: MonthUsage;
+  try {
+    usage = await loadMonthUsage(sql, month);
+  } catch (err) {
+    console.warn("llm-extract: failed to read monthly usage, skipping batch submission", err);
+    return { ok: false, reason: "usage_read_failed" };
+  }
+  const spentUsd = estimateCostUsd(usage.inputTokens, usage.outputTokens, usage.batchInputTokens, usage.batchOutputTokens);
+  if (spentUsd >= budgetUsd) {
+    console.warn(`llm-extract: monthly budget reached ($${spentUsd.toFixed(2)} >= $${budgetUsd}), skipping batch submission`);
+    return { ok: false, reason: "budget_gate" };
+  }
+
+  const outcome = await submitBatchRequest(chunks);
+  if (outcome.networkError) {
+    console.warn("llm-extract: batch submit request threw");
+    return { ok: false, reason: "submit_network_error" };
+  }
+  if (outcome.httpStatus !== undefined) {
+    console.warn(`llm-extract: batch submit failed with status ${outcome.httpStatus}`);
+    return { ok: false, reason: `submit_http_${outcome.httpStatus}` };
+  }
+  if (!outcome.data?.id) {
+    console.warn("llm-extract: batch submit response missing id");
+    return { ok: false, reason: "submit_malformed_response" };
+  }
+  return { ok: true, batchId: outcome.data.id };
+}
+
+// ---- poll ----
+
+interface AnthropicBatchStatus {
+  id: string;
+  processing_status: "in_progress" | "canceling" | "ended";
+  results_url?: string | null;
+}
+
+async function pollBatchRequest(batchId: string): Promise<FetchOutcome<AnthropicBatchStatus>> {
+  return fetchJsonWithTimeout<AnthropicBatchStatus>(`${BATCHES_URL}/${batchId}`, { method: "GET" });
+}
+
+export type BatchPollResult = { status: "in_progress" } | { status: "ended"; resultsUrl: string } | { status: "failed"; reason: string };
+
+/** "canceling" is treated as still in-flight, not ended — a canceling
+ * batch still eventually produces a results_url once it lands on "ended". */
+export async function pollBatch(batchId: string): Promise<BatchPollResult> {
+  const outcome = await pollBatchRequest(batchId);
+  if (outcome.networkError) return { status: "failed", reason: "poll_network_error" };
+  if (outcome.httpStatus !== undefined) return { status: "failed", reason: `poll_http_${outcome.httpStatus}` };
+  if (!outcome.data) return { status: "failed", reason: "poll_malformed_response" };
+  if (outcome.data.processing_status !== "ended") return { status: "in_progress" };
+  if (!outcome.data.results_url) return { status: "failed", reason: "ended_no_results_url" };
+  return { status: "ended", resultsUrl: outcome.data.results_url };
+}
+
+// ---- results ----
+
+export interface BatchResults {
+  byChunk: Map<number, ChunkExtractionResult>;
+  chunkFailures: Map<number, "errored" | "canceled" | "expired" | "malformed">;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+interface ParsedResultLine {
+  chunkIndex: number;
+  type: "succeeded" | "errored" | "canceled" | "expired";
+  message?: AnthropicMessageResponse;
+}
+
+function parseResultLine(line: string): ParsedResultLine | null {
+  let obj: unknown;
+  try {
+    obj = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (typeof obj !== "object" || obj === null) return null;
+  const r = obj as Record<string, unknown>;
+  const chunkIndex = Number(r.custom_id);
+  if (!Number.isInteger(chunkIndex)) return null;
+  if (typeof r.result !== "object" || r.result === null) return null;
+  const result = r.result as Record<string, unknown>;
+  if (typeof result.type !== "string" || !["succeeded", "errored", "canceled", "expired"].includes(result.type)) return null;
+  const type = result.type as ParsedResultLine["type"];
+  if (type === "succeeded") {
+    if (typeof result.message !== "object" || result.message === null) return null;
+    return { chunkIndex, type, message: result.message as AnthropicMessageResponse };
+  }
+  return { chunkIndex, type };
+}
+
+// Results arrive one JSON object per line, in ANY order — every line is
+// keyed by its own custom_id (chunk index), never by position.
+function parseBatchResultsText(text: string): BatchResults {
+  const byChunk = new Map<number, ChunkExtractionResult>();
+  const chunkFailures = new Map<number, "errored" | "canceled" | "expired" | "malformed">();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let malformedLines = 0;
+
+  for (const line of text.split("\n")) {
+    if (line.trim().length === 0) continue;
+    const parsed = parseResultLine(line);
+    if (!parsed) {
+      malformedLines += 1;
+      continue;
+    }
+    if (parsed.type === "succeeded" && parsed.message) {
+      const usage = extractUsage(parsed.message);
+      inputTokens += usage.inputTokens;
+      outputTokens += usage.outputTokens;
+      const chunkResult = parseChunkMessage(parsed.message);
+      if (chunkResult) byChunk.set(parsed.chunkIndex, chunkResult);
+      else chunkFailures.set(parsed.chunkIndex, "malformed");
+    } else {
+      chunkFailures.set(parsed.chunkIndex, parsed.type === "succeeded" ? "malformed" : parsed.type);
+    }
+  }
+  if (malformedLines > 0) {
+    console.warn(`llm-extract: skipped ${malformedLines} malformed result line(s)`);
+  }
+  return { byChunk, chunkFailures, inputTokens, outputTokens };
+}
+
+/** Fetches and parses a batch's results_url. Never throws — a fetch
+ * failure of any kind returns a { reason } object instead. */
+export async function fetchBatchResults(resultsUrl: string): Promise<BatchResults | { reason: string }> {
+  const outcome = await fetchTextWithTimeout(resultsUrl, { method: "GET" });
+  if (outcome.networkError) return { reason: "results_network_error" };
+  if (outcome.httpStatus !== undefined) return { reason: `results_http_${outcome.httpStatus}` };
+  if (outcome.text === null) return { reason: "results_malformed_response" };
+  return parseBatchResultsText(outcome.text);
 }

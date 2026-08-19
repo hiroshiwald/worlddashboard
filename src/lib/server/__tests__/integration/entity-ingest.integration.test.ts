@@ -161,7 +161,11 @@ describe.skipIf(!TEST_DATABASE_URL)("entity-ingest integration (real Postgres)",
       mentionsWritten: 0,
       newEntities: 0,
       candidatesTouched: 0,
-      llm: { used: false, articles: 0, monthCostUsd: 0 },
+      llm: {
+        used: false, articles: 0, monthCostUsd: 0,
+        batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes: null },
+        failureReasons: {},
+      },
       entities: { autoAccepted: 0 },
       relations: { written: 0 },
     });

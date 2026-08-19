@@ -8,12 +8,12 @@ import {
   dedupeMentions,
   chunkArticles,
 } from "../entity-ingest";
-import { isLlmConfigured, extractEntitiesBatch } from "../llm-extract";
+import { isLlmConfigured, submitBatch, pollBatch, fetchBatchResults } from "../llm-extract";
 import type { Sql, SqlRow } from "../db";
 
 // Only the "POISON" title throws; every other title delegates to the real
 // extractCandidates, so this mock doesn't change behavior for other tests —
-// it just gives FIX 5's per-article resilience test a deterministic trigger.
+// it just gives the per-article resilience test a deterministic trigger.
 vi.mock("../extract-v2", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../extract-v2")>();
   return {
@@ -27,12 +27,16 @@ vi.mock("../extract-v2", async (importOriginal) => {
 
 // Defaults every test in this file to the pre-LLM heuristic path (matching
 // this suite's original behavior, since it never sets ANTHROPIC_API_KEY);
-// the "LLM extraction path" describe block below overrides isLlmConfigured
-// per test.
+// blocks below override isLlmConfigured per test.
 vi.mock("../llm-extract", () => ({
   isLlmConfigured: vi.fn(() => false),
-  extractEntitiesBatch: vi.fn(),
-  getLlmMonthStats: vi.fn(async () => ({ month: "2026-07", inputTokens: 0, outputTokens: 0, calls: 0, costUsd: 0 })),
+  submitBatch: vi.fn(),
+  pollBatch: vi.fn(),
+  fetchBatchResults: vi.fn(),
+  recordBatchUsage: vi.fn(),
+  currentUtcMonth: vi.fn(() => "2026-07"),
+  MAX_BATCH_SIZE: 25,
+  getLlmMonthStats: vi.fn(async () => ({ month: "2026-07", inputTokens: 0, outputTokens: 0, batchInputTokens: 0, batchOutputTokens: 0, calls: 0, costUsd: 0 })),
 }));
 
 interface RecordedCall {
@@ -54,12 +58,22 @@ function findCall(calls: RecordedCall[], marker: string): RecordedCall | undefin
   return calls.find((c) => c.query.includes(marker));
 }
 
+// Every mocked-sql test in this file needs to answer "is there a pending
+// batch row?" (there isn't, by default) before it reaches the heads query —
+// this handler composes that in front of a test's own per-query routing.
+function withNoPendingBatch(handler: (call: RecordedCall) => SqlRow[]): (call: RecordedCall) => SqlRow[] {
+  return (call) => {
+    if (call.query.includes("FROM llm_batches")) return [];
+    return handler(call);
+  };
+}
+
 describe("selectUnprocessedHeads (via processNewArticles)", () => {
   it("scopes cluster heads by the entities_processed_at marker, not NOT EXISTS", async () => {
-    const { sql, calls } = makeMockSql(() => []);
+    const { sql, calls } = makeMockSql(withNoPendingBatch(() => []));
     await processNewArticles(sql);
 
-    const headsCall = calls[0];
+    const headsCall = findCall(calls, "FROM articles a")!;
     expect(headsCall.query).toContain("a.entities_processed_at IS NULL");
     expect(headsCall.query).not.toContain("NOT EXISTS");
     expect(headsCall.query).not.toContain("article_entities");
@@ -71,18 +85,18 @@ describe("selectUnprocessedHeads (via processNewArticles)", () => {
       id: "1", title: "Test", summary: "", published_at: "2026-07-15T09:00:00Z",
       first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A",
     };
-    const { sql, calls } = makeMockSql((call) => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) return [headRow];
       return [];
-    });
+    }));
     await processNewArticles(sql);
 
     const registryCall = calls.find((c) => c.query.includes("SELECT id, canonical_name, type, aliases"));
     expect(registryCall!.query).toContain("ORDER BY id ASC");
   });
 
-  it("returns zero stats and issues only the heads query when nothing is unprocessed", async () => {
-    const { sql, calls } = makeMockSql(() => []);
+  it("returns zero stats and issues only the pending-batch check and heads query when nothing is unprocessed", async () => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch(() => []));
     const stats = await processNewArticles(sql);
 
     expect(stats).toEqual({
@@ -90,11 +104,15 @@ describe("selectUnprocessedHeads (via processNewArticles)", () => {
       mentionsWritten: 0,
       newEntities: 0,
       candidatesTouched: 0,
-      llm: { used: false, articles: 0, monthCostUsd: 0 },
+      llm: {
+        used: false, articles: 0, monthCostUsd: 0,
+        batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes: null },
+        failureReasons: {},
+      },
       entities: { autoAccepted: 0 },
       relations: { written: 0 },
     });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2); // llm_batches check, then the heads query
   });
 });
 
@@ -127,8 +145,6 @@ describe("rollupHourlyMentions", () => {
   });
 
   it("buckets on effectiveAt (publish date), ignoring arrivalAt entirely", () => {
-    // Published a week ago, but all arriving today (a feed pre-load) — the
-    // bucket must land on the publish date, not today.
     const rows = rollupHourlyMentions([
       { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-08T09:00:00Z"), arrivalAt: new Date("2026-07-15T18:00:00Z"), sourceName: "A", sentiment: 0 },
     ]);
@@ -187,8 +203,6 @@ describe("rollupEntityEdges", () => {
   });
 
   it("keys first/last seen on arrivalAt (watch time), ignoring effectiveAt (news time) entirely", () => {
-    // Both articles published on the same (backdated) day, but arriving on two different days —
-    // firstSeenAt/lastSeenAt must reflect the arrival spread, not collapse to the shared publish date.
     const rows = rollupEntityEdges([
       { articleId: 1, entityId: 10, effectiveAt: new Date("2026-07-01T09:00:00Z"), arrivalAt: new Date("2026-07-14T09:00:00Z"), sourceName: "A", sentiment: 0 },
       { articleId: 1, entityId: 20, effectiveAt: new Date("2026-07-01T09:00:00Z"), arrivalAt: new Date("2026-07-14T09:00:00Z"), sourceName: "A", sentiment: 0 },
@@ -254,7 +268,7 @@ describe("rollupRelations", () => {
   it("picks the latest-arriving article as evidence, regardless of input order", () => {
     const rows = rollupRelations([
       occurrence({ articleId: 1, arrivalAt: new Date("2026-07-16T09:00:00Z") }),
-      occurrence({ articleId: 2, arrivalAt: new Date("2026-07-17T09:00:00Z") }), // latest
+      occurrence({ articleId: 2, arrivalAt: new Date("2026-07-17T09:00:00Z") }),
       occurrence({ articleId: 3, arrivalAt: new Date("2026-07-15T09:00:00Z") }),
     ]);
     expect(rows[0].evidenceArticleId).toBe(2);
@@ -349,7 +363,7 @@ describe("processNewArticles resolution order and idempotency", () => {
   };
 
   it("resolves a dismissed registry entity as a normal mention and writes no candidate for it", async () => {
-    const { sql, calls } = makeMockSql((call) => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) return [headRow];
       if (call.query.includes("SELECT id, canonical_name, type, aliases")) {
         return [{ id: "99", canonical_name: "Kestrel Basin", type: "region", aliases: [], status: "dismissed" }];
@@ -357,7 +371,7 @@ describe("processNewArticles resolution order and idempotency", () => {
       if (call.query.includes("INSERT INTO entities")) return [];
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
 
     const stats = await processNewArticles(sql);
 
@@ -376,7 +390,7 @@ describe("processNewArticles resolution order and idempotency", () => {
   });
 
   it("counts one mention, not two, when an article's text matches two aliases of the same entity", async () => {
-    const { sql, calls } = makeMockSql((call) => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) {
         return [{ ...headRow, title: "Kestrel Basin, also known as Kestrel Valley, saw new activity today.", summary: "" }];
       }
@@ -386,7 +400,7 @@ describe("processNewArticles resolution order and idempotency", () => {
       if (call.query.includes("INSERT INTO entities")) return [];
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
 
     const stats = await processNewArticles(sql);
     expect(stats.mentionsWritten).toBe(1);
@@ -401,7 +415,7 @@ describe("processNewArticles resolution order and idempotency", () => {
   });
 
   it("creates a new entity for a first-time dictionary hit and links article_entities to its returned id", async () => {
-    const { sql, calls } = makeMockSql((call) => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) {
         return [{ ...headRow, title: "Russia announces new policy.", summary: "" }];
       }
@@ -411,7 +425,7 @@ describe("processNewArticles resolution order and idempotency", () => {
       }
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
 
     const stats = await processNewArticles(sql);
     expect(stats.newEntities).toBe(1);
@@ -421,7 +435,7 @@ describe("processNewArticles resolution order and idempotency", () => {
   });
 
   it("accumulates an unresolved candidate that matches neither the registry nor a dictionary", async () => {
-    const { sql, calls } = makeMockSql((call) => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) {
         return [{ ...headRow, title: "Jonas Kestrel toured the facility today.", summary: "" }];
       }
@@ -429,7 +443,7 @@ describe("processNewArticles resolution order and idempotency", () => {
       if (call.query.includes("INSERT INTO entities")) return [];
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
 
     const stats = await processNewArticles(sql);
     expect(stats.candidatesTouched).toBeGreaterThan(0);
@@ -447,7 +461,7 @@ describe("review fix-pack: processed marker, last_seen_at bump, per-article resi
       id: "1", title: "Russia and China sign new trade deal.", summary: "",
       published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A",
     };
-    const { sql, calls } = makeMockSql((call) => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) return [headRow];
       if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
       if (call.query.includes("INSERT INTO entities")) {
@@ -455,7 +469,7 @@ describe("review fix-pack: processed marker, last_seen_at bump, per-article resi
       }
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
 
     await processNewArticles(sql);
 
@@ -473,7 +487,7 @@ describe("review fix-pack: processed marker, last_seen_at bump, per-article resi
       id: "2", title: "Russia responds to sanctions pressure.", summary: "",
       published_at: "2026-07-15T14:00:00Z", first_seen_at: "2026-07-15T14:00:00Z", source_name: "Source B",
     };
-    const { sql, calls } = makeMockSql((call) => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) return [article1, article2];
       if (call.query.includes("SELECT id, canonical_name, type, aliases")) {
         return [{ id: "7", canonical_name: "Russia", type: "country", aliases: [] }];
@@ -481,7 +495,7 @@ describe("review fix-pack: processed marker, last_seen_at bump, per-article resi
       if (call.query.includes("INSERT INTO entities")) return [];
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
 
     await processNewArticles(sql);
 
@@ -501,13 +515,13 @@ describe("review fix-pack: processed marker, last_seen_at bump, per-article resi
       published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source B",
     };
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    const { sql, calls } = makeMockSql((call) => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) return [poisonArticle, goodArticle];
       if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
       if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
 
     const stats = await processNewArticles(sql);
 
@@ -537,7 +551,7 @@ describe("chunkArticles", () => {
   });
 });
 
-describe("LLM extraction path (entity-ingest wiring)", () => {
+describe("no pending batch, LLM configured: submitting a new batch", () => {
   const headRow = {
     id: "1",
     title: "Firstname Lastname met officials in Iran today.",
@@ -553,98 +567,128 @@ describe("LLM extraction path (entity-ingest wiring)", () => {
 
   afterEach(() => {
     vi.mocked(isLlmConfigured).mockReturnValue(false);
-    vi.mocked(extractEntitiesBatch).mockReset();
+    vi.mocked(submitBatch).mockReset();
   });
 
-  it("unions a successful LLM result with the dictionary layer only, threading roleContext into contexts and same-article resolutions into co_entities", async () => {
-    vi.mocked(extractEntitiesBatch).mockResolvedValue({
-      candidates: new Map([
-        [
-          0,
-          [
-            {
-              display: "Firstname Lastname",
-              norm: "firstname lastname",
-              typeHint: "person" as const,
-              layer: "llm" as const,
-              roleContext: "former IRGC commander",
-              prominence: "known" as const,
-            },
-          ],
-        ],
-      ]),
-      relations: new Map(),
-    });
-    const { sql, calls } = makeMockSql((call) => {
+  it("submits a batch and processes nothing this tick — no candidates/relations/mentions written for the submitted heads", async () => {
+    vi.mocked(submitBatch).mockResolvedValue({ ok: true, batchId: "batch_1" });
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) return [headRow];
-      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
-      if (call.query.includes("INSERT INTO entities")) return [{ id: "1", canonical_name: "Iran" }];
-      if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
 
     const stats = await processNewArticles(sql);
 
-    expect(stats.llm).toEqual({ used: true, articles: 1, monthCostUsd: 0 });
-    expect(stats.newEntities).toBe(1); // Iran, via the dictionary layer union
-
-    const candidatesUpsertCall = findCall(calls, "INSERT INTO entity_candidates");
-    expect(candidatesUpsertCall).toBeDefined();
-    const payload = JSON.parse(candidatesUpsertCall!.values[0] as string) as {
-      name_norm: string;
-      contexts: string[];
-      co_entities: string[];
-    }[];
-    const person = payload.find((p) => p.name_norm === "firstname lastname");
-    expect(person).toBeDefined();
-    expect(person!.contexts).toEqual(["former IRGC commander"]);
-    expect(person!.co_entities).toEqual(["Iran"]);
+    expect(stats.articlesProcessed).toBe(0);
+    expect(stats.llm.batch).toEqual({ submittedArticles: 1, retrievedArticles: 0, pendingAgeMinutes: null });
+    expect(findCall(calls, "INSERT INTO article_entities")).toBeUndefined();
+    const insertBatchCall = findCall(calls, "INSERT INTO llm_batches");
+    expect(insertBatchCall).toBeDefined();
+    expect(insertBatchCall!.values).toEqual(["batch_1", expect.any(String), [1]]);
   });
 
-  it("falls back to the full heuristic stack for an article whose batch returned null", async () => {
-    vi.mocked(extractEntitiesBatch).mockResolvedValue(null);
+  it("falls back to heuristic extraction this tick on a submit failure, tallying the reason", async () => {
+    vi.mocked(submitBatch).mockResolvedValue({ ok: false, reason: "submit_http_529" });
     const russiaHead = { ...headRow, title: "Russia announces new policy." };
-    const { sql } = makeMockSql((call) => {
+    const { sql } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) return [russiaHead];
       if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
       if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
 
     const stats = await processNewArticles(sql);
 
     expect(stats.newEntities).toBe(1); // Russia still resolves via the heuristic dictionary layer
-    expect(stats.llm).toEqual({ used: false, articles: 0, monthCostUsd: 0 });
+    expect(stats.llm.used).toBe(false);
+    expect(stats.llm.failureReasons).toEqual({ submit_http_529: 1 });
   });
 
-  it("issues zero LLM-related queries when isLlmConfigured() is false", async () => {
-    vi.mocked(isLlmConfigured).mockReturnValue(false);
+  it("does not submit when the budget gate blocks it, falling back to heuristics", async () => {
+    vi.mocked(submitBatch).mockResolvedValue({ ok: false, reason: "budget_gate" });
     const russiaHead = { ...headRow, title: "Russia announces new policy." };
-    const { sql, calls } = makeMockSql((call) => {
+    const { sql } = makeMockSql(withNoPendingBatch((call) => {
       if (call.query.includes("FROM articles a")) return [russiaHead];
       if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
       if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
-    });
+    }));
+
+    const stats = await processNewArticles(sql);
+    expect(stats.newEntities).toBe(1);
+    expect(stats.llm.failureReasons).toEqual({ budget_gate: 1 });
+  });
+
+  it("issues zero LLM-related queries (llm_usage/settings) when isLlmConfigured() is false, still checking for a pending batch", async () => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    const russiaHead = { ...headRow, title: "Russia announces new policy." };
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
+      if (call.query.includes("FROM articles a")) return [russiaHead];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    }));
 
     await processNewArticles(sql);
 
-    expect(extractEntitiesBatch).not.toHaveBeenCalled();
+    expect(submitBatch).not.toHaveBeenCalled();
     expect(calls.some((c) => c.query.includes("llm_usage"))).toBe(false);
     expect(calls.some((c) => c.query.includes("FROM settings"))).toBe(false);
+    expect(calls.some((c) => c.query.includes("FROM llm_batches"))).toBe(true);
   });
 });
 
-describe("famous-entity auto-accept and relations persistence (entity-ingest wiring)", () => {
-  const headRow = {
-    id: "1",
-    title: "Hyundai announces new plans today.",
-    summary: "",
-    published_at: "2026-07-15T09:00:00Z",
-    first_seen_at: "2026-07-15T09:00:00Z",
-    source_name: "Source A",
+describe("pending batch: still in_progress", () => {
+  beforeEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    vi.mocked(pollBatch).mockReset();
+    vi.mocked(submitBatch).mockReset();
+  });
+
+  it("leaves the pending row's articles unselected this tick, skips submitting a new batch, and reports pendingAgeMinutes", async () => {
+    vi.mocked(pollBatch).mockResolvedValue({ status: "in_progress" });
+    const submittedAt = new Date(Date.now() - 12 * 60_000).toISOString();
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "batch_1", submitted_at: submittedAt, article_ids: ["1", "2"] }];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.articlesProcessed).toBe(0);
+    expect(stats.llm.batch.pendingAgeMinutes).toBeGreaterThanOrEqual(11);
+    expect(stats.llm.batch.pendingAgeMinutes).toBeLessThanOrEqual(13);
+    expect(submitBatch).not.toHaveBeenCalled();
+    // Step 2 (select+submit) is skipped entirely while a batch remains pending.
+    expect(calls.some((c) => c.query.includes("FROM articles a"))).toBe(false);
+  });
+
+  it("a poll failure also leaves the batch pending (status unknown) rather than resubmitting", async () => {
+    vi.mocked(pollBatch).mockResolvedValue({ status: "failed", reason: "poll_http_500" });
+    const submittedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "batch_1", submitted_at: submittedAt, article_ids: ["1"] }];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.llm.failureReasons).toEqual({ poll_http_500: 1 });
+    expect(submitBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe("pending batch: abandoned after 6h", () => {
+  const pendingHead = {
+    id: "1", title: "Russia announces new policy.", summary: "",
+    published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A",
   };
 
   beforeEach(() => {
@@ -653,20 +697,41 @@ describe("famous-entity auto-accept and relations persistence (entity-ingest wir
 
   afterEach(() => {
     vi.mocked(isLlmConfigured).mockReturnValue(false);
-    vi.mocked(extractEntitiesBatch).mockReset();
+    vi.mocked(pollBatch).mockReset();
   });
 
-  it("auto-accepts an unresolved 'famous' LLM candidate straight into entities as tracked, skipping entity_candidates", async () => {
-    vi.mocked(extractEntitiesBatch).mockResolvedValue({
-      candidates: new Map([
-        [0, [{ display: "Hyundai", norm: "hyundai", typeHint: "company" as const, layer: "llm" as const, prominence: "famous" as const }]],
-      ]),
-      relations: new Map(),
-    });
+  it("heuristic-processes the pending articles without polling, tallies abandoned_timeout, and deletes the row", async () => {
+    const submittedAt = new Date(Date.now() - 7 * 60 * 60_000).toISOString(); // 7h old
     const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("FROM articles a")) return [headRow];
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "batch_1", submitted_at: submittedAt, article_ids: ["1"] }];
+      if (call.query.includes("FROM articles a") && !call.query.includes("dup_group_id")) return [pendingHead];
       if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
-      if (call.query.includes("INSERT INTO entities")) return [{ id: "9", canonical_name: "Hyundai" }];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(pollBatch).not.toHaveBeenCalled();
+    expect(stats.newEntities).toBe(1); // heuristic dictionary layer still resolves Russia
+    expect(stats.llm.used).toBe(false);
+    expect(stats.llm.failureReasons).toEqual({ abandoned_timeout: 1 });
+    expect(findCall(calls, "DELETE FROM llm_batches")).toBeDefined();
+  });
+});
+
+describe("pending batch: isLlmConfigured() false with a row present", () => {
+  it("heuristic-processes the pending articles immediately (cannot poll without a key) and deletes the row", async () => {
+    const pendingHead = {
+      id: "1", title: "Russia announces new policy.", summary: "",
+      published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A",
+    };
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "batch_1", submitted_at: new Date().toISOString(), article_ids: ["1"] }];
+      if (call.query.includes("FROM articles a") && !call.query.includes("dup_group_id")) return [pendingHead];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
       if (call.query.includes("SELECT name_norm")) return [];
       return [];
     });
@@ -674,141 +739,21 @@ describe("famous-entity auto-accept and relations persistence (entity-ingest wir
     const stats = await processNewArticles(sql);
 
     expect(stats.newEntities).toBe(1);
-    expect(stats.entities.autoAccepted).toBe(1);
-    expect(stats.candidatesTouched).toBe(0);
-
-    const insertCall = findCall(calls, "INSERT INTO entities");
-    expect(insertCall!.values[0]).toEqual(["Hyundai"]);
-    expect(insertCall!.values[1]).toEqual(["company"]);
-    expect(findCall(calls, "INSERT INTO entity_candidates")).toBeUndefined();
-  });
-
-  it("keeps a 'known' or 'obscure' LLM candidate in the review queue instead of auto-accepting it", async () => {
-    vi.mocked(extractEntitiesBatch).mockResolvedValue({
-      candidates: new Map([
-        [0, [{ display: "Someone Regional", norm: "someone regional", typeHint: "person" as const, layer: "llm" as const, prominence: "obscure" as const }]],
-      ]),
-      relations: new Map(),
-    });
-    const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("FROM articles a")) return [headRow];
-      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
-      if (call.query.includes("INSERT INTO entities")) return [];
-      if (call.query.includes("SELECT name_norm")) return [];
-      return [];
-    });
-
-    const stats = await processNewArticles(sql);
-
-    expect(stats.entities.autoAccepted).toBe(0);
-    expect(stats.newEntities).toBe(0);
-    expect(stats.candidatesTouched).toBe(1);
-    const payload = JSON.parse(findCall(calls, "INSERT INTO entity_candidates")!.values[0] as string);
-    expect(payload.some((p: { name_norm: string }) => p.name_norm === "someone regional")).toBe(true);
-  });
-
-  it("persists a relation once both endpoints resolve in the same run, including same-run famous auto-accepts", async () => {
-    vi.mocked(extractEntitiesBatch).mockResolvedValue({
-      candidates: new Map([
-        [0, [
-          { display: "Hyundai", norm: "hyundai", typeHint: "company" as const, layer: "llm" as const, prominence: "famous" as const },
-          { display: "Boston Dynamics", norm: "boston dynamics", typeHint: "company" as const, layer: "llm" as const, prominence: "famous" as const },
-        ]],
-      ]),
-      relations: new Map([[0, [{ source: "Hyundai", target: "Boston Dynamics", relation: "acquisition" as const }]]]),
-    });
-    const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("FROM articles a")) return [headRow];
-      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
-      if (call.query.includes("INSERT INTO entities")) {
-        return [{ id: "9", canonical_name: "Hyundai" }, { id: "10", canonical_name: "Boston Dynamics" }];
-      }
-      if (call.query.includes("SELECT name_norm")) return [];
-      return [];
-    });
-
-    const stats = await processNewArticles(sql);
-
-    expect(stats.entities.autoAccepted).toBe(2);
-    expect(stats.relations.written).toBe(1);
-    const relationsInsertCall = findCall(calls, "INSERT INTO entity_relations");
-    expect(relationsInsertCall).toBeDefined();
-    expect(relationsInsertCall!.values[0]).toEqual([9]);
-    expect(relationsInsertCall!.values[1]).toEqual([10]);
-    expect(relationsInsertCall!.values[2]).toEqual(["acquisition"]);
-  });
-
-  it("drops a relation this run when one endpoint doesn't resolve, but still auto-accepts the resolved endpoint", async () => {
-    vi.mocked(extractEntitiesBatch).mockResolvedValue({
-      candidates: new Map([
-        [0, [
-          { display: "Hyundai", norm: "hyundai", typeHint: "company" as const, layer: "llm" as const, prominence: "famous" as const },
-          { display: "Boston Dynamics", norm: "boston dynamics", typeHint: "company" as const, layer: "llm" as const, prominence: "obscure" as const },
-        ]],
-      ]),
-      relations: new Map([[0, [{ source: "Hyundai", target: "Boston Dynamics", relation: "acquisition" as const }]]]),
-    });
-    const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("FROM articles a")) return [headRow];
-      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
-      if (call.query.includes("INSERT INTO entities")) return [{ id: "9", canonical_name: "Hyundai" }];
-      if (call.query.includes("SELECT name_norm")) return [];
-      return [];
-    });
-
-    const stats = await processNewArticles(sql);
-
-    expect(stats.entities.autoAccepted).toBe(1);
-    expect(stats.relations.written).toBe(0);
-    expect(findCall(calls, "INSERT INTO entity_relations")).toBeUndefined();
-  });
-
-  it("drops a degenerate self-relation when both endpoints resolve to the same entity via alias overlap", async () => {
-    vi.mocked(extractEntitiesBatch).mockResolvedValue({
-      candidates: new Map([
-        [0, [
-          { display: "Hyundai", norm: "hyundai", typeHint: "company" as const, layer: "llm" as const, prominence: "known" as const },
-          { display: "Hyundai Motor Group", norm: "hyundai motor group", typeHint: "company" as const, layer: "llm" as const, prominence: "known" as const },
-        ]],
-      ]),
-      relations: new Map([[0, [{ source: "Hyundai", target: "Hyundai Motor Group", relation: "partnership" as const }]]]),
-    });
-    const { sql, calls } = makeMockSql((call) => {
-      if (call.query.includes("FROM articles a")) return [headRow];
-      if (call.query.includes("SELECT id, canonical_name, type, aliases")) {
-        return [{ id: "50", canonical_name: "Hyundai Motor Group", type: "company", aliases: ["Hyundai"] }];
-      }
-      if (call.query.includes("INSERT INTO entities")) return [];
-      if (call.query.includes("SELECT name_norm")) return [];
-      return [];
-    });
-
-    const stats = await processNewArticles(sql);
-
-    expect(stats.relations.written).toBe(0);
-    expect(findCall(calls, "INSERT INTO entity_relations")).toBeUndefined();
+    expect(stats.llm.failureReasons).toEqual({ no_api_key_pending: 1 });
+    expect(findCall(calls, "DELETE FROM llm_batches")).toBeDefined();
   });
 });
 
-describe("LLM wave concurrency and wall-clock deadline (entity-ingest wiring)", () => {
-  function makeHeads(count: number) {
-    return Array.from({ length: count }, (_, i) => ({
-      id: String(i + 1),
-      title: `Headline number ${i + 1}`,
-      summary: "",
-      published_at: "2026-07-15T09:00:00Z",
-      first_seen_at: "2026-07-15T09:00:00Z",
-      source_name: "Source A",
-    }));
-  }
+describe("pending batch: ended", () => {
+  const pendingHeads = [
+    { id: "1", title: "Firstname Lastname met officials in Iran today.", summary: "", published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A" },
+  ];
 
-  function makeSql(heads: ReturnType<typeof makeHeads>) {
+  function makeSql(handler: (call: RecordedCall) => SqlRow[]) {
     return makeMockSql((call) => {
-      if (call.query.includes("FROM articles a")) return heads;
-      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
-      if (call.query.includes("INSERT INTO entities")) return [];
-      if (call.query.includes("SELECT name_norm")) return [];
-      return [];
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "batch_1", submitted_at: new Date().toISOString(), article_ids: ["1"] }];
+      if (call.query.includes("FROM articles a") && !call.query.includes("dup_group_id")) return pendingHeads;
+      return handler(call);
     });
   }
 
@@ -818,56 +763,116 @@ describe("LLM wave concurrency and wall-clock deadline (entity-ingest wiring)", 
 
   afterEach(() => {
     vi.mocked(isLlmConfigured).mockReturnValue(false);
-    vi.mocked(extractEntitiesBatch).mockReset();
+    vi.mocked(pollBatch).mockReset();
+    vi.mocked(fetchBatchResults).mockReset();
   });
 
-  it("dispatches up to 3 batches per wave concurrently, not strictly sequentially", async () => {
-    // 60 articles -> batches of [25, 25, 10] -> a single wave of 3 batches.
-    const { sql } = makeSql(makeHeads(60));
-
-    let inFlight = 0;
-    let maxInFlight = 0;
-    vi.mocked(extractEntitiesBatch).mockImplementation(async (_sql, _budget, articles) => {
-      inFlight += 1;
-      maxInFlight = Math.max(maxInFlight, inFlight);
-      await Promise.resolve();
-      inFlight -= 1;
-      return { candidates: new Map(articles.map((a) => [a.index, []])), relations: new Map() };
+  it("applies a succeeded chunk's results through the real parser, records batch usage, deletes the row, then submits nothing new this tick", async () => {
+    vi.mocked(pollBatch).mockResolvedValue({ status: "ended", resultsUrl: "https://x/results" });
+    vi.mocked(fetchBatchResults).mockResolvedValue({
+      byChunk: new Map([[0, {
+        candidates: new Map([[0, [{ display: "Firstname Lastname", norm: "firstname lastname", typeHint: "person" as const, layer: "llm" as const, roleContext: "former IRGC commander", prominence: "known" as const }]]]),
+        relations: new Map(),
+      }]]),
+      chunkFailures: new Map(),
+      inputTokens: 1000,
+      outputTokens: 500,
+    });
+    const { sql, calls } = makeSql((call) => {
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "1", canonical_name: "Iran" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
     });
 
-    await processNewArticles(sql);
+    const stats = await processNewArticles(sql);
 
-    expect(extractEntitiesBatch).toHaveBeenCalledTimes(3);
-    expect(maxInFlight).toBe(3);
+    expect(stats.llm.used).toBe(true);
+    expect(stats.llm.articles).toBe(1);
+    expect(stats.llm.batch).toEqual({ submittedArticles: 0, retrievedArticles: 1, pendingAgeMinutes: null });
+    expect(stats.newEntities).toBe(1); // Iran, via the dictionary layer union
+
+    const { recordBatchUsage } = await import("../llm-extract");
+    expect(recordBatchUsage).toHaveBeenCalledWith(sql, "2026-07", 1000, 500);
+    expect(findCall(calls, "DELETE FROM llm_batches")).toBeDefined();
+
+    const candidatesUpsertCall = findCall(calls, "INSERT INTO entity_candidates");
+    const payload = JSON.parse(candidatesUpsertCall!.values[0] as string) as { name_norm: string; contexts: string[]; co_entities: string[] }[];
+    const person = payload.find((p) => p.name_norm === "firstname lastname");
+    expect(person!.contexts).toEqual(["former IRGC commander"]);
+    expect(person!.co_entities).toEqual(["Iran"]);
   });
 
-  it("runs the first wave, skips the second once the deadline has passed, and still marks every article processed", async () => {
-    // 76 articles -> batches of [25, 25, 25, 1] -> waves of [3 batches] then [1 batch].
-    const heads = makeHeads(76);
-    const { sql, calls } = makeSql(heads);
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-15T12:00:00Z"));
-    const deadline = Date.now() + 20_000;
-    vi.mocked(extractEntitiesBatch).mockImplementation(async (_sql, _budget, articles) => {
-      // Simulate a wave slow enough to blow the wall-clock budget.
-      vi.advanceTimersByTime(25_000);
-      return { candidates: new Map(articles.map((a) => [a.index, []])), relations: new Map() };
+  it("falls back to heuristics for an errored/canceled/expired chunk, tallying chunk_<reason>", async () => {
+    vi.mocked(pollBatch).mockResolvedValue({ status: "ended", resultsUrl: "https://x/results" });
+    vi.mocked(fetchBatchResults).mockResolvedValue({
+      byChunk: new Map(),
+      chunkFailures: new Map([[0, "errored"]]),
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+    const russiaHeads = [{ ...pendingHeads[0], title: "Russia announces new policy." }];
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "batch_1", submitted_at: new Date().toISOString(), article_ids: ["1"] }];
+      if (call.query.includes("FROM articles a") && !call.query.includes("dup_group_id")) return russiaHeads;
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
     });
 
-    const stats = await processNewArticles(sql, deadline);
-    vi.useRealTimers();
+    const stats = await processNewArticles(sql);
 
-    expect(extractEntitiesBatch).toHaveBeenCalledTimes(3); // only wave 1's 3 batches
-    expect(stats.llm.articles).toBe(75); // wave 1: 3 batches x 25 articles
-    expect(stats.articlesProcessed).toBe(76); // wave 2's 1 article still processed via heuristics
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("1 article(s) fell back"));
+    expect(stats.newEntities).toBe(1); // heuristic dictionary layer still resolves Russia
+    expect(stats.llm.used).toBe(false);
+    expect(stats.llm.failureReasons).toEqual({ chunk_errored: 1 });
+  });
 
+  it("falls back to heuristics for the whole batch when the results fetch itself fails", async () => {
+    vi.mocked(pollBatch).mockResolvedValue({ status: "ended", resultsUrl: "https://x/results" });
+    vi.mocked(fetchBatchResults).mockResolvedValue({ reason: "results_http_500" });
+    const russiaHeads = [{ ...pendingHeads[0], title: "Russia announces new policy." }];
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "batch_1", submitted_at: new Date().toISOString(), article_ids: ["1"] }];
+      if (call.query.includes("FROM articles a") && !call.query.includes("dup_group_id")) return russiaHeads;
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.newEntities).toBe(1);
+    expect(stats.llm.failureReasons).toEqual({ results_http_500: 1 });
+  });
+
+  it("exactly-once guard: an article already processed (absent from the re-query) is silently skipped, not double-written", async () => {
+    vi.mocked(pollBatch).mockResolvedValue({ status: "ended", resultsUrl: "https://x/results" });
+    vi.mocked(fetchBatchResults).mockResolvedValue({
+      byChunk: new Map([[0, { candidates: new Map([[0, [{ display: "Russia", norm: "russia", typeHint: "country" as const, layer: "llm" as const, prominence: "famous" as const }]]]), relations: new Map() }]]),
+      chunkFailures: new Map(),
+      inputTokens: 100,
+      outputTokens: 50,
+    });
+    const neutralHead = { id: "1", title: "Local officials made an announcement today.", summary: "", published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A" };
+    // Two ids were submitted together, but article 2 already got processed
+    // by some other path — loadHeadsByIds' entities_processed_at IS NULL
+    // filter means it's simply absent from the re-query.
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "batch_1", submitted_at: new Date().toISOString(), article_ids: ["1", "2"] }];
+      if (call.query.includes("FROM articles a") && !call.query.includes("dup_group_id")) return [neutralHead]; // only id 1 returned
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.articlesProcessed).toBe(1);
     const markCall = calls[calls.length - 1];
     expect(markCall.query).toContain("entities_processed_at = now()");
-    expect(markCall.values[0]).toHaveLength(76);
-
-    warnSpy.mockRestore();
+    expect(markCall.values[0]).toEqual([1]); // id 2 never appears anywhere
   });
 });

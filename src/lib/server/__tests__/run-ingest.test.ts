@@ -33,7 +33,12 @@ beforeEach(() => {
   vi.mocked(sweepRetention).mockResolvedValue({ expired: 0 });
   vi.mocked(processNewArticles).mockResolvedValue({
     articlesProcessed: 0, mentionsWritten: 0, newEntities: 0, candidatesTouched: 0,
-    llm: { used: false, articles: 0, monthCostUsd: 0 }, entities: { autoAccepted: 0 }, relations: { written: 0 },
+    llm: {
+      used: false, articles: 0, monthCostUsd: 0,
+      batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes: null },
+      failureReasons: {},
+    },
+    entities: { autoAccepted: 0 }, relations: { written: 0 },
   });
   vi.mocked(getSettings).mockResolvedValue(FAKE_SETTINGS);
   vi.mocked(runDetectors).mockResolvedValue([]);
