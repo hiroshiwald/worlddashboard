@@ -169,6 +169,8 @@ interface FetchOutcome<T> {
   data: T | null;
   httpStatus?: number;
   networkError?: boolean;
+  /** Set alongside httpStatus — see sampleErrorBody. */
+  errorSample?: string;
 }
 
 function anthropicHeaders(): Record<string, string> {
@@ -179,12 +181,63 @@ function anthropicHeaders(): Record<string, string> {
   };
 }
 
+// Batch endpoint (submit/poll/results) failure sample: a bounded raw-body
+// read (2KB) reduced to a capped final sample (200 chars) — see
+// sampleErrorBody.
+const MAX_ERROR_BODY_READ_CHARS = 2048;
+const MAX_ERROR_SAMPLE_CHARS = 200;
+
+interface AnthropicErrorBody {
+  type: string;
+  message: string;
+}
+
+function parseAnthropicErrorBody(bodyText: string): AnthropicErrorBody | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const p = parsed as Record<string, unknown>;
+  if (p.type !== "error" || typeof p.error !== "object" || p.error === null) return null;
+  const e = p.error as Record<string, unknown>;
+  if (typeof e.type !== "string" || typeof e.message !== "string") return null;
+  return { type: e.type, message: e.message };
+}
+
+// Same one-line regex as fame-sweep.ts's redactSecrets — copied, not
+// imported (this repo's convention: a small independent copy beats a
+// cross-module dependency for one line). A batch endpoint's error body isn't
+// expected to contain a URL, but a stray one must never reach the ingest
+// response/Actions log unredacted.
+function redactSecrets(text: string): string {
+  return text.replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, "<redacted-url>");
+}
+
+// A non-2xx batch-endpoint response body, reduced to one bounded, secret-safe
+// diagnostic string — this is the fact that discriminates a real
+// submit_http_400 (a specific invalid field) from every other opaque failure
+// reason (see DEVLOG). Safety: Anthropic error bodies carry schema-path
+// messages, never credentials — the API key travels only in request headers,
+// never the body — and redaction plus this length cap bound any remaining
+// surprise. The sample travels into a public repo's Actions log via the
+// ingest JSON response, so it stays capped, redacted, and (via
+// entity-ingest.ts's distinct-sample cap) few.
+function sampleErrorBody(bodyText: string): string {
+  const capped = bodyText.slice(0, MAX_ERROR_BODY_READ_CHARS);
+  const parsedError = parseAnthropicErrorBody(capped);
+  const raw = parsedError ? `${parsedError.type}: ${parsedError.message}` : capped;
+  return redactSecrets(raw).slice(0, MAX_ERROR_SAMPLE_CHARS);
+}
+
 async function fetchJsonWithTimeout<T>(url: string, init: RequestInit): Promise<FetchOutcome<T>> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(url, { ...init, headers: anthropicHeaders(), signal: controller.signal });
-    if (!res.ok) return { data: null, httpStatus: res.status };
+    if (!res.ok) return { data: null, httpStatus: res.status, errorSample: sampleErrorBody(await res.text()) };
     return { data: (await res.json()) as T };
   } catch {
     return { data: null, networkError: true };
@@ -197,6 +250,8 @@ interface FetchTextOutcome {
   text: string | null;
   httpStatus?: number;
   networkError?: boolean;
+  /** Set alongside httpStatus — see sampleErrorBody. */
+  errorSample?: string;
 }
 
 async function fetchTextWithTimeout(url: string, init: RequestInit): Promise<FetchTextOutcome> {
@@ -204,7 +259,7 @@ async function fetchTextWithTimeout(url: string, init: RequestInit): Promise<Fet
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(url, { ...init, headers: anthropicHeaders(), signal: controller.signal });
-    if (!res.ok) return { text: null, httpStatus: res.status };
+    if (!res.ok) return { text: null, httpStatus: res.status, errorSample: sampleErrorBody(await res.text()) };
     return { text: await res.text() };
   } catch {
     return { text: null, networkError: true };
@@ -424,7 +479,7 @@ async function submitBatchRequest(chunks: ArticleInput[][]): Promise<FetchOutcom
  * never throws) if the month's estimated cost is already at/over
  * budgetUsd. Any failure reason is a low-cardinality, credential-free
  * string — see EntityIngestStats.llm.failureReasons. */
-export async function submitBatch(sql: Sql, budgetUsd: number, chunks: ArticleInput[][]): Promise<{ ok: true; batchId: string } | { ok: false; reason: string }> {
+export async function submitBatch(sql: Sql, budgetUsd: number, chunks: ArticleInput[][]): Promise<{ ok: true; batchId: string } | { ok: false; reason: string; sample?: string }> {
   for (const chunk of chunks) {
     if (chunk.length > MAX_BATCH_SIZE) {
       console.warn(`llm-extract: chunk of ${chunk.length} exceeds max ${MAX_BATCH_SIZE}, refusing to submit`);
@@ -453,7 +508,7 @@ export async function submitBatch(sql: Sql, budgetUsd: number, chunks: ArticleIn
   }
   if (outcome.httpStatus !== undefined) {
     console.warn(`llm-extract: batch submit failed with status ${outcome.httpStatus}`);
-    return { ok: false, reason: `submit_http_${outcome.httpStatus}` };
+    return { ok: false, reason: `submit_http_${outcome.httpStatus}`, sample: outcome.errorSample };
   }
   if (!outcome.data?.id) {
     console.warn("llm-extract: batch submit response missing id");
@@ -474,14 +529,14 @@ async function pollBatchRequest(batchId: string): Promise<FetchOutcome<Anthropic
   return fetchJsonWithTimeout<AnthropicBatchStatus>(`${BATCHES_URL}/${batchId}`, { method: "GET" });
 }
 
-export type BatchPollResult = { status: "in_progress" } | { status: "ended"; resultsUrl: string } | { status: "failed"; reason: string };
+export type BatchPollResult = { status: "in_progress" } | { status: "ended"; resultsUrl: string } | { status: "failed"; reason: string; sample?: string };
 
 /** "canceling" is treated as still in-flight, not ended — a canceling
  * batch still eventually produces a results_url once it lands on "ended". */
 export async function pollBatch(batchId: string): Promise<BatchPollResult> {
   const outcome = await pollBatchRequest(batchId);
   if (outcome.networkError) return { status: "failed", reason: "poll_network_error" };
-  if (outcome.httpStatus !== undefined) return { status: "failed", reason: `poll_http_${outcome.httpStatus}` };
+  if (outcome.httpStatus !== undefined) return { status: "failed", reason: `poll_http_${outcome.httpStatus}`, sample: outcome.errorSample };
   if (!outcome.data) return { status: "failed", reason: "poll_malformed_response" };
   if (outcome.data.processing_status !== "ended") return { status: "in_progress" };
   if (!outcome.data.results_url) return { status: "failed", reason: "ended_no_results_url" };
@@ -560,10 +615,10 @@ function parseBatchResultsText(text: string): BatchResults {
 
 /** Fetches and parses a batch's results_url. Never throws — a fetch
  * failure of any kind returns a { reason } object instead. */
-export async function fetchBatchResults(resultsUrl: string): Promise<BatchResults | { reason: string }> {
+export async function fetchBatchResults(resultsUrl: string): Promise<BatchResults | { reason: string; sample?: string }> {
   const outcome = await fetchTextWithTimeout(resultsUrl, { method: "GET" });
   if (outcome.networkError) return { reason: "results_network_error" };
-  if (outcome.httpStatus !== undefined) return { reason: `results_http_${outcome.httpStatus}` };
+  if (outcome.httpStatus !== undefined) return { reason: `results_http_${outcome.httpStatus}`, sample: outcome.errorSample };
   if (outcome.text === null) return { reason: "results_malformed_response" };
   return parseBatchResultsText(outcome.text);
 }

@@ -1,5 +1,48 @@
 # World Dashboard Development Log
 
+## 2026-08-19 — capture the Batch API's 400 error detail
+
+**What changed**: Every tick since the Batches API merge was reporting
+`llm.failureReasons {"submit_http_400": 1}` — `POST /v1/messages/batches`
+rejects our submission deterministically, and the discriminating fact (which
+field Anthropic considers invalid) lived in the 400 response body, which
+`fetchJsonWithTimeout`/`fetchTextWithTimeout` discarded outright. Both now
+read the body (capped at 2KB) on any non-2xx from a batch endpoint (submit,
+poll, results fetch) and reduce it to one sanitized sample via the new
+`sampleErrorBody`: `<error.type>: <error.message>` when it parses as
+Anthropic's error shape, else a capped raw prefix — URL-redacted with the
+same one-line regex as `fame-sweep.ts`'s `redactSecrets` (copied, not
+imported, per this repo's small-independent-copies convention), then capped
+at 200 chars. `submitBatch`/`pollBatch`/`fetchBatchResults` thread this
+through as an optional `sample` alongside their existing `reason`.
+`entity-ingest.ts` collects up to 2 DISTINCT samples per run into a new
+`EntityIngestStats.llm.errorSamples?: string[]`, field OMITTED entirely
+when empty — the same `fameSweep.exceptionSamples` convention, and the
+architecture naturally caps at 2 anyway (a results-fetch failure and a
+same-tick fresh-batch submit failure are the only two call sites that can
+carry a sample in one run). Anthropic error bodies carry schema-path
+messages, never credentials (the API key travels only in request headers),
+so redaction plus the length/count caps bound the surprise this adds to a
+public repo's Actions log. Deliberately did NOT touch the request
+construction, headers, model, or add retries — diagnosing what's actually
+invalid is the point of this change, not guessing a fix blind.
+
+**What it affected**: `src/lib/server/llm-extract.ts` (`sampleErrorBody`,
+`parseAnthropicErrorBody`, `redactSecrets`, `FetchOutcome`/`FetchTextOutcome`
+gain `errorSample`; `submitBatch`/`pollBatch`/`fetchBatchResults` return
+types gain an optional `sample`). `src/lib/server/entity-ingest.ts`
+(`EntityIngestStats.llm.errorSamples`; `tally` now takes an optional
+`sample` and accumulates into a capped `Set`). Tests: `llm-extract.test.ts`
+(sample capture from a real-shaped 400 body, raw-prefix fallback, URL
+redaction, 200-char cap, omitted on network error; three pre-existing
+non-2xx tests updated to assert the now-present `sample`).
+`entity-ingest.test.ts` (single sample, two distinct samples in one tick,
+identical samples collapsing to one, and the success path omitting the
+field). `MANIFEST.md`'s `llm-extract.ts`/`entity-ingest.ts` rows updated to
+match — the old "never a free-text message" claim was no longer accurate.
+**Not touched**: the 400's actual cause — that's still unknown until the
+next production tick's Actions log carries a sample.
+
 ## 2026-08-19 — replace the placeholder Wikimedia User-Agent contact
 
 **What changed**: `USER_AGENT` (`src/lib/server/wikidata.ts`) no longer

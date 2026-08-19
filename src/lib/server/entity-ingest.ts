@@ -26,6 +26,9 @@ const MAX_CO_ENTITIES = 5;
 // documented "most batches finish within an hour, hard max 24h" makes 6h a
 // generous wait before giving up on one tick's worth of articles.
 const PENDING_BATCH_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+// Up to this many DISTINCT error samples per run — mirrors fame-sweep.ts's
+// MAX_EXCEPTION_SAMPLES convention (a few bounded samples, not a flood).
+const MAX_ERROR_SAMPLES = 2;
 
 export interface EntityIngestStats {
   articlesProcessed: number;
@@ -43,6 +46,12 @@ export interface EntityIngestStats {
      * keys only, never free text — see llm-extract.ts's submit/poll/
      * fetchBatchResults. */
     failureReasons: Record<string, number>;
+    /** Up to MAX_ERROR_SAMPLES distinct sanitized samples of the response
+     * body behind a submit/poll/results-fetch HTTP failure (see
+     * llm-extract.ts's sampleErrorBody) — present only when at least one
+     * such failure happened this run. Omitted (not empty-array) when there
+     * are none, matching fame-sweep.ts's exceptionSamples convention. */
+    errorSamples?: string[];
   };
   /** Famous-prominence LLM candidates inserted straight into entities
    * (status 'tracked') instead of the review queue — see classifyCandidate.
@@ -494,10 +503,10 @@ async function resolveWithHeuristicFallback(sql: Sql, pending: PendingBatch): Pr
   };
 }
 
-async function resolveEndedBatch(sql: Sql, pending: PendingBatch, resultsUrl: string, tally: (reason: string) => void): Promise<PendingBatchOutcome> {
+async function resolveEndedBatch(sql: Sql, pending: PendingBatch, resultsUrl: string, tally: (reason: string, sample?: string) => void): Promise<PendingBatchOutcome> {
   const results = await fetchBatchResults(resultsUrl);
   if ("reason" in results) {
-    tally(results.reason);
+    tally(results.reason, results.sample);
     return resolveWithHeuristicFallback(sql, pending);
   }
 
@@ -525,7 +534,7 @@ async function resolveEndedBatch(sql: Sql, pending: PendingBatch, resultsUrl: st
 // pending row present can't poll without a key, so it heuristic-processes
 // immediately — the one edge case where the key check happens AFTER (not
 // instead of) the pending-row read.
-async function resolvePendingBatchStage(sql: Sql, tally: (reason: string) => void): Promise<PendingBatchOutcome> {
+async function resolvePendingBatchStage(sql: Sql, tally: (reason: string, sample?: string) => void): Promise<PendingBatchOutcome> {
   const pending = await loadPendingBatch(sql);
   if (!pending) return emptyPendingOutcome();
 
@@ -546,7 +555,7 @@ async function resolvePendingBatchStage(sql: Sql, tally: (reason: string) => voi
     return { ...emptyPendingOutcome(), excludeIds: pending.articleIds, stillPending: true, batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes } };
   }
   if (pollResult.status === "failed") {
-    tally(pollResult.reason);
+    tally(pollResult.reason, pollResult.sample);
     return { ...emptyPendingOutcome(), excludeIds: pending.articleIds, stillPending: true, batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes } };
   }
   return resolveEndedBatch(sql, pending, pollResult.resultsUrl, tally);
@@ -559,7 +568,7 @@ async function resolvePendingBatchStage(sql: Sql, tally: (reason: string) => voi
 async function submitNewBatchStage(
   sql: Sql,
   excludeIds: number[],
-  tally: (reason: string) => void,
+  tally: (reason: string, sample?: string) => void,
 ): Promise<{ headById: Map<number, HeadArticle>; candidatesByArticle: Map<number, Candidate[] | null>; submittedArticles: number }> {
   const newHeads = await selectUnprocessedHeads(sql, excludeIds);
   const headById = new Map(newHeads.map((h) => [h.id, h] as const));
@@ -570,7 +579,7 @@ async function submitNewBatchStage(
   const chunks = chunkArticles(newHeads, MAX_BATCH_SIZE).map((chunk) => chunk.map((a, j) => ({ index: j, title: a.title, summary: a.summary })));
   const submitResult = await submitBatch(sql, settings.llm_monthly_budget_usd, chunks);
   if (!submitResult.ok) {
-    tally(submitResult.reason);
+    tally(submitResult.reason, submitResult.sample);
     return { headById, candidatesByArticle: extractAllHeuristic(newHeads), submittedArticles: 0 };
   }
 
@@ -1154,13 +1163,20 @@ async function persistCandidates(sql: Sql, sightings: CandidateSighting[]): Prom
 
 // ---- orchestrator ----
 
-function emptyEntityIngestStats(batch: EntityIngestStats["llm"]["batch"], failureReasons: Record<string, number>): EntityIngestStats {
+function emptyEntityIngestStats(
+  batch: EntityIngestStats["llm"]["batch"],
+  failureReasons: Record<string, number>,
+  errorSamples: string[],
+): EntityIngestStats {
   return {
     articlesProcessed: 0,
     mentionsWritten: 0,
     newEntities: 0,
     candidatesTouched: 0,
-    llm: { used: false, articles: 0, monthCostUsd: 0, batch, failureReasons },
+    llm: {
+      used: false, articles: 0, monthCostUsd: 0, batch, failureReasons,
+      ...(errorSamples.length > 0 ? { errorSamples } : {}),
+    },
     entities: { autoAccepted: 0 },
     relations: { written: 0 },
   };
@@ -1168,8 +1184,12 @@ function emptyEntityIngestStats(batch: EntityIngestStats["llm"]["batch"], failur
 
 export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
   const failureReasons: Record<string, number> = {};
-  const tally = (reason: string) => {
+  const errorSamples = new Set<string>();
+  const tally = (reason: string, sample?: string) => {
     failureReasons[reason] = (failureReasons[reason] ?? 0) + 1;
+    // Distinct samples only, and only while under the cap — repeated
+    // identical failures shouldn't flood the ingest response.
+    if (sample && errorSamples.size < MAX_ERROR_SAMPLES) errorSamples.add(sample);
   };
 
   const pending = await resolvePendingBatchStage(sql, tally);
@@ -1182,7 +1202,7 @@ export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
   const batch = { ...pending.batch, submittedArticles: submitted.submittedArticles };
 
   const heads = Array.from(candidatesByArticle.keys()).map((id) => headById.get(id)!);
-  if (heads.length === 0) return emptyEntityIngestStats(batch, failureReasons);
+  if (heads.length === 0) return emptyEntityIngestStats(batch, failureReasons, Array.from(errorSamples));
 
   const registry = await loadEntityRegistry(sql);
   const classified = classifyAll(heads, candidatesByArticle, registry);
@@ -1214,7 +1234,10 @@ export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
     mentionsWritten: allMentions.length,
     newEntities: insertedEntities.length,
     candidatesTouched,
-    llm: { used: pending.llmUsed > 0, articles: pending.llmUsed, monthCostUsd, batch, failureReasons },
+    llm: {
+      used: pending.llmUsed > 0, articles: pending.llmUsed, monthCostUsd, batch, failureReasons,
+      ...(errorSamples.size > 0 ? { errorSamples: Array.from(errorSamples) } : {}),
+    },
     entities: { autoAccepted: autoAcceptedCount },
     relations: { written: relationsWritten },
   };
