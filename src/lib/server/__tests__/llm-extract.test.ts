@@ -275,7 +275,7 @@ describe("submitBatch: submit failures", () => {
     mockFetchOnce(jsonResponse(529, {}));
     const { sql } = emptyUsageSql();
     const result = await submitBatch(sql, 5, [[article(0)]]);
-    expect(result).toEqual({ ok: false, reason: "submit_http_529" });
+    expect(result).toEqual({ ok: false, reason: "submit_http_529", sample: "{}" });
   });
 
   it("returns submit_network_error when fetch itself rejects", async () => {
@@ -290,6 +290,67 @@ describe("submitBatch: submit failures", () => {
     const { sql } = emptyUsageSql();
     const result = await submitBatch(sql, 5, [[article(0)]]);
     expect(result).toEqual({ ok: false, reason: "submit_malformed_response" });
+  });
+});
+
+describe("error sample capture on a non-2xx batch response", () => {
+  const errorBody = {
+    type: "error",
+    error: { type: "invalid_request_error", message: "messages.0.content: at least one of `text` or `content` must be non-empty" },
+  };
+  const expectedSample = "invalid_request_error: messages.0.content: at least one of `text` or `content` must be non-empty";
+
+  it("submitBatch: captures '<error.type>: <error.message>' from a real-shaped Anthropic error body", async () => {
+    mockFetchOnce(jsonResponse(400, errorBody));
+    const { sql } = emptyUsageSql();
+    const result = await submitBatch(sql, 5, [[article(0)]]);
+    expect(result).toEqual({ ok: false, reason: "submit_http_400", sample: expectedSample });
+  });
+
+  it("pollBatch: captures the same shape from a non-2xx poll response", async () => {
+    mockFetchOnce(jsonResponse(400, errorBody));
+    const result = await pollBatch("batch_1");
+    expect(result).toEqual({ status: "failed", reason: "poll_http_400", sample: expectedSample });
+  });
+
+  it("fetchBatchResults: captures the same shape from a non-2xx results fetch", async () => {
+    mockFetchOnce(textResponse(400, JSON.stringify(errorBody)));
+    const result = await fetchBatchResults("https://api.anthropic.com/results/batch_1");
+    expect(result).toEqual({ reason: "results_http_400", sample: expectedSample });
+  });
+
+  it("falls back to a capped raw prefix when the body isn't Anthropic's error shape", async () => {
+    mockFetchOnce(jsonResponse(400, { oops: "not the expected shape" }));
+    const { sql } = emptyUsageSql();
+    const result = await submitBatch(sql, 5, [[article(0)]]);
+    expect(result).toEqual({ ok: false, reason: "submit_http_400", sample: '{"oops":"not the expected shape"}' });
+  });
+
+  it("redacts every URL-shaped substring in the sample", async () => {
+    mockFetchOnce(jsonResponse(400, {
+      type: "error",
+      error: { type: "invalid_request_error", message: "see https://docs.anthropic.com/en/api/errors for details" },
+    }));
+    const { sql } = emptyUsageSql();
+    const result = await submitBatch(sql, 5, [[article(0)]]);
+    expect(result).toEqual({ ok: false, reason: "submit_http_400", sample: "invalid_request_error: see <redacted-url> for details" });
+  });
+
+  it("caps the final sample at 200 chars", async () => {
+    mockFetchOnce(jsonResponse(400, { type: "error", error: { type: "invalid_request_error", message: "x".repeat(500) } }));
+    const { sql } = emptyUsageSql();
+    const result = await submitBatch(sql, 5, [[article(0)]]);
+    expect(result.ok).toBe(false);
+    const sample = (result as { ok: false; reason: string; sample?: string }).sample!;
+    expect(sample.length).toBe(200);
+    expect(sample.startsWith("invalid_request_error: ")).toBe(true);
+  });
+
+  it("omits sample on a network error — there's no response body to read", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    const { sql } = emptyUsageSql();
+    const result = await submitBatch(sql, 5, [[article(0)]]);
+    expect(result).toEqual({ ok: false, reason: "submit_network_error" });
   });
 });
 
@@ -318,7 +379,7 @@ describe("pollBatch", () => {
 
   it("reports failed with poll_http_<status> on a non-2xx response", async () => {
     mockFetchOnce(jsonResponse(500, {}));
-    expect(await pollBatch("batch_1")).toEqual({ status: "failed", reason: "poll_http_500" });
+    expect(await pollBatch("batch_1")).toEqual({ status: "failed", reason: "poll_http_500", sample: "{}" });
   });
 
   it("reports failed with poll_network_error when fetch rejects", async () => {
@@ -455,7 +516,7 @@ describe("fetchBatchResults: per-chunk / whole-fetch failure handling", () => {
   it("returns results_http_<status> on a non-2xx results fetch", async () => {
     mockFetchOnce(textResponse(500, ""));
     const result = await fetchBatchResults("https://x/results");
-    expect(result).toEqual({ reason: "results_http_500" });
+    expect(result).toEqual({ reason: "results_http_500", sample: "" });
   });
 
   it("returns results_network_error when the results fetch rejects", async () => {

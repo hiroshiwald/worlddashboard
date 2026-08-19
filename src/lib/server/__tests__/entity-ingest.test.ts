@@ -790,6 +790,7 @@ describe("pending batch: ended", () => {
     expect(stats.llm.used).toBe(true);
     expect(stats.llm.articles).toBe(1);
     expect(stats.llm.batch).toEqual({ submittedArticles: 0, retrievedArticles: 1, pendingAgeMinutes: null });
+    expect(stats.llm.errorSamples).toBeUndefined(); // success path: field omitted, not an empty array
     expect(stats.newEntities).toBe(1); // Iran, via the dictionary layer union
 
     const { recordBatchUsage } = await import("../llm-extract");
@@ -874,5 +875,86 @@ describe("pending batch: ended", () => {
     const markCall = calls[calls.length - 1];
     expect(markCall.query).toContain("entities_processed_at = now()");
     expect(markCall.values[0]).toEqual([1]); // id 2 never appears anywhere
+  });
+});
+
+describe("llm.errorSamples", () => {
+  const pendingHeads = [
+    { id: "1", title: "Pending headline", summary: "", published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source A" },
+  ];
+  const freshHead = {
+    id: "2", title: "Russia announces new policy.", summary: "",
+    published_at: "2026-07-15T09:00:00Z", first_seen_at: "2026-07-15T09:00:00Z", source_name: "Source B",
+  };
+
+  beforeEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    vi.mocked(pollBatch).mockReset();
+    vi.mocked(fetchBatchResults).mockReset();
+    vi.mocked(submitBatch).mockReset();
+  });
+
+  it("carries a single sample through when only one failure happens this tick", async () => {
+    vi.mocked(submitBatch).mockResolvedValue({ ok: false, reason: "submit_http_400", sample: "invalid_request_error: bad field" });
+    const russiaHead = { ...freshHead, id: "1" };
+    const { sql } = makeMockSql(withNoPendingBatch((call) => {
+      if (call.query.includes("FROM articles a")) return [russiaHead];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    }));
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.llm.failureReasons).toEqual({ submit_http_400: 1 });
+    expect(stats.llm.errorSamples).toEqual(["invalid_request_error: bad field"]);
+  });
+
+  // A results-fetch failure heuristic-processes the pending batch's own
+  // articles (stillPending becomes false), so the SAME tick goes on to try
+  // submitting a fresh batch for other unprocessed heads — a real scenario
+  // where two distinct batch-endpoint failures land in one run.
+  function makeTwoFailureSql(): { sql: Sql } {
+    return makeMockSql((call) => {
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "batch_1", submitted_at: new Date().toISOString(), article_ids: ["1"] }];
+      if (call.query.includes("FROM articles a") && !call.query.includes("dup_group_id")) return pendingHeads; // loadHeadsByIds re-query
+      if (call.query.includes("FROM articles a")) return [freshHead]; // selectUnprocessedHeads
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) return [];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "5", canonical_name: "Russia" }];
+      if (call.query.includes("SELECT name_norm")) return [];
+      return [];
+    });
+  }
+
+  it("two different failures in one tick produce two distinct samples", async () => {
+    vi.mocked(pollBatch).mockResolvedValue({ status: "ended", resultsUrl: "https://x/results" });
+    vi.mocked(fetchBatchResults).mockResolvedValue({ reason: "results_http_500", sample: "internal_server_error: results unavailable" });
+    vi.mocked(submitBatch).mockResolvedValue({ ok: false, reason: "submit_http_400", sample: "invalid_request_error: bad field" });
+    const { sql } = makeTwoFailureSql();
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.llm.failureReasons).toEqual({ results_http_500: 1, submit_http_400: 1 });
+    expect(stats.llm.errorSamples).toEqual([
+      "internal_server_error: results unavailable",
+      "invalid_request_error: bad field",
+    ]);
+  });
+
+  it("identical samples from two different failures collapse to one distinct entry", async () => {
+    vi.mocked(pollBatch).mockResolvedValue({ status: "ended", resultsUrl: "https://x/results" });
+    vi.mocked(fetchBatchResults).mockResolvedValue({ reason: "results_http_500", sample: "invalid_request_error: bad field" });
+    vi.mocked(submitBatch).mockResolvedValue({ ok: false, reason: "submit_http_400", sample: "invalid_request_error: bad field" });
+    const { sql } = makeTwoFailureSql();
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.llm.failureReasons).toEqual({ results_http_500: 1, submit_http_400: 1 });
+    expect(stats.llm.errorSamples).toEqual(["invalid_request_error: bad field"]);
   });
 });
