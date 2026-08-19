@@ -64,6 +64,11 @@ statements against a schema with no `schema_migrations` table at all, so a
 literal `INSERT INTO schema_migrations` inside the file would 500 every
 integration test on a fresh schema.
 
+**Follow-up (CI)**: `entity-ingest.integration.test.ts`'s idempotent-second-run
+test had its own pre-existing `llm: {...}` literal (missed above — it lives in
+that file, outside this PR's original allowlist) that didn't yet know about
+`batch`/`failureReasons`; extended it to match, no behavior change.
+
 ## 2026-07-29 — round computeMedianPageviews so it never poisons an INT write
 
 **What changed**: `computeMedianPageviews` (`src/lib/server/wikidata.ts`) now
