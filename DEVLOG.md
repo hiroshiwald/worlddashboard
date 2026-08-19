@@ -1,5 +1,69 @@
 # World Dashboard Development Log
 
+## 2026-08-19 — move LLM entity extraction to the Anthropic Message Batches API
+
+**What changed**: Entity extraction (`llm-extract.ts`, `entity-ingest.ts`)
+now submits article chunks to `POST /v1/messages/batches` instead of calling
+`POST /v1/messages` live — the Batches API bills 50% of standard per-token
+rates for an identical request, ~55¢/day → ~28¢/day at full health against
+the $5/month cap. `callAnthropic` and the old wave-dispatch/wall-clock-budget
+machinery (`LLM_WAVE_SIZE`, `LLM_TIME_BUDGET_MS`, `extractAllWithLlm`,
+`applyWaveResults`) are deleted. Each `process-entities` tick now: (1)
+resolves any pending batch row (poll; apply its results through the
+unchanged parser on `ended`, heuristic-fallback on `errored`/`canceled`/
+`expired`/an unreachable results fetch, or on abandonment past 6h); (2) only
+if no batch remains pending, selects fresh unprocessed heads, budget-gates,
+and submits ONE new batch (one request per 25-article chunk, `custom_id` =
+chunk index) — a submit failure heuristic-processes those heads immediately,
+same as the old live-call-failure path. Invariant: at most one `llm_batches`
+row at a time; enforced structurally (a pending batch's own article ids are
+excluded from the next selection, and step 2 is skipped entirely while one
+remains in flight), not by a DB constraint. Exactly-once guard: applying a
+batch result re-queries `entities_processed_at IS NULL` for that batch's
+article ids, so an already-processed id (shouldn't happen given the
+invariant, but defensively) is silently skipped rather than double-written.
+`llm_usage` gains `batch_input_tokens`/`batch_output_tokens` (new migration
+008), priced at half the live rate (`estimateCostUsd`'s existing
+`inputTokens`/`outputTokens` args keep pricing August's already-recorded
+live spend at the live rate — separate columns, not a repriced constant).
+`EntityIngestStats.llm` gains `batch: {submittedArticles, retrievedArticles,
+pendingAgeMinutes}` and `failureReasons: Record<string, number>` (low-
+cardinality reason keys only — submit/poll/results HTTP statuses, per-chunk
+errored/canceled/expired/malformed, `abandoned_timeout`, `budget_gate`,
+`no_api_key_pending` — never a free-text message, since this lands in a
+public repo's Actions log via the ingest JSON response).
+
+**What it affected**: `src/lib/server/llm-extract.ts` (full rewrite of the
+network/parsing layer: `submitBatch`/`pollBatch`/`fetchBatchResults`/
+`recordBatchUsage` replace `extractEntitiesBatch`; the defensive entity/
+relation JSON parsing is untouched, just re-wired to parse a batch result
+line's `message` field instead of a live response body), `src/lib/server/
+entity-ingest.ts` (new `llm_batches` orchestration:
+`resolvePendingBatchStage`/`submitNewBatchStage`/`applyBatchResults`;
+`processNewArticles` no longer takes an `llmDeadline` param), `migrations/
+008_llm_batches.sql` (new — `llm_batches` table, `llm_usage`'s two new
+columns), `src/lib/server/__tests__/llm-extract.test.ts` and `entity-
+ingest.test.ts` (rewritten for the submit/poll/results-fetch API and the
+pending-batch state machine), `src/lib/server/__tests__/run-ingest.test.ts`
+(fixture shape only — `run-ingest.ts` itself needed no change, since
+`counts.llm = entityStats.llm` already passes the new fields through
+unchanged), `src/lib/server/__tests__/integration/llm-extract.integration.
+test.ts` (rewritten as two-tick submit-then-apply scenarios against real
+Postgres — not run locally, no `TEST_DATABASE_URL` here; CI's harness
+applies migration files itself, no separate list to update since the
+integration helper discovers `migrations/*.sql` via `readdir`).
+
+**Gotcha**: the task brief for this PR asked for migration 008 to include
+its own `INSERT INTO schema_migrations VALUES (...)` statement "following
+the existing files' convention" — but migrations 001–007 never do this;
+`scripts/migrate.mjs` appends that INSERT itself, in the same transaction,
+after applying a file's statements. Migration 008 follows the files'
+*actual* convention (DDL only) instead: the integration test helper
+(`__tests__/helpers/pg-sql.ts`) applies every `migrations/*.sql` file's raw
+statements against a schema with no `schema_migrations` table at all, so a
+literal `INSERT INTO schema_migrations` inside the file would 500 every
+integration test on a fresh schema.
+
 ## 2026-07-29 — round computeMedianPageviews so it never poisons an INT write
 
 **What changed**: `computeMedianPageviews` (`src/lib/server/wikidata.ts`) now
