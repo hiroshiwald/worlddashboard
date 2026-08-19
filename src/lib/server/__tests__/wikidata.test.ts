@@ -391,10 +391,10 @@ describe("ALIAS_LANGUAGES", () => {
 });
 
 describe("USER_AGENT", () => {
-  it("identifies the app with its own URL and a contact address, per Wikimedia's User-Agent policy", () => {
-    expect(USER_AGENT).toContain("worlddashboard/1.0");
-    expect(USER_AGENT).toContain("https://worlddashboard.vercel.app");
-    expect(USER_AGENT).toMatch(/[\w.+-]+@[\w.-]+\.[a-z]+/i); // an email-shaped contact address is present
+  it("identifies the app with its own URL and a contact page, per Wikimedia's User-Agent policy", () => {
+    expect(USER_AGENT).toBe(
+      "worlddashboard/1.0 (https://worlddashboard.vercel.app; https://github.com/hiroshiwald/worlddashboard)",
+    );
   });
 });
 
