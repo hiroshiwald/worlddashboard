@@ -1,5 +1,22 @@
 # World Dashboard Development Log
 
+## 2026-08-19 — replace the placeholder Wikimedia User-Agent contact
+
+**What changed**: `USER_AGENT` (`src/lib/server/wikidata.ts`) no longer
+carries the `contact@example.com` placeholder. Production fame sweeps were
+seeing intermittent 429s, and Wikimedia's User-Agent policy throttles
+clients whose contact info doesn't resolve to anything. Operator decision:
+the contact portion is now the project's public GitHub repo URL
+(`https://github.com/hiroshiwald/worlddashboard`) instead of an email — the
+policy accepts a contact page, and this avoids publishing a personal
+address in public source.
+
+**What it affected**: `src/lib/server/wikidata.ts` (`USER_AGENT` value and
+its doc comment only — every request already sends this header, so no call
+sites changed). `src/lib/server/__tests__/wikidata.test.ts`'s `USER_AGENT`
+test now asserts the exact new string instead of the old email-shaped-regex
+check. `MANIFEST.md`'s `wikidata.ts` row updated to match.
+
 ## 2026-08-19 — move LLM entity extraction to the Anthropic Message Batches API
 
 **What changed**: Entity extraction (`llm-extract.ts`, `entity-ingest.ts`)

@@ -18,10 +18,11 @@ export const REQUEST_TIMEOUT_MS = 4000;
 // Wikimedia's API etiquette (https://meta.wikimedia.org/wiki/User-Agent_policy)
 // asks every caller to self-identify with a URL and a real contact address,
 // so a misbehaving client can be traced and throttled instead of the whole
-// service degrading for everyone. contact@example.com is a placeholder that
-// satisfies the documented format, not a real mailbox — the operator MUST
-// replace it with a real, monitored address before this is relied on.
-export const USER_AGENT = "worlddashboard/1.0 (https://worlddashboard.vercel.app; contact@example.com)";
+// service degrading for everyone. The policy accepts a contact page in place
+// of an email, so this points at the project's public GitHub repo rather
+// than publishing a personal address in source.
+export const USER_AGENT =
+  "worlddashboard/1.0 (https://worlddashboard.vercel.app; https://github.com/hiroshiwald/worlddashboard)";
 
 // The feed corpus's language spread (see entity-dictionaries.ts's European
 // aliases) — labels/aliases in these languages are what actually shows up as
