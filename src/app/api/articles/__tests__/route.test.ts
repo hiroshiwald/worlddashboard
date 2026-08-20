@@ -120,3 +120,56 @@ describe("GET /api/articles", () => {
     expect(clusterCall?.values).toContain("world");
   });
 });
+
+describe("GET /api/articles?titleExact=", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+  afterEach(() => {
+    delete process.env.DATABASE_URL;
+  });
+
+  it("returns 503 when DATABASE_URL is unset", async () => {
+    delete process.env.DATABASE_URL;
+    const res = await GET(getRequest("http://localhost/api/articles?titleExact=Some+Title"));
+    expect(res.status).toBe(503);
+  });
+
+  it("returns 400 for a blank titleExact", async () => {
+    const { sql } = makeMockSql(() => []);
+    currentSql = sql;
+    const res = await GET(getRequest("http://localhost/api/articles?titleExact=%20%20"));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns {link} for a hit, newest match first, scoped to the 30-day window", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM articles") && call.query.includes("WHERE title")) {
+        expect(call.values).toContain("Some Title");
+        expect(call.values).toContain(30);
+        return [{ link: "https://example.com/article" }];
+      }
+      return [];
+    });
+    currentSql = sql;
+
+    const res = await GET(getRequest("http://localhost/api/articles?titleExact=Some+Title"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ link: "https://example.com/article" });
+    expect(calls.some((c) => c.query.includes("ORDER BY first_seen_at DESC"))).toBe(true);
+    expect(calls.some((c) => c.query.includes("last_ingest_at"))).toBe(false);
+  });
+
+  it("returns 404 when no article matches the title within the retention window", async () => {
+    const { sql } = makeMockSql(() => []);
+    currentSql = sql;
+
+    const res = await GET(getRequest("http://localhost/api/articles?titleExact=No+Such+Title"));
+    const body = await res.json();
+
+    expect(res.status).toBe(404);
+    expect(body.error).toBeTruthy();
+  });
+});

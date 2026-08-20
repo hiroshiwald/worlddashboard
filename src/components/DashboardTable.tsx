@@ -6,12 +6,12 @@ import EntityPanel from "./EntityPanel";
 import { EntityFilterBanner, FeedTable, FeedCardList, TabContent } from "./dashboard";
 import { TabKey } from "@/hooks/useDashboardTable";
 
-// Brief, Review, Signals, and Entities are DB-backed and render
-// independently of the live feed items array (see TabContent.tsx) — every
-// other tab needs items to render at all, so only they should show the
-// live-feed loading/empty states.
+// Brief, Signals, and Entities are DB-backed and render independently of the
+// live feed items array (see TabContent.tsx) — every other tab needs items
+// to render at all, so only they should show the live-feed loading/empty
+// states.
 function isItemsDependentTab(activeTab: TabKey): boolean {
-  return activeTab !== "brief" && activeTab !== "review" && activeTab !== "signals" && activeTab !== "entities";
+  return activeTab !== "brief" && activeTab !== "signals" && activeTab !== "entities";
 }
 
 export default function DashboardTable() {
@@ -67,7 +67,7 @@ export default function DashboardTable() {
 
         <TabContent
           activeTab={activeTab} items={items} filteredItems={filteredItems} dark={dark}
-          onEntityClick={handleEntityClick} onCandidatesChanged={handleCandidatesChanged}
+          onEntityClick={handleEntityClick} onEntitySelect={setPanelEntityId} onCandidatesChanged={handleCandidatesChanged}
         />
 
         {activeTab === "feeds" && items.length > 0 && (

@@ -9,20 +9,38 @@ interface RowCellProps {
   onPatch: (id: number, patch: EntityPatch) => void;
 }
 
-function NameCell({ row, dark }: { row: EntityRowData; dark: boolean }) {
-  const nameCls = `text-sm font-medium ${dark ? "text-slate-100" : "text-gray-900"}`;
-  if (!row.wikiTitle) return <span className={nameCls}>{row.canonicalName}</span>;
-  const href = `https://en.wikipedia.org/wiki/${encodeURIComponent(row.wikiTitle.replace(/ /g, "_"))}`;
+function WikiIcon() {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`${nameCls} hover:underline ${dark ? "hover:text-blue-300" : "hover:text-blue-600"}`}
-      title="Evidence: the Wikipedia article behind this fame verdict"
-    >
-      {row.canonicalName}
-    </a>
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+    </svg>
+  );
+}
+
+// The name opens the evidence panel (Part B, spine 2: evidence one click
+// away) — the Wikipedia link (fame verdict evidence) moves to its own small
+// icon alongside it rather than sharing the name's click target.
+function NameCell({ row, dark, busy, onSelect }: { row: EntityRowData; dark: boolean; busy: boolean; onSelect: (id: number) => void }) {
+  const nameCls = `text-sm font-medium text-left hover:underline disabled:no-underline disabled:cursor-default ${dark ? "text-slate-100 hover:text-blue-300" : "text-gray-900 hover:text-blue-600"}`;
+  return (
+    <div className="flex items-center gap-1.5">
+      <button onClick={() => onSelect(row.id)} disabled={busy} className={nameCls} title="View evidence">
+        {row.canonicalName}
+      </button>
+      {busy && <span className={`text-[10px] italic whitespace-nowrap ${dark ? "text-slate-500" : "text-gray-400"}`}>saving…</span>}
+      {row.wikiTitle && (
+        <a
+          href={`https://en.wikipedia.org/wiki/${encodeURIComponent(row.wikiTitle.replace(/ /g, "_"))}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={dark ? "text-slate-500 hover:text-blue-300" : "text-gray-400 hover:text-blue-600"}
+          title="Evidence: the Wikipedia article behind this fame verdict"
+          aria-label="Open Wikipedia article"
+        >
+          <WikiIcon />
+        </a>
+      )}
+    </div>
   );
 }
 
@@ -82,16 +100,17 @@ interface EntityRowProps {
   dark: boolean;
   busy: boolean;
   onPatch: (id: number, patch: EntityPatch) => void;
+  onSelect: (id: number) => void;
   rowAltA: string;
   rowAltB: string;
   rowBorder: string;
   selectBg: string;
 }
 
-export default function EntityRow({ row, idx, dark, busy, onPatch, rowAltA, rowAltB, rowBorder, selectBg }: EntityRowProps) {
+export default function EntityRow({ row, idx, dark, busy, onPatch, onSelect, rowAltA, rowAltB, rowBorder, selectBg }: EntityRowProps) {
   return (
-    <tr className={`${idx % 2 === 0 ? rowAltA : rowAltB} ${rowBorder}`}>
-      <td className="px-4 py-2.5"><NameCell row={row} dark={dark} /></td>
+    <tr className={`${idx % 2 === 0 ? rowAltA : rowAltB} ${rowBorder} ${busy ? "opacity-50" : ""} transition-opacity`}>
+      <td className="px-4 py-2.5"><NameCell row={row} dark={dark} busy={busy} onSelect={onSelect} /></td>
       <td className="px-4 py-2.5"><TypeCell row={row} busy={busy} onPatch={onPatch} selectBg={selectBg} /></td>
       <td className="px-4 py-2.5"><StatusCell row={row} busy={busy} onPatch={onPatch} /></td>
       <td className="px-4 py-2.5"><FameCell row={row} busy={busy} onPatch={onPatch} dark={dark} /></td>

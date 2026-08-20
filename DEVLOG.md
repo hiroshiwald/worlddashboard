@@ -1,5 +1,76 @@
 # World Dashboard Development Log
 
+## 2026-08-20 — EM-2b: Entities tab feedback fixes, evidence panel, candidate triage; Review tab retired
+
+**What changed**: Three pieces of live operator feedback on the EM-2a
+Entities tab, addressed together since the third one (absorbing Review)
+touches the same nav/plumbing as the first two. (A) The PATCH error banner
+moved from an inline top-of-tab block to a fixed, dismissible `ErrorToast`
+(bottom-right, never auto-hides) — and a real latent bug came with it: a
+failed PATCH's message was being wiped almost immediately by its own
+follow-up `load()`, since both used the same `error` state and `load()`
+unconditionally nulls it at the top of every call. Fixed by splitting
+`useEntitiesTab`'s error state into `error` (load/fetch failures, still
+auto-clears per attempt — that's an honest retry, not a hidden failure) and
+`actionError` (PATCH failures, persists until the user dismisses it). Busy
+rows now dim (`opacity-50`) and show an inline "saving…" label next to the
+name instead of only disabling controls. (B) Clicking an entity's name now
+opens the existing `EntityPanel` (fetched by id, no name-resolution round
+trip needed since the row already has it) instead of linking to Wikipedia —
+that link moved to a small icon beside the name. `EntityPanel` gained a
+"Relations" section rendering the typed/directed `relations.incoming`/
+`outgoing` the API already returned but the component never read; each
+relation reuses the existing `onSelectRelated` callback, so no new panel
+prop was needed. (C) The Review queue (1,641 pending, one-click-per-item)
+is now a segmented "Review queue (N)" view inside the Entities tab
+(`useCandidateQueue`, `CandidateTable`/`CandidateRow`/`BulkActionsBar`),
+client-paginated 100/page against the unchanged `GET /api/candidates`
+(server still returns the whole qualifying set). Sample titles are now
+links: `SampleTitleLink` resolves a title via a new `?titleExact=` mode on
+`GET /api/articles` (exact match, newest first, scoped to the same 30-day
+window `sweepRetention` already enforces; 404 shown inline as "article no
+longer retained" rather than a dead link) and opens the real article in a
+new tab. Row actions (accept with the row's own type select, merge,
+dismiss) hit the unchanged `POST /api/candidates`; a checkbox per row plus
+select-all-on-page feed a bulk bar hitting the unchanged
+`POST /api/candidates/bulk` (max 100 — guaranteed by page size) — per-item
+bulk failures render in the same `ErrorToast`, one line each, never
+silently dropped. `ReviewTab.tsx` is deleted; its "review" `TabKey` is gone
+from `HeaderBar`/`useDashboardTable`, and the pending-count badge moved to
+the "Entities (N)" tab label, fed by the same `onCandidatesChanged` callback
+`ReviewTab` used to drive (now threaded to `useCandidateQueue` instead —
+not dead plumbing, just re-pointed).
+
+**What it affected**: `src/hooks/useEntitiesTab.ts` (`actionError`,
+`dismissErrors`), `src/hooks/useCandidateQueue.ts` (new), new
+`src/components/entities/{PaginationFooter,ErrorToast,SegmentedControl,
+CandidateRow,CandidateTable,BulkActionsBar,SampleTitleLink}.tsx`,
+`src/components/entities/types.ts` (`CandidateRowData`, `BulkItemResult`),
+`src/components/entities/{EntityRow,EntitiesTable,index}.tsx`,
+`src/components/EntitiesTab.tsx` (segmented Tracked/queue composition),
+`src/components/EntityPanel.tsx` (relations section), `src/components/
+{HeaderBar,DashboardTable}.tsx`, `src/components/dashboard/TabContent.tsx`,
+`src/hooks/useDashboardTable.ts` (`TabKey` drops `"review"`),
+`src/app/api/articles/route.ts` (`?titleExact=` lookup mode) + its route
+tests (hit/miss/validation), `src/components/ReviewTab.tsx` (deleted).
+Verified: `tsc --noEmit`, full `vitest` suite, `next build` all green;
+UI behavior driven against the dev server with Playwright route
+interception (mocked `/api/entities*`, `/api/candidates*`,
+`/api/articles?titleExact=` — no database in this sandbox) covering the
+segment toggle, a single accept, a bulk dismiss of 2, a sample-title hit
+and a 404 miss, the evidence panel opening (including its new Relations
+section) from a tracked row, and — specifically targeting the bug above —
+a failed PATCH's toast surviving its own refetch and clearing only on
+explicit dismiss.
+
+**Gotchas**: the auto-hide bug in (A) only shows up because `updateEntity`
+always calls `load()` in its `finally`, and `load()` always calls
+`setError(null)` first — sharing one state variable between "the list
+fetch failed" and "the action you just took failed" makes the second kind
+invisible almost every time, since a successful GET right after a failed
+PATCH is the common case, not the exception. Two state variables, not a
+setTimeout guard, is the fix — nothing here is time-based.
+
 ## 2026-08-19 — capture the Batch API's 400 error detail
 
 **What changed**: Every tick since the Batches API merge was reporting

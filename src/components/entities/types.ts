@@ -47,3 +47,26 @@ export interface EntityPatch {
   fame?: string;
   fameLocked?: boolean;
 }
+
+// EM-2b: candidate triage (absorbs ReviewTab.tsx) — mirrors /api/candidates'
+// GET row shape byte-for-byte.
+export interface CandidateRowData {
+  nameNorm: string;
+  displayName: string;
+  typeHint: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  mentionCount: number;
+  sourceNames: string[];
+  sourceCount: number;
+  dayCount: number;
+  sampleTitles: string[];
+  contexts: string[];
+  coEntities: string[];
+}
+
+export interface BulkItemResult {
+  nameNorm: string;
+  ok: boolean;
+  error?: string;
+}
