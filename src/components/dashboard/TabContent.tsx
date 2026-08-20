@@ -46,6 +46,15 @@ const ReviewTab = dynamic(() => import("../ReviewTab"), {
   ),
 });
 
+const EntitiesTab = dynamic(() => import("../EntitiesTab"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full">
+      <p className="text-sm text-gray-400">Loading entities...</p>
+    </div>
+  ),
+});
+
 interface TabContentProps {
   activeTab: string;
   items: FeedItem[];
@@ -57,11 +66,13 @@ interface TabContentProps {
 
 export default function TabContent({ activeTab, items, filteredItems, dark, onEntityClick, onCandidatesChanged }: TabContentProps) {
   if (activeTab === "feeds") return null;
-  // Brief, Review, and Signals are DB-backed, independent of the live feed
-  // items array, so they aren't gated behind items.length like the tabs below.
+  // Brief, Review, Signals, and Entities are DB-backed, independent of the
+  // live feed items array, so they aren't gated behind items.length like
+  // the tabs below.
   if (activeTab === "brief") return <BriefTab dark={dark} onEntityClick={onEntityClick} />;
   if (activeTab === "review") return <ReviewTab dark={dark} onCandidatesChanged={onCandidatesChanged} />;
   if (activeTab === "signals") return <SignalsTab dark={dark} onEntityClick={onEntityClick} />;
+  if (activeTab === "entities") return <EntitiesTab dark={dark} />;
   if (items.length === 0) return null;
 
   switch (activeTab) {

@@ -2,16 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/server/db";
 import type { SqlRow } from "@/lib/server/db";
 import { normalizeName } from "@/lib/server/extract-v2";
-import { searchEntities, ValidationError } from "@/lib/server/entity-admin";
+import { searchEntities, loadEntityStats, ValidationError } from "@/lib/server/entity-admin";
 
 export const dynamic = "force-dynamic";
 
-// Two-mode contract: ?name=<n> resolves a single entity by exact
-// (normalized) canonical name or alias match — {id, canonicalName, type,
-// status}, unchanged since before this file existed. Any OTHER request
-// (name entirely absent from the query string) is list/search mode,
-// backed by entity-admin.ts's searchEntities: ?q=&status=&fame=&limit=&
-// offset= -> {entities: [...], total}. The two modes never overlap: a
+// Three-mode contract: ?view=stats returns entity-admin.ts's loadEntityStats
+// shape directly (EM-2a: the Entities tab's stats strip) and is checked
+// first since it takes no other params. Otherwise, ?name=<n> resolves a
+// single entity by exact (normalized) canonical name or alias match —
+// {id, canonicalName, type, status}, unchanged since before this file
+// existed. Any OTHER request (name entirely absent from the query string)
+// is list/search mode, backed by entity-admin.ts's searchEntities:
+// ?q=&status=&fame=&limit=&offset= -> {entities: [...], total}. The three
+// modes never overlap: ?view=stats always wins, and among the rest a
 // request with ?name= (even blank) always takes the single-lookup path.
 
 const MAX_NAME_LEN = 200;
@@ -75,6 +78,10 @@ export async function GET(req: NextRequest) {
   }
 
   const params = new URL(req.url).searchParams;
+  if (params.get("view") === "stats") {
+    return NextResponse.json(await loadEntityStats(getSql()));
+  }
+
   const name = params.get("name");
   if (name === null) {
     return listEntities(params);

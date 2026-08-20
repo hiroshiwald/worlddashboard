@@ -26,6 +26,15 @@ function listRequest(query: string): NextRequest {
   return new NextRequest(`http://localhost/api/entities${query}`);
 }
 
+function statsRow(overrides: Partial<SqlRow> = {}): SqlRow {
+  return {
+    total_tracked: "5", famous_count: "2", not_famous_count: "1", unknown_count: "2",
+    parked_count: "1", never_checked_count: "1", locked_count: "1",
+    oldest_checked_at: "2026-07-01T00:00:00Z", newest_checked_at: "2026-08-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
 function entityRow(id: number, canonicalName: string): SqlRow {
   return {
     id, canonical_name: canonicalName, type: "person", status: "tracked", aliases: [],
@@ -129,5 +138,53 @@ describe("GET /api/entities — list mode (?name= absent)", () => {
     currentSql = makeMockSql([]).sql;
     const res = await GET(listRequest("?status=bogus"));
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/entities?view=stats", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+
+  it("returns 503 when DATABASE_URL is unset", async () => {
+    delete process.env.DATABASE_URL;
+    const res = await GET(listRequest("?view=stats"));
+    expect(res.status).toBe(503);
+  });
+
+  it("returns loadEntityStats's shape", async () => {
+    currentSql = makeMockSql([statsRow()]).sql;
+    const res = await GET(listRequest("?view=stats"));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toEqual({
+      totalTracked: 5, famousCount: 2, notFamousCount: 1, unknownCount: 2,
+      parkedCount: 1, neverCheckedCount: 1, lockedCount: 1,
+      oldestFameCheckedAt: "2026-07-01T00:00:00.000Z",
+      newestFameCheckedAt: "2026-08-01T00:00:00.000Z",
+    });
+  });
+
+  it("returns null timestamps and zero counts for an empty table", async () => {
+    currentSql = makeMockSql([
+      statsRow({
+        total_tracked: "0", famous_count: "0", not_famous_count: "0", unknown_count: "0",
+        parked_count: "0", never_checked_count: "0", locked_count: "0",
+        oldest_checked_at: null, newest_checked_at: null,
+      }),
+    ]).sql;
+    const res = await GET(listRequest("?view=stats"));
+    const body = await res.json();
+    expect(body.totalTracked).toBe(0);
+    expect(body.oldestFameCheckedAt).toBeNull();
+    expect(body.newestFameCheckedAt).toBeNull();
+  });
+
+  it("takes priority over list mode when both view=stats and other params are present", async () => {
+    currentSql = makeMockSql([statsRow()]).sql;
+    const res = await GET(listRequest("?view=stats&q=ignored&status=bogus"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.totalTracked).toBe(5);
   });
 });

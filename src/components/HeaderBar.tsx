@@ -3,7 +3,7 @@
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
 
-type TabKey = "brief" | "feeds" | "network" | "map" | "signals" | "review";
+type TabKey = "brief" | "feeds" | "network" | "map" | "signals" | "review" | "entities";
 
 interface HeaderBarProps {
   dark: boolean;
@@ -118,6 +118,7 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: "map", label: "Map" },
   { key: "signals", label: "Signals" },
   { key: "review", label: "Review" },
+  { key: "entities", label: "Entities" },
 ];
 
 function SearchInput({
