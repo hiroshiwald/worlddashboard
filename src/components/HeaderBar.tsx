@@ -3,7 +3,7 @@
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
 
-type TabKey = "brief" | "feeds" | "network" | "map" | "signals" | "review" | "entities";
+type TabKey = "brief" | "feeds" | "network" | "map" | "signals" | "entities";
 
 interface HeaderBarProps {
   dark: boolean;
@@ -117,7 +117,6 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: "network", label: "Network" },
   { key: "map", label: "Map" },
   { key: "signals", label: "Signals" },
-  { key: "review", label: "Review" },
   { key: "entities", label: "Entities" },
 ];
 
@@ -287,7 +286,7 @@ export default function HeaderBar({
                 activeTab === tab.key ? t.tabActive : t.tabInactive
               }`}
             >
-              {tab.key === "review" && candidateCount > 0 ? `${tab.label} (${candidateCount})` : tab.label}
+              {tab.key === "entities" && candidateCount > 0 ? `${tab.label} (${candidateCount})` : tab.label}
             </button>
           ))}
         </div>

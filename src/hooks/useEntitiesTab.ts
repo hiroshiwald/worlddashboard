@@ -76,6 +76,10 @@ export function useEntitiesTab() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Separate from `error`: a PATCH failure must stay visible until the user
+  // dismisses it, not get silently wiped by the refetch's own setError(null)
+  // a few lines below (operator feedback: errors must never auto-hide).
+  const [actionError, setActionError] = useState<string | null>(null);
   const [dbUnconfigured, setDbUnconfigured] = useState(false);
   const { busyIds, withBusy } = useBusyIds();
   const loadSeq = useRef(0);
@@ -121,21 +125,28 @@ export function useEntitiesTab() {
   const setFame = useCallback((next: FameFilter) => { setOffset(0); setFameInternal(next); }, []);
 
   // Fails loud, never silently reverts: a PATCH failure still refetches so
-  // the table always reflects the server's real current state.
+  // the table always reflects the server's real current state. The failure
+  // message itself lives in actionError, untouched by load()'s own error
+  // handling, so it survives that refetch instead of vanishing with it.
   const updateEntity = useCallback(
     (id: number, patch: EntityPatch) =>
       withBusy(id, async () => {
-        setError(null);
+        setActionError(null);
         try {
           await patchEntity(id, patch);
         } catch (e) {
-          setError(e instanceof Error ? e.message : "Update failed");
+          setActionError(e instanceof Error ? e.message : "Update failed");
         } finally {
           await load();
         }
       }),
     [load, withBusy],
   );
+
+  const dismissErrors = useCallback(() => {
+    setError(null);
+    setActionError(null);
+  }, []);
 
   const hasPrev = offset > 0;
   const hasNext = offset + entities.length < total;
@@ -144,7 +155,7 @@ export function useEntitiesTab() {
 
   return {
     q, setQ, status, setStatus, fame, setFame,
-    stats, entities, total, loading, error, dbUnconfigured,
+    stats, entities, total, loading, error, actionError, dismissErrors, dbUnconfigured,
     busyIds, updateEntity,
     offset, pageSize: PAGE_SIZE, hasPrev, hasNext, goPrev, goNext,
   };

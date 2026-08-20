@@ -30,11 +30,20 @@ interface RelatedEntity {
   articleCount: number;
 }
 
+interface RelationEdge {
+  relation: string;
+  id: number;
+  name: string;
+  articleCount: number;
+  lastSeenAt: string;
+}
+
 interface EntityDetail {
   entity: EntityProfile;
   series: SeriesPoint[];
   articles: ArticleItem[];
   edges: RelatedEntity[];
+  relations: { incoming: RelationEdge[]; outgoing: RelationEdge[] };
 }
 
 async function fetchEntityDetail(id: number): Promise<EntityDetail> {
@@ -100,6 +109,32 @@ function ArticleList({ articles, dark }: { articles: ArticleItem[]; dark: boolea
           <p className={`text-xs mt-0.5 ${dark ? "text-slate-500" : "text-gray-400"}`}>
             {a.sourceName} &middot; {new Date(a.published).toLocaleDateString()}
           </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// Typed, directed relations (spine 2: evidence one click away) — distinct
+// from the plain co-occurrence chips below: each line states the specific
+// stated relation, not just "appears together".
+function RelationsList({
+  relations, entityName, dark, onSelect,
+}: { relations: { incoming: RelationEdge[]; outgoing: RelationEdge[] }; entityName: string; dark: boolean; onSelect: (id: number) => void }) {
+  const rowCls = `text-xs px-2.5 py-1.5 rounded-lg text-left w-full ${dark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-gray-100 hover:bg-gray-200 text-gray-600"}`;
+  if (relations.incoming.length === 0 && relations.outgoing.length === 0) {
+    return <p className={`text-xs ${dark ? "text-slate-500" : "text-gray-400"}`}>No stated relations yet</p>;
+  }
+  return (
+    <ul className="space-y-1.5">
+      {relations.outgoing.map((r) => (
+        <li key={`out-${r.relation}-${r.id}`}>
+          <button onClick={() => onSelect(r.id)} className={rowCls}>{entityName} {r.relation.replace(/_/g, " ")} {r.name}</button>
+        </li>
+      ))}
+      {relations.incoming.map((r) => (
+        <li key={`in-${r.relation}-${r.id}`}>
+          <button onClick={() => onSelect(r.id)} className={rowCls}>{r.name} {r.relation.replace(/_/g, " ")} {entityName}</button>
         </li>
       ))}
     </ul>
@@ -188,6 +223,11 @@ export default function EntityPanel({ entityId, dark, onClose, onSelectRelated }
             <section className="mt-5">
               <h3 className={`text-sm font-semibold mb-2 ${dark ? "text-slate-200" : "text-gray-800"}`}>Recent articles</h3>
               <ArticleList articles={detail.articles} dark={dark} />
+            </section>
+
+            <section className="mt-5">
+              <h3 className={`text-sm font-semibold mb-2 ${dark ? "text-slate-200" : "text-gray-800"}`}>Relations</h3>
+              <RelationsList relations={detail.relations} entityName={detail.entity.canonicalName} dark={dark} onSelect={onSelectRelated} />
             </section>
 
             <section className="mt-5">

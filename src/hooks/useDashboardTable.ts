@@ -5,7 +5,7 @@ import { FeedItem, SortConfig } from "@/lib/types";
 import { useFeed } from "@/hooks/useSources";
 import { getThemeClasses, ThemeClasses } from "@/lib/theme";
 
-export type TabKey = "brief" | "feeds" | "network" | "map" | "signals" | "review" | "entities";
+export type TabKey = "brief" | "feeds" | "network" | "map" | "signals" | "entities";
 export type ColumnKey = keyof FeedItem;
 
 interface UseDashboardTableReturn {

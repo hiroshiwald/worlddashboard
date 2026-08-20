@@ -37,15 +37,6 @@ const SignalsTab = dynamic(() => import("../SignalsTab"), {
   ),
 });
 
-const ReviewTab = dynamic(() => import("../ReviewTab"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex items-center justify-center h-full">
-      <p className="text-sm text-gray-400">Loading review queue...</p>
-    </div>
-  ),
-});
-
 const EntitiesTab = dynamic(() => import("../EntitiesTab"), {
   ssr: false,
   loading: () => (
@@ -61,18 +52,20 @@ interface TabContentProps {
   filteredItems: FeedItem[];
   dark: boolean;
   onEntityClick: (name: string) => void;
+  onEntitySelect: (id: number) => void;
   onCandidatesChanged: (count: number) => void;
 }
 
-export default function TabContent({ activeTab, items, filteredItems, dark, onEntityClick, onCandidatesChanged }: TabContentProps) {
+export default function TabContent({ activeTab, items, filteredItems, dark, onEntityClick, onEntitySelect, onCandidatesChanged }: TabContentProps) {
   if (activeTab === "feeds") return null;
-  // Brief, Review, Signals, and Entities are DB-backed, independent of the
-  // live feed items array, so they aren't gated behind items.length like
-  // the tabs below.
+  // Brief, Signals, and Entities are DB-backed, independent of the live feed
+  // items array, so they aren't gated behind items.length like the tabs
+  // below. Entities absorbs the former Review tab's candidate queue.
   if (activeTab === "brief") return <BriefTab dark={dark} onEntityClick={onEntityClick} />;
-  if (activeTab === "review") return <ReviewTab dark={dark} onCandidatesChanged={onCandidatesChanged} />;
   if (activeTab === "signals") return <SignalsTab dark={dark} onEntityClick={onEntityClick} />;
-  if (activeTab === "entities") return <EntitiesTab dark={dark} />;
+  if (activeTab === "entities") {
+    return <EntitiesTab dark={dark} onEntitySelect={onEntitySelect} onCandidatesChanged={onCandidatesChanged} />;
+  }
   if (items.length === 0) return null;
 
   switch (activeTab) {

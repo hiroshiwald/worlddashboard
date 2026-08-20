@@ -8,6 +8,8 @@ export const dynamic = "force-dynamic";
 const DEFAULT_DAYS = 7;
 const MAX_DAYS = 30;
 const MAX_ITEMS = 500;
+const TITLE_EXACT_MAX_LEN = 500;
+const TITLE_EXACT_RETENTION_DAYS = 30;
 
 function parseDays(raw: string | null): number {
   const parsed = Number(raw);
@@ -84,19 +86,49 @@ async function queryClusterHeads(
   return rows.map(toFeedItem);
 }
 
+// Sample-title lookup (candidate triage's "linked sample titles"): resolves a
+// verbatim article title to its link, newest match first, so a click can open
+// the real source article in a new tab instead of a black box. Bounded to the
+// same 30-day window sweepRetention already enforces, matched exactly (sample
+// titles are stored verbatim) rather than fuzzily.
+function isValidTitleExact(title: string): boolean {
+  return title.trim().length > 0 && title.length <= TITLE_EXACT_MAX_LEN;
+}
+
+async function lookupArticleByExactTitle(sql: Sql, title: string): Promise<{ link: string } | null> {
+  const rows = await sql`
+    SELECT link FROM articles
+    WHERE title = ${title}
+      AND first_seen_at >= now() - make_interval(days => ${TITLE_EXACT_RETENTION_DAYS}::int)
+    ORDER BY first_seen_at DESC
+    LIMIT 1
+  `;
+  return rows[0] ? { link: String(rows[0].link) } : null;
+}
+
 export async function GET(req: NextRequest) {
   if (!process.env.DATABASE_URL) {
     return NextResponse.json({ error: "DATABASE_URL is not configured" }, { status: 503 });
   }
 
   const sql = getSql();
+  const { searchParams } = new URL(req.url);
+  const titleExact = searchParams.get("titleExact");
+  if (titleExact !== null) {
+    if (!isValidTitleExact(titleExact)) {
+      return NextResponse.json({ error: "titleExact must be a non-empty string" }, { status: 400 });
+    }
+    const match = await lookupArticleByExactTitle(sql, titleExact);
+    if (!match) return NextResponse.json({ error: "Article not found" }, { status: 404 });
+    return NextResponse.json(match);
+  }
+
   const summaryRows = await sql`SELECT COUNT(*)::int AS count, MAX(first_seen_at) AS last_ingest_at FROM articles`;
   const totalCount = Number(summaryRows[0]?.count ?? 0);
   if (totalCount === 0) {
     return NextResponse.json({ error: "No articles ingested yet" }, { status: 503 });
   }
 
-  const { searchParams } = new URL(req.url);
   const days = parseDays(searchParams.get("days"));
   const category = searchParams.get("category");
   const items = await queryClusterHeads(sql, days, category);

@@ -1,4 +1,11 @@
 export { default as StatsStrip } from "./StatsStrip";
 export { default as ControlsRow } from "./ControlsRow";
 export { default as EntitiesTable } from "./EntitiesTable";
+export { default as PaginationFooter } from "./PaginationFooter";
+export { default as ErrorToast } from "./ErrorToast";
+export { default as SegmentedControl } from "./SegmentedControl";
+export { default as CandidateTable } from "./CandidateTable";
+export { default as BulkActionsBar } from "./BulkActionsBar";
+export { default as SampleTitleLink } from "./SampleTitleLink";
 export * from "./types";
+export * from "./SegmentedControl";

@@ -3,6 +3,7 @@
 import { ThemeClasses } from "@/lib/theme";
 import { EntityPatch, EntityRowData } from "./types";
 import EntityRow from "./EntityRow";
+import PaginationFooter from "./PaginationFooter";
 
 const COLUMNS = ["Name", "Type", "Status", "Fame", "Checked", "First seen"];
 
@@ -20,34 +21,13 @@ function TableHeader({ t }: { t: ThemeClasses }) {
   );
 }
 
-function PaginationFooter({
-  offset, count, total, hasPrev, hasNext, goPrev, goNext, dark,
-}: {
-  offset: number; count: number; total: number;
-  hasPrev: boolean; hasNext: boolean; goPrev: () => void; goNext: () => void; dark: boolean;
-}) {
-  const btnCls = `text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-40 ${
-    dark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"
-  }`;
-  return (
-    <div className="flex items-center justify-between px-4 py-3">
-      <span className={`text-xs ${dark ? "text-slate-500" : "text-gray-400"}`}>
-        {total === 0 ? "0 entities" : `${offset + 1}–${offset + count} of ${total}`}
-      </span>
-      <div className="flex gap-2">
-        <button onClick={goPrev} disabled={!hasPrev} className={btnCls}>Prev</button>
-        <button onClick={goNext} disabled={!hasNext} className={btnCls}>Next</button>
-      </div>
-    </div>
-  );
-}
-
 interface EntitiesTableProps {
   entities: EntityRowData[];
   dark: boolean;
   t: ThemeClasses;
   busyIds: Set<number>;
   onPatch: (id: number, patch: EntityPatch) => void;
+  onEntitySelect: (id: number) => void;
   offset: number;
   total: number;
   hasPrev: boolean;
@@ -57,7 +37,7 @@ interface EntitiesTableProps {
 }
 
 export default function EntitiesTable({
-  entities, dark, t, busyIds, onPatch, offset, total, hasPrev, hasNext, goPrev, goNext,
+  entities, dark, t, busyIds, onPatch, onEntitySelect, offset, total, hasPrev, hasNext, goPrev, goNext,
 }: EntitiesTableProps) {
   return (
     <div className={`rounded-xl overflow-hidden shadow-sm ${dark ? "shadow-black/20" : ""} ${t.tableBorder}`}>
@@ -73,6 +53,7 @@ export default function EntitiesTable({
                 dark={dark}
                 busy={busyIds.has(row.id)}
                 onPatch={onPatch}
+                onSelect={onEntitySelect}
                 rowAltA={t.rowAltA}
                 rowAltB={t.rowAltB}
                 rowBorder={t.rowBorder}
@@ -85,6 +66,7 @@ export default function EntitiesTable({
       <PaginationFooter
         offset={offset} count={entities.length} total={total}
         hasPrev={hasPrev} hasNext={hasNext} goPrev={goPrev} goNext={goNext} dark={dark}
+        noun="entities"
       />
     </div>
   );
