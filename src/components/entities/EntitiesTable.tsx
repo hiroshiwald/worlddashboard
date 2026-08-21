@@ -1,18 +1,26 @@
 "use client";
 
 import { ThemeClasses } from "@/lib/theme";
-import { EntityPatch, EntityRowData } from "./types";
+import { EntityPatch, EntityRowData, PageSizeOption, PAGE_SIZE_OPTIONS } from "./types";
 import EntityRow from "./EntityRow";
 import PaginationFooter from "./PaginationFooter";
 
 const COLUMNS = ["Name", "Type", "Status", "Fame", "Checked", "First seen"];
+
+// The one-line helper text the task asks for lives on the Fame column
+// header, right where the Established/Emerging buttons it explains live.
+const FAME_HELP = "Established: a widely known name — appears as context, never as a card subject. Emerging: eligible to headline cards.";
 
 function TableHeader({ t }: { t: ThemeClasses }) {
   return (
     <thead className="sticky top-0 z-10">
       <tr className={t.theadBg}>
         {COLUMNS.map((col) => (
-          <th key={col} className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${t.theadText}`}>
+          <th
+            key={col}
+            title={col === "Fame" ? FAME_HELP : undefined}
+            className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap ${t.theadText}`}
+          >
             {col}
           </th>
         ))}
@@ -34,10 +42,13 @@ interface EntitiesTableProps {
   hasNext: boolean;
   goPrev: () => void;
   goNext: () => void;
+  pageSize: PageSizeOption;
+  onPageSizeChange: (size: PageSizeOption) => void;
 }
 
 export default function EntitiesTable({
   entities, dark, t, busyIds, onPatch, onEntitySelect, offset, total, hasPrev, hasNext, goPrev, goNext,
+  pageSize, onPageSizeChange,
 }: EntitiesTableProps) {
   return (
     <div className={`rounded-xl overflow-hidden shadow-sm ${dark ? "shadow-black/20" : ""} ${t.tableBorder}`}>
@@ -67,6 +78,8 @@ export default function EntitiesTable({
         offset={offset} count={entities.length} total={total}
         hasPrev={hasPrev} hasNext={hasNext} goPrev={goPrev} goNext={goNext} dark={dark}
         noun="entities"
+        pageSize={pageSize} pageSizeOptions={PAGE_SIZE_OPTIONS}
+        onPageSizeChange={(size) => onPageSizeChange(size as PageSizeOption)}
       />
     </div>
   );

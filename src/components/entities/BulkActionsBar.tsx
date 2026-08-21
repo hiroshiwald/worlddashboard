@@ -16,6 +16,7 @@ export default function BulkActionsBar({ selectedCount, bulkBusy, dark, onAccept
       <button
         onClick={onAcceptSelected}
         disabled={bulkBusy}
+        title={`Tracks all ${selectedCount} selected candidates, each as its chosen type. Reversible individually: dismiss any of them afterward.`}
         className="text-xs px-3 py-1.5 rounded-lg font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40"
       >
         {bulkBusy ? "Working…" : "Accept selected"}
@@ -23,6 +24,7 @@ export default function BulkActionsBar({ selectedCount, bulkBusy, dark, onAccept
       <button
         onClick={onDismissSelected}
         disabled={bulkBusy}
+        title={`Dismisses all ${selectedCount} selected candidates — none will be suggested again. Reversible individually from Status: Dismissed in the Tracked view.`}
         className={`text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-40 ${dark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
       >
         {bulkBusy ? "Working…" : "Dismiss selected"}

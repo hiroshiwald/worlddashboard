@@ -70,3 +70,13 @@ export interface BulkItemResult {
   ok: boolean;
   error?: string;
 }
+
+// Consequence narration: a success confirmation with an optional one-level
+// undo (the inverse call, from a pre-action snapshot — no history stack).
+export interface ToastState {
+  message: string;
+  onUndo?: () => void;
+}
+
+export const PAGE_SIZE_OPTIONS = [50, 100, 250] as const;
+export type PageSizeOption = (typeof PAGE_SIZE_OPTIONS)[number];

@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useBusyIds } from "./useBusyIds";
 import {
   EntityRowData, EntityStats, EntityPatch, StatusFilter, FameFilter,
+  ToastState, PageSizeOption, PAGE_SIZE_OPTIONS,
 } from "@/components/entities/types";
 
-const PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE: PageSizeOption = PAGE_SIZE_OPTIONS[0];
 const SEARCH_DEBOUNCE_MS = 300;
 
 // Distinguishes "no database configured yet" from a genuine fetch/shape
@@ -20,12 +21,12 @@ async function fetchStats(): Promise<EntityStats> {
   return res.json();
 }
 
-function buildListQuery(q: string, status: StatusFilter, fame: FameFilter, offset: number): string {
+function buildListQuery(q: string, status: StatusFilter, fame: FameFilter, offset: number, pageSize: number): string {
   const params = new URLSearchParams();
   if (q.trim()) params.set("q", q.trim());
   if (status !== "all") params.set("status", status);
   if (fame !== "all") params.set("fame", fame);
-  params.set("limit", String(PAGE_SIZE));
+  params.set("limit", String(pageSize));
   params.set("offset", String(offset));
   return params.toString();
 }
@@ -35,8 +36,8 @@ interface FetchListResult {
   total: number;
 }
 
-async function fetchEntitiesList(q: string, status: StatusFilter, fame: FameFilter, offset: number): Promise<FetchListResult> {
-  const res = await fetch(`/api/entities?${buildListQuery(q, status, fame, offset)}`, { cache: "no-store" });
+async function fetchEntitiesList(q: string, status: StatusFilter, fame: FameFilter, offset: number, pageSize: number): Promise<FetchListResult> {
+  const res = await fetch(`/api/entities?${buildListQuery(q, status, fame, offset, pageSize)}`, { cache: "no-store" });
   if (res.status === 503) throw new DatabaseNotConfiguredError();
   if (!res.ok) throw new Error(`Failed to load entities (${res.status})`);
   const data = await res.json();
@@ -46,7 +47,7 @@ async function fetchEntitiesList(q: string, status: StatusFilter, fame: FameFilt
   };
 }
 
-async function patchEntity(id: number, patch: EntityPatch): Promise<void> {
+async function patchEntity(id: number, patch: EntityPatch): Promise<EntityRowData> {
   const res = await fetch(`/api/entities/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -56,6 +57,48 @@ async function patchEntity(id: number, patch: EntityPatch): Promise<void> {
     const data = await res.json().catch(() => ({}));
     throw new Error(typeof data.error === "string" ? data.error : `Update failed (${res.status})`);
   }
+  // The PATCH response is the authoritative post-update row (server truth,
+  // not optimistic state) — the live bug this hook exists to fix is that
+  // callers used to discard it and wait for a manual refresh.
+  return res.json();
+}
+
+function matchesActiveFilters(row: EntityRowData, status: StatusFilter, fame: FameFilter): boolean {
+  if (status !== "all" && row.status !== status) return false;
+  if (fame !== "all" && row.fame !== fame) return false;
+  return true;
+}
+
+/** Consequence narration copy, decided per-task, keyed off the patch that
+ * was actually sent — undoPatch is the inverse, built from the pre-action
+ * snapshot. A patch outside this list (e.g. a type change) gets no toast. */
+function describePatch(before: EntityRowData, patch: EntityPatch): { message: string; undoPatch: EntityPatch } | null {
+  const name = before.canonicalName;
+  if (patch.fame === "famous") {
+    return {
+      message: `${name} is now Established (locked — the automatic sweep won't change it). It can appear as context on cards, never as a subject.`,
+      undoPatch: { fame: before.fame, fameLocked: before.fameLocked },
+    };
+  }
+  if (patch.fame === "not_famous") {
+    return {
+      message: `${name} is now Emerging (locked). It can headline Developments cards.`,
+      undoPatch: { fame: before.fame, fameLocked: before.fameLocked },
+    };
+  }
+  if (patch.status === "dismissed") {
+    return {
+      message: `${name} dismissed — no longer tracked; future mentions are not collected. It stays in the database: filter Status: Dismissed to re-track.`,
+      undoPatch: { status: before.status },
+    };
+  }
+  if (patch.status === "tracked") {
+    return { message: `${name} is tracked again.`, undoPatch: { status: before.status } };
+  }
+  if (patch.fameLocked === false) {
+    return { message: `${name} unlocked — the automatic sweep may revise its status.`, undoPatch: { fameLocked: before.fameLocked } };
+  }
+  return null;
 }
 
 // Exception to 50-line rule: search/filter/pagination/PATCH state for the
@@ -70,6 +113,7 @@ export function useEntitiesTab() {
   const [status, setStatusInternal] = useState<StatusFilter>("tracked");
   const [fame, setFameInternal] = useState<FameFilter>("all");
   const [offset, setOffset] = useState(0);
+  const [pageSize, setPageSizeInternal] = useState<PageSizeOption>(DEFAULT_PAGE_SIZE);
 
   const [stats, setStats] = useState<EntityStats | null>(null);
   const [entities, setEntities] = useState<EntityRowData[]>([]);
@@ -80,6 +124,7 @@ export function useEntitiesTab() {
   // dismisses it, not get silently wiped by the refetch's own setError(null)
   // a few lines below (operator feedback: errors must never auto-hide).
   const [actionError, setActionError] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [dbUnconfigured, setDbUnconfigured] = useState(false);
   const { busyIds, withBusy } = useBusyIds();
   const loadSeq = useRef(0);
@@ -100,7 +145,7 @@ export function useEntitiesTab() {
     try {
       const [statsResult, listResult] = await Promise.all([
         fetchStats(),
-        fetchEntitiesList(debouncedQ, status, fame, offset),
+        fetchEntitiesList(debouncedQ, status, fame, offset, pageSize),
       ]);
       if (seq !== loadSeq.current) return;
       setStats(statsResult);
@@ -113,7 +158,7 @@ export function useEntitiesTab() {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [debouncedQ, status, fame, offset]);
+  }, [debouncedQ, status, fame, offset, pageSize]);
 
   useEffect(() => {
     // Fire-and-forget: load() owns its own try/catch and reports via state.
@@ -123,40 +168,76 @@ export function useEntitiesTab() {
   const setQ = useCallback((next: string) => { setOffset(0); setQInternal(next); }, []);
   const setStatus = useCallback((next: StatusFilter) => { setOffset(0); setStatusInternal(next); }, []);
   const setFame = useCallback((next: FameFilter) => { setOffset(0); setFameInternal(next); }, []);
+  const setPageSize = useCallback((next: PageSizeOption) => { setOffset(0); setPageSizeInternal(next); }, []);
+
+  // Applies the PATCH response (server truth) to local state immediately,
+  // instead of waiting for the follow-up refetch: replaces the row in
+  // place, or — if it no longer matches the active filters — drops it from
+  // the visible list and adjusts the visible total. A row not currently in
+  // the list (e.g. an undo bringing a filtered-out row back) is left for
+  // the refetch below to reinsert in its correct sorted/paged position.
+  const applyServerUpdate = useCallback((updated: EntityRowData) => {
+    setEntities((prev) => {
+      const idx = prev.findIndex((e) => e.id === updated.id);
+      if (idx === -1) return prev;
+      if (!matchesActiveFilters(updated, status, fame)) {
+        setTotal((t) => Math.max(0, t - 1));
+        return prev.filter((e) => e.id !== updated.id);
+      }
+      const next = [...prev];
+      next[idx] = updated;
+      return next;
+    });
+  }, [status, fame]);
 
   // Fails loud, never silently reverts: a PATCH failure still refetches so
   // the table always reflects the server's real current state. The failure
   // message itself lives in actionError, untouched by load()'s own error
   // handling, so it survives that refetch instead of vanishing with it.
+  // `silent` skips the toast — used for the undo action itself, since
+  // one-level undo needs no toast chain of its own.
   const updateEntity = useCallback(
-    (id: number, patch: EntityPatch) =>
+    (id: number, patch: EntityPatch, opts?: { silent?: boolean }) =>
       withBusy(id, async () => {
         setActionError(null);
+        const before = entities.find((e) => e.id === id) ?? null;
         try {
-          await patchEntity(id, patch);
+          const updated = await patchEntity(id, patch);
+          applyServerUpdate(updated);
+          if (before && !opts?.silent) {
+            const description = describePatch(before, patch);
+            if (description) {
+              setToast({
+                message: description.message,
+                onUndo: () => updateEntity(id, description.undoPatch, { silent: true }),
+              });
+            }
+          }
         } catch (e) {
           setActionError(e instanceof Error ? e.message : "Update failed");
         } finally {
           await load();
         }
       }),
-    [load, withBusy],
+    [load, withBusy, entities, applyServerUpdate],
   );
 
   const dismissErrors = useCallback(() => {
     setError(null);
     setActionError(null);
   }, []);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   const hasPrev = offset > 0;
   const hasNext = offset + entities.length < total;
-  const goPrev = useCallback(() => setOffset((o) => Math.max(0, o - PAGE_SIZE)), []);
-  const goNext = useCallback(() => setOffset((o) => o + PAGE_SIZE), []);
+  const goPrev = useCallback(() => setOffset((o) => Math.max(0, o - pageSize)), [pageSize]);
+  const goNext = useCallback(() => setOffset((o) => o + pageSize), [pageSize]);
 
   return {
     q, setQ, status, setStatus, fame, setFame,
     stats, entities, total, loading, error, actionError, dismissErrors, dbUnconfigured,
+    toast, dismissToast,
     busyIds, updateEntity,
-    offset, pageSize: PAGE_SIZE, hasPrev, hasNext, goPrev, goNext,
+    offset, pageSize, setPageSize, hasPrev, hasNext, goPrev, goNext,
   };
 }

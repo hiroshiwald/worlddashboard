@@ -6,7 +6,7 @@ import { useEntitiesTab } from "@/hooks/useEntitiesTab";
 import { useCandidateQueue } from "@/hooks/useCandidateQueue";
 import {
   StatsStrip, ControlsRow, EntitiesTable, SegmentedControl, CandidateTable,
-  BulkActionsBar, ErrorToast, EntitiesView,
+  BulkActionsBar, ErrorToast, SuccessToast, EntitiesView,
 } from "./entities";
 
 interface EntitiesTabProps {
@@ -20,15 +20,20 @@ function EmptyState({ dark, message }: { dark: boolean; message: string }) {
 }
 
 function TrackedView({ dark, t, tab, onEntitySelect }: { dark: boolean; t: ThemeClasses; tab: ReturnType<typeof useEntitiesTab>; onEntitySelect: (id: number) => void }) {
-  const { q, setQ, status, setStatus, fame, setFame, stats, entities, total, loading, busyIds, updateEntity, offset, hasPrev, hasNext, goPrev, goNext } = tab;
-  const isFiltered = q.trim() !== "" || status !== "all" || fame !== "all";
+  const {
+    q, setQ, status, setStatus, fame, setFame, stats, entities, total, loading, busyIds, updateEntity,
+    offset, pageSize, setPageSize, hasPrev, hasNext, goPrev, goNext,
+  } = tab;
+  // The Tracked stat tile counts as the "status=tracked, fame=all" default,
+  // not as an active filter narrowing an otherwise-broader view.
+  const isFiltered = q.trim() !== "" || status !== "tracked" || fame !== "all";
 
   if (loading && !stats) return <EmptyState dark={dark} message="Loading entities..." />;
   if (!stats) return null;
 
   return (
     <>
-      <StatsStrip stats={stats} dark={dark} />
+      <StatsStrip stats={stats} dark={dark} status={status} fame={fame} setStatus={setStatus} setFame={setFame} />
       <ControlsRow q={q} setQ={setQ} status={status} setStatus={setStatus} fame={fame} setFame={setFame} t={t} />
       {entities.length === 0 ? (
         <EmptyState dark={dark} message={isFiltered ? "No entities match" : "No entities tracked yet"} />
@@ -36,6 +41,7 @@ function TrackedView({ dark, t, tab, onEntitySelect }: { dark: boolean; t: Theme
         <EntitiesTable
           entities={entities} dark={dark} t={t} busyIds={busyIds} onPatch={updateEntity} onEntitySelect={onEntitySelect}
           offset={offset} total={total} hasPrev={hasPrev} hasNext={hasNext} goPrev={goPrev} goNext={goNext}
+          pageSize={pageSize} onPageSizeChange={setPageSize}
         />
       )}
     </>
@@ -73,14 +79,17 @@ export default function EntitiesTab({ dark, onEntitySelect, onCandidatesChanged 
   const t = getThemeClasses(dark);
 
   const dbUnconfigured = tab.dbUnconfigured || queue.dbUnconfigured;
-  const toastMessages = view === "tracked"
+  const errorMessages = view === "tracked"
     ? [tab.error, tab.actionError].filter((m): m is string => !!m)
     : [queue.error, queue.actionError, ...queue.bulkErrors.map((f) => `${f.nameNorm}: ${f.error ?? "failed"}`)].filter((m): m is string => !!m);
-  const dismissToast = view === "tracked" ? tab.dismissErrors : queue.dismissErrors;
+  const dismissErrorToast = view === "tracked" ? tab.dismissErrors : queue.dismissErrors;
+  const successToast = view === "tracked" ? tab.toast : queue.toast;
+  const dismissSuccessToast = view === "tracked" ? tab.dismissToast : queue.dismissToast;
 
   return (
     <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-4">
-      <ErrorToast messages={toastMessages} dark={dark} onDismiss={dismissToast} />
+      <ErrorToast messages={errorMessages} dark={dark} onDismiss={dismissErrorToast} />
+      <SuccessToast toast={successToast} dark={dark} onDismiss={dismissSuccessToast} />
 
       {dbUnconfigured && <EmptyState dark={dark} message="Entity management requires a configured database." />}
 
