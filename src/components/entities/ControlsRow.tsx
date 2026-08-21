@@ -4,7 +4,7 @@ import { ThemeClasses } from "@/lib/theme";
 import { StatusFilter, FameFilter, STATUS_FILTERS, FAME_FILTERS } from "./types";
 
 const STATUS_LABELS: Record<StatusFilter, string> = { tracked: "Tracked", dismissed: "Dismissed", all: "All statuses" };
-const FAME_LABELS: Record<FameFilter, string> = { all: "All fame", famous: "Famous", not_famous: "Not famous", unknown: "Unknown" };
+const FAME_LABELS: Record<FameFilter, string> = { all: "All fame", famous: "Established", not_famous: "Emerging", unknown: "Unchecked" };
 
 interface ControlsRowProps {
   q: string;
@@ -36,6 +36,7 @@ export default function ControlsRow({ q, setQ, status, setStatus, fame, setFame,
       <select
         value={fame}
         onChange={(e) => setFame(e.target.value as FameFilter)}
+        title="Established: a widely known name — appears as context, never as a card subject. Emerging: eligible to headline cards."
         className={`px-3 py-2 text-sm border rounded-lg focus:outline-none cursor-pointer ${t.selectBg}`}
       >
         {FAME_FILTERS.map((f) => <option key={f} value={f}>{FAME_LABELS[f]}</option>)}

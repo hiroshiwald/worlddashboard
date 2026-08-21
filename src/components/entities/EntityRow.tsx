@@ -50,6 +50,7 @@ function TypeCell({ row, busy, onPatch, selectBg }: RowCellProps & { selectBg: s
       value={row.type}
       disabled={busy}
       onChange={(e) => onPatch(row.id, { type: e.target.value })}
+      title="Change the entity type. You can change it back anytime."
       className={`text-xs px-2 py-1 border rounded-lg disabled:opacity-40 ${selectBg}`}
     >
       {ENTITY_TYPES.map((opt) => <option key={opt} value={opt}>{opt.replace(/_/g, " ")}</option>)}
@@ -60,12 +61,16 @@ function TypeCell({ row, busy, onPatch, selectBg }: RowCellProps & { selectBg: s
 function StatusCell({ row, busy, onPatch }: RowCellProps) {
   const next = row.status === "tracked" ? "dismissed" : "tracked";
   const label = row.status === "tracked" ? "Dismiss" : "Track";
+  const title = row.status === "tracked"
+    ? `Dismisses ${row.canonicalName} — stops collecting new mentions. Reversible.`
+    : `Tracks ${row.canonicalName} again. Reversible.`;
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs">{row.status}</span>
       <button
         onClick={() => onPatch(row.id, { status: next })}
         disabled={busy}
+        title={title}
         className="text-[11px] px-2 py-1 rounded-lg font-medium bg-slate-700/20 hover:bg-slate-700/40 disabled:opacity-40"
       >
         {label}
@@ -81,10 +86,29 @@ function FameCell({ row, busy, onPatch, dark }: RowCellProps & { dark: boolean }
     }`;
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
-      <button onClick={() => onPatch(row.id, { fame: "famous", fameLocked: true })} disabled={busy} className={btn(row.fame === "famous")}>Famous</button>
-      <button onClick={() => onPatch(row.id, { fame: "not_famous", fameLocked: true })} disabled={busy} className={btn(row.fame === "not_famous")}>Not famous</button>
+      <button
+        onClick={() => onPatch(row.id, { fame: "famous", fameLocked: true })}
+        disabled={busy}
+        title={`Marks ${row.canonicalName} as Established and locks it — appears only as context, never a card subject. Reversible.`}
+        className={btn(row.fame === "famous")}
+      >
+        Established
+      </button>
+      <button
+        onClick={() => onPatch(row.id, { fame: "not_famous", fameLocked: true })}
+        disabled={busy}
+        title={`Marks ${row.canonicalName} as Emerging and locks it — eligible to headline Developments cards. Reversible.`}
+        className={btn(row.fame === "not_famous")}
+      >
+        Emerging
+      </button>
       {row.fameLocked ? (
-        <button onClick={() => onPatch(row.id, { fameLocked: false })} disabled={busy} className="text-[11px]" title="Human-locked — the sweep will not overwrite this">
+        <button
+          onClick={() => onPatch(row.id, { fameLocked: false })}
+          disabled={busy}
+          className="text-[11px]"
+          title={`Unlocks ${row.canonicalName} — the automatic sweep may revise its status. Reversible.`}
+        >
           🔒 Unlock
         </button>
       ) : (

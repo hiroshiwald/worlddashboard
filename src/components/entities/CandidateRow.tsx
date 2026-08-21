@@ -57,9 +57,17 @@ function ActionsCell({
 }: { candidate: CandidateRowData; rowType: string; busy: boolean; dark: boolean; onAccept: () => void; onMerge: (mergeInto: string) => void; onDismiss: () => void }) {
   const [mergeTarget, setMergeTarget] = useState("");
   const inputBg = dark ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-gray-50 border-gray-200 text-gray-900";
+  const mergeTitle = mergeTarget.trim().length > 0
+    ? `Merges ${candidate.displayName} into "${mergeTarget.trim()}" — combines their mentions immediately. Not reversible here.`
+    : "Enter the exact existing entity name to merge into.";
   return (
     <div className="flex flex-col gap-1.5 min-w-[11rem]">
-      <button onClick={onAccept} disabled={busy} className="text-xs px-3 py-1.5 rounded-lg font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40">
+      <button
+        onClick={onAccept}
+        disabled={busy}
+        title={`Tracks ${candidate.displayName} as ${rowType.replace(/_/g, " ")}. Reversible: dismiss it from the Tracked view afterward.`}
+        className="text-xs px-3 py-1.5 rounded-lg font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40"
+      >
         Accept as {rowType.replace(/_/g, " ")}
       </button>
       <div className="flex gap-1.5">
@@ -74,6 +82,7 @@ function ActionsCell({
         <button
           onClick={() => onMerge(mergeTarget)}
           disabled={busy || mergeTarget.trim().length === 0}
+          title={mergeTitle}
           className="text-xs px-2 py-1.5 rounded-lg font-medium bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 shrink-0"
         >
           Merge
@@ -82,6 +91,7 @@ function ActionsCell({
       <button
         onClick={onDismiss}
         disabled={busy}
+        title={`Dismisses ${candidate.displayName} — it will not be suggested again. Reversible from Status: Dismissed in the Tracked view.`}
         className={`text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-40 ${dark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
       >
         Dismiss
