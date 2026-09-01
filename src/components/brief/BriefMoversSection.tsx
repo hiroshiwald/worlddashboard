@@ -9,6 +9,12 @@ interface BriefMoversSectionProps {
   onEntityClick: (name: string) => void;
 }
 
+// One decimal below 10 (baselines are often fractional, e.g. 4.3/day),
+// whole number at/above 10 where the extra precision stops mattering.
+function formatBaseline(n: number): string {
+  return n < 10 ? n.toFixed(1) : Math.round(n).toString();
+}
+
 // BriefDevelopmentsSection (rendered first in BriefTab) owns the single
 // warm-up line — this section stays silent during warm-up instead of
 // duplicating it.
@@ -29,7 +35,9 @@ export default function BriefMoversSection({ movers, warmup, dark, onEntityClick
             className={`text-xs px-3 py-1.5 rounded-full border ${dark ? "bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"}`}
           >
             <span className="font-semibold">{mover.name}</span>
-            <span className={dark ? "text-slate-500" : "text-gray-400"}> ×{mover.lift.toFixed(1)}</span>
+            <span className={dark ? "text-slate-500" : "text-gray-400"}>
+              {" "}×{mover.lift.toFixed(1)} · {mover.observed24h} today vs ~{formatBaseline(mover.baselineDaily)}/day
+            </span>
           </button>
         ))}
       </div>

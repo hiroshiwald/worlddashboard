@@ -139,9 +139,14 @@ export default function BriefDevelopmentsSection({ developments, warmup, dark, o
   const warmupDays = Math.ceil(warmup.daysRemaining);
   return (
     <div className="mb-6">
-      <h3 className={`text-xs font-bold uppercase tracking-wide mb-2 ${dark ? "text-slate-400" : "text-gray-500"}`}>
-        Developments
-      </h3>
+      <div className="mb-2">
+        <h3 className={`text-xs font-bold uppercase tracking-wide ${dark ? "text-slate-400" : "text-gray-500"}`}>
+          Developments{developments.length > 0 ? ` · ${developments.length}` : ""}
+        </h3>
+        {developments.length > 0 && (
+          <p className={`text-[11px] mt-0.5 ${dark ? "text-slate-500" : "text-gray-400"}`}>Ranked by score</p>
+        )}
+      </div>
       {warmup.active ? (
         <p className={`text-xs ${dark ? "text-slate-500" : "text-gray-400"}`}>
           Signal engine warming up — {warmupDays} {warmupDays === 1 ? "day" : "days"} of baseline remaining.
