@@ -151,6 +151,10 @@ describe("GET /api/entities/[id]", () => {
       fameCheckedAt: null,
       firstSeenAt: "2026-07-01T00:00:00.000Z",
       lastSeenAt: "2026-07-15T00:00:00.000Z",
+      // type=country fires isAnchor's type prong regardless of baseline —
+      // deterministic even with no baseline-panel mock response.
+      role: "anchor",
+      roleReasons: ["country_or_region_type"],
     });
     expect(body.activity).toEqual({ mentions30d: 0, sources30d: 0 });
     expect(body.series).toEqual([]);
@@ -267,6 +271,46 @@ describe("GET /api/entities/[id] — activity", () => {
     const res = await GET(req, { params: { id: "1" } });
     const body = await res.json();
     expect(body.activity).toEqual({ mentions30d: 0, sources30d: 0 });
+  });
+});
+
+describe("GET /api/entities/[id] — role classification", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+
+  it("classifies a famous (non-anchor-type) entity via the dictionary prong, and scopes breadth to this one id", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM entities WHERE id")) {
+        return [entityRow({ id: "7", canonical_name: "Kremlin", type: "organization" })];
+      }
+      return [];
+    });
+    currentSql = sql;
+    const res = await GET(req, { params: { id: "7" } });
+    const body = await res.json();
+
+    expect(body.entity.role).toBe("famous");
+    expect(body.entity.roleReasons).toEqual(["famous_dictionary"]);
+
+    const breadthCall = calls.find((c) => c.query.includes("source_breadth"));
+    expect(breadthCall).toBeDefined();
+    expect(breadthCall!.values[0]).toEqual([7]);
+  });
+
+  it("classifies a plain, non-famous entity as satellite with no reasons", async () => {
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("FROM entities WHERE id")) {
+        return [entityRow({ id: "8", canonical_name: "Acme Corp", type: "company" })];
+      }
+      return [];
+    });
+    currentSql = sql;
+    const res = await GET(req, { params: { id: "8" } });
+    const body = await res.json();
+
+    expect(body.entity.role).toBe("satellite");
+    expect(body.entity.roleReasons).toEqual([]);
   });
 });
 

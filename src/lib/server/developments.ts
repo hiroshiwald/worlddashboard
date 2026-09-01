@@ -47,7 +47,9 @@ interface TrackedEntityMeta {
   fame: StoredFame;
 }
 
-interface EntityBaselineRow {
+// Exported for entity-admin.ts's role classification (TABS-REDESIGN-PLAN.md
+// §6, Phase 3a follow-up) — same population, same shape, no second copy.
+export interface EntityBaselineRow {
   id: number;
   canonicalName: string;
   type: string;
@@ -482,7 +484,9 @@ function parseEntityBaselineRow(row: SqlRow): EntityBaselineRow {
 // total_mentions_15d rather than loadMoverAgg's baseline_sum: that exact
 // substring is what brief.test.ts's existing mock branches on, and reusing
 // it here would silently misroute rows in any test exercising both queries.
-async function loadEntityBaselinePanel(sql: Sql): Promise<EntityBaselineRow[]> {
+// Exported (entity-admin.ts consumes it for role classification) — zero
+// logic change from its original private form.
+export async function loadEntityBaselinePanel(sql: Sql): Promise<EntityBaselineRow[]> {
   const rows = await sql`
     SELECT e.id, e.canonical_name, e.type, e.aliases, e.fame,
       COALESCE(SUM(emh.mentions) FILTER (WHERE emh.bucket < now() - INTERVAL '24 hours'), 0) AS baseline_mentions,

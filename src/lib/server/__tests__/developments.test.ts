@@ -23,6 +23,7 @@ import {
   sortAndCapCards,
   getDevelopments,
   getDevelopmentsDetailed,
+  loadEntityBaselinePanel,
 } from "../developments";
 import type { Sql, SqlRow } from "../db";
 
@@ -1210,5 +1211,20 @@ describe("getDevelopmentsDetailed — cap validation", () => {
   it("accepts a valid positive-integer cap", async () => {
     const { cards } = await getDevelopmentsDetailed(sql, NOW, { cap: 1 });
     expect(cards).toEqual([]);
+  });
+});
+
+// Smoke test only: loadEntityBaselinePanel was made exported (entity-admin.ts
+// role classification consumes it, TABS-REDESIGN-PLAN.md §6 Phase 3a
+// follow-up) with zero logic change — its real behavior stays covered
+// end-to-end by every getDevelopments*/getDevelopmentsDetailed fixture above,
+// which all exercise this same query via "baseline" responses.
+describe("loadEntityBaselinePanel — export smoke test", () => {
+  it("is exported and parses a baseline row", async () => {
+    const sql = makeDevelopmentsSql({ baseline: [entityRow(1, "Russia", "country", 14, "unknown")] });
+    const rows = await loadEntityBaselinePanel(sql);
+    expect(rows).toEqual([
+      { id: 1, canonicalName: "Russia", type: "country", aliases: [], baselineMentions: 14, totalMentions15d: 14, fame: "unknown" },
+    ]);
   });
 });

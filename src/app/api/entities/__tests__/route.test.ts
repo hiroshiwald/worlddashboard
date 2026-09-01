@@ -321,6 +321,26 @@ describe("GET /api/entities — stat-tile filters", () => {
   });
 });
 
+describe("GET /api/entities — role classification", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+
+  it("every row carries role/roleReasons (anchor via country type)", async () => {
+    currentSql = makeMockSql([entityRow(1, "Russia", { type: "country" })]).sql;
+    const body = await (await GET(listRequest(""))).json();
+    expect(body.entities[0].role).toBe("anchor");
+    expect(body.entities[0].roleReasons).toEqual(["country_or_region_type"]);
+  });
+
+  it("a plain, non-anchor, non-famous row classifies as satellite with no reasons", async () => {
+    currentSql = makeMockSql([entityRow(1, "Acme Corp", { type: "company" })]).sql;
+    const body = await (await GET(listRequest(""))).json();
+    expect(body.entities[0].role).toBe("satellite");
+    expect(body.entities[0].roleReasons).toEqual([]);
+  });
+});
+
 describe("GET /api/entities?view=stats", () => {
   beforeEach(() => {
     process.env.DATABASE_URL = "postgres://fake";

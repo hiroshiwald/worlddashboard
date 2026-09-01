@@ -1,5 +1,17 @@
 import type { Sql, SqlRow } from "./db";
 import { normalizeName } from "./extract-v2";
+import { computeEffectiveBaselineDays } from "./detectors";
+import { isAnchor, computeAnchorThreshold, loadEntityBaselinePanel } from "./developments";
+import type { EntityBaselineRow } from "./developments";
+import {
+  isFamous,
+  isDictionaryFamous,
+  isBreadthFamous,
+  isVolumeFamous,
+  computeFameVolumeThreshold,
+  loadLifetimeSourceBreadth,
+} from "./fame";
+import type { FameFacts, StoredFame } from "./fame";
 
 // ---- shared row shaping ----
 
@@ -58,16 +70,143 @@ const MAX_Q_LEN = 200;
 const VALID_STATUSES = new Set(["tracked", "dismissed"]);
 const VALID_FAME = new Set(["unknown", "not_famous", "famous"]);
 
-// role/roleReasons (TABS-REDESIGN-PLAN.md §6, Phase 3a) are intentionally
-// NOT implemented in this slice. Computing them requires, per entity, the
-// same 15-day baseline daily rate developments.ts's isAnchor/isFamous use —
-// which requires developments.ts's private loadEntityBaselinePanel (not
-// exported) plus its population array feeding computeAnchorThreshold. That
-// loader cannot be reproduced here without either exporting it (forbidden
-// for this task) or duplicating its SQL (exactly the "never re-implement or
-// re-tune a threshold" this codebase's own convention forbids — see e.g.
-// fame.ts's computeFameVolumeThreshold comment). STOPPED per task
-// instructions; see the task's final report for the full writeup.
+// ---- role classification (anchor/famous/satellite) ----
+//
+// TABS-REDESIGN-PLAN.md §6, Phase 3a follow-up. Reuses developments.ts's own
+// exported isAnchor/computeAnchorThreshold and fame.ts's own exported
+// isFamous/isDictionaryFamous/isBreadthFamous/isVolumeFamous/
+// computeFameVolumeThreshold verbatim — never a second copy of either
+// threshold or its OR chain. Both percentile thresholds are derived, once
+// per request, from the SAME loadEntityBaselinePanel population
+// developments.ts's getDevelopmentsDetailed itself scans (same population,
+// same values) — a Developments card and this classification never disagree.
+
+export type EntityRole = "anchor" | "famous" | "satellite";
+
+export interface EntityRoleResult {
+  role: EntityRole;
+  roleReasons: string[];
+}
+
+export interface ClassifyEntityRoleInput {
+  type: string;
+  anchorThreshold: number;
+  fameVolumeThreshold: number;
+  fame: FameFacts;
+}
+
+/** Pure — plain values only, no SQL. anchor: isAnchor's own gate; each of
+ * its two prongs (type, then volume) contributes its own reason when it
+ * independently fires. famous (checked only once anchor doesn't fire,
+ * mirroring developments.ts's isSatellite ordering): isFamous's own gate,
+ * decomposed into its four prongs for roleReasons — the identical
+ * conditions isFamous itself ORs, so roleReasons is non-empty exactly when
+ * isFamous is true. satellite: neither gate fires, reasons empty. */
+export function classifyEntityRole(input: ClassifyEntityRoleInput): EntityRoleResult {
+  const anchorReasons: string[] = [];
+  if (input.type === "country" || input.type === "region") anchorReasons.push("country_or_region_type");
+  if (input.fame.baselineDaily >= input.anchorThreshold) anchorReasons.push("high_baseline");
+  if (isAnchor(input.type, input.fame.baselineDaily, input.anchorThreshold)) {
+    return { role: "anchor", roleReasons: anchorReasons };
+  }
+
+  const famousReasons: string[] = [];
+  if (input.fame.storedFame === "famous") famousReasons.push("famous_stored");
+  if (isDictionaryFamous(input.fame.names)) famousReasons.push("famous_dictionary");
+  if (isBreadthFamous(input.fame.sourceBreadth)) famousReasons.push("famous_breadth");
+  if (isVolumeFamous(input.fame.baselineDaily, input.fameVolumeThreshold)) famousReasons.push("famous_volume");
+  if (isFamous(input.fame, input.fameVolumeThreshold)) {
+    return { role: "famous", roleReasons: famousReasons };
+  }
+
+  return { role: "satellite", roleReasons: [] };
+}
+
+function toStoredFame(fame: string): StoredFame {
+  return fame === "not_famous" || fame === "famous" ? fame : "unknown";
+}
+
+function toDate(value: unknown): Date {
+  return value instanceof Date ? value : new Date(value as string);
+}
+
+// Local copy of developments.ts's own private getSystemEpoch/
+// computeDaysSinceEpoch — the same established convention brief.ts,
+// run-ingest.ts, and the developments/signals API routes each already
+// follow: a tiny DB+pure helper pair duplicated per module rather than
+// exported for one caller.
+async function getSystemEpoch(sql: Sql): Promise<Date | null> {
+  const rows = await sql`SELECT MIN(first_seen_at) AS min_first_seen FROM articles`;
+  const value = rows[0]?.min_first_seen;
+  return value == null ? null : toDate(value);
+}
+
+function computeDaysSinceEpoch(now: Date, epoch: Date): number {
+  return Math.floor((now.getTime() - epoch.getTime()) / (24 * 3600 * 1000));
+}
+
+interface RoleThresholds {
+  anchorThreshold: number;
+  fameVolumeThreshold: number;
+  baselineDailyById: Map<number, number>;
+}
+
+/** ONE loadEntityBaselinePanel call; both threshold percentiles derived in
+ * JS from that single population — mirrors getDevelopmentsDetailed exactly.
+ * Skips the panel query when the system has no operating history yet (no
+ * articles at all): every baselineDaily is 0 regardless in that case. */
+async function loadRoleThresholds(sql: Sql): Promise<RoleThresholds> {
+  const epoch = await getSystemEpoch(sql);
+  if (!epoch) {
+    return {
+      anchorThreshold: computeAnchorThreshold([]),
+      fameVolumeThreshold: computeFameVolumeThreshold([]),
+      baselineDailyById: new Map(),
+    };
+  }
+  const effectiveBaselineDays = computeEffectiveBaselineDays(computeDaysSinceEpoch(new Date(), epoch));
+  const rows: EntityBaselineRow[] = await loadEntityBaselinePanel(sql);
+  const baselineDailyById = new Map(rows.map((row) => [row.id, row.baselineMentions / effectiveBaselineDays]));
+  const population = rows
+    .filter((row) => row.totalMentions15d > 0)
+    .map((row) => row.baselineMentions / effectiveBaselineDays);
+  return {
+    anchorThreshold: computeAnchorThreshold(population),
+    fameVolumeThreshold: computeFameVolumeThreshold(population),
+    baselineDailyById,
+  };
+}
+
+/** Attaches role/roleReasons to a bounded row set — the returned PAGE for
+ * list mode, the single entity for detail — never the whole matched set:
+ * loadLifetimeSourceBreadth's own contract demands a bounded id set. Two
+ * queries: the baseline panel (population-wide, same cost class as Brief's
+ * own per-request scan) and one breadth query bounded to rows.length ids
+ * (<=200 for a list page, 1 for detail). */
+export async function attachEntityRoles<
+  T extends Pick<EntityAdminJson, "id" | "canonicalName" | "type" | "aliases" | "fame">,
+>(sql: Sql, rows: T[]): Promise<(T & EntityRoleResult)[]> {
+  if (rows.length === 0) return [];
+  const [thresholds, breadthById] = await Promise.all([
+    loadRoleThresholds(sql),
+    loadLifetimeSourceBreadth(sql, rows.map((row) => row.id)),
+  ]);
+  return rows.map((row) => {
+    const fame: FameFacts = {
+      names: [row.canonicalName, ...row.aliases],
+      baselineDaily: thresholds.baselineDailyById.get(row.id) ?? 0,
+      sourceBreadth: breadthById.get(row.id) ?? 0,
+      storedFame: toStoredFame(row.fame),
+    };
+    const result = classifyEntityRole({
+      type: row.type,
+      anchorThreshold: thresholds.anchorThreshold,
+      fameVolumeThreshold: thresholds.fameVolumeThreshold,
+      fame,
+    });
+    return { ...row, ...result };
+  });
+}
 
 export type EntitySort = "name" | "first_seen" | "last_seen" | "activity";
 const VALID_SORTS = new Set<EntitySort>(["name", "first_seen", "last_seen", "activity"]);
@@ -93,7 +232,14 @@ export interface EntityListItemJson extends EntityAdminJson {
   lastSeenAt: string | null;
   mentions7d: number;
   sources7d: number;
+  role: EntityRole;
+  roleReasons: string[];
 }
+
+// Pre-role-attachment shape: what toEntityListItemJson/compareEntities work
+// with, before the returned page (never the whole matched set) is run
+// through attachEntityRoles.
+type EntityListItemDraft = Omit<EntityListItemJson, "role" | "roleReasons">;
 
 export interface SearchEntitiesResult {
   entities: EntityListItemJson[];
@@ -242,7 +388,7 @@ function toEntityListItemJson(
   row: SqlRow,
   mentions7dById: Map<number, number>,
   sources7dById: Map<number, number>,
-): EntityListItemJson {
+): EntityListItemDraft {
   const base = toEntityAdminJson(row);
   return {
     ...base,
@@ -255,7 +401,7 @@ function toEntityListItemJson(
 /** last_seen sorts nulls (an entity with no recorded mention yet) after
  * every real timestamp in either comparison direction — a null last-seen is
  * never "more recent" than a real one. */
-function compareLastSeenDesc(a: EntityListItemJson, b: EntityListItemJson): number {
+function compareLastSeenDesc(a: EntityListItemDraft, b: EntityListItemDraft): number {
   if (a.lastSeenAt === b.lastSeenAt) return 0;
   if (a.lastSeenAt === null) return 1;
   if (b.lastSeenAt === null) return -1;
@@ -265,7 +411,7 @@ function compareLastSeenDesc(a: EntityListItemJson, b: EntityListItemJson): numb
 /** Each sort option is a fixed, opinionated direction (TABS-REDESIGN-PLAN.md
  * §6: no direction param). ISO-8601 timestamp strings sort correctly under
  * plain string comparison, so no Date parsing is needed here. */
-function compareEntities(a: EntityListItemJson, b: EntityListItemJson, sort: EntitySort): number {
+function compareEntities(a: EntityListItemDraft, b: EntityListItemDraft, sort: EntitySort): number {
   if (sort === "name") return a.canonicalName.localeCompare(b.canonicalName);
   if (sort === "first_seen") return b.firstSeenAt.localeCompare(a.firstSeenAt);
   if (sort === "activity") return b.mentions7d - a.mentions7d;
@@ -315,7 +461,10 @@ export async function loadSourcesInWindow(sql: Sql, entityIds: number[], windowD
  * a malformed value is REJECTED, never silently coerced to a default.
  * Activity aggregates (mentions7d/sources7d) and sort are computed over the
  * FULL matched set — one GROUP BY query each, per TABS-REDESIGN-PLAN.md §6's
- * query-cost note — before the existing offset/limit slice is applied. */
+ * query-cost note — before the existing offset/limit slice is applied.
+ * role/roleReasons (see attachEntityRoles) are computed AFTER that slice,
+ * for the returned page only — the baseline panel plus one breadth query
+ * bounded to the page's own ids, never the full matched set. */
 export async function searchEntities(sql: Sql, params: SearchEntitiesParams): Promise<SearchEntitiesResult> {
   const q = validateQ(params.q);
   const status = validateStatus(params.status);
@@ -338,8 +487,13 @@ export async function searchEntities(sql: Sql, params: SearchEntitiesParams): Pr
   const enriched = matched.map((row) => toEntityListItemJson(row, mentions7dById, sources7dById));
   enriched.sort((a, b) => compareEntities(a, b, sort));
 
+  // role/roleReasons is display metadata computed for the RETURNED PAGE only
+  // (post-slice), never the whole matched set — see attachEntityRoles.
+  const page = enriched.slice(offset, offset + limit);
+  const withRoles = await attachEntityRoles(sql, page);
+
   return {
-    entities: enriched.slice(offset, offset + limit),
+    entities: withRoles,
     total: enriched.length,
   };
 }

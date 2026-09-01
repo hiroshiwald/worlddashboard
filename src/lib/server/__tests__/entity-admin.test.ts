@@ -5,8 +5,10 @@ import {
   findSimilarNames,
   loadMentionsInWindow,
   loadSourcesInWindow,
+  classifyEntityRole,
   ValidationError,
   type SimilarNameEntity,
+  type ClassifyEntityRoleInput,
 } from "../entity-admin";
 import type { Sql, SqlRow } from "../db";
 
@@ -97,6 +99,102 @@ describe("findSimilarNames", () => {
     const groups = findSimilarNames([named(1, "Modi"), named(2, "Narendra Modi"), named(3, "narendra modi")]);
     expect(groups).toHaveLength(1);
     expect(groups[0].entities.map((e) => e.id).sort()).toEqual([1, 2, 3]);
+  });
+});
+
+describe("classifyEntityRole", () => {
+  function input(overrides: Partial<ClassifyEntityRoleInput> = {}): ClassifyEntityRoleInput {
+    return {
+      type: "company",
+      anchorThreshold: 10,
+      fameVolumeThreshold: 10,
+      fame: { names: ["Acme"], baselineDaily: 0, sourceBreadth: 0, storedFame: "unknown" },
+      ...overrides,
+    };
+  }
+
+  it("country type -> anchor/country_or_region_type", () => {
+    const result = classifyEntityRole(input({ type: "country" }));
+    expect(result).toEqual({ role: "anchor", roleReasons: ["country_or_region_type"] });
+  });
+
+  it("region type -> anchor/country_or_region_type", () => {
+    const result = classifyEntityRole(input({ type: "region" }));
+    expect(result).toEqual({ role: "anchor", roleReasons: ["country_or_region_type"] });
+  });
+
+  it("high-baseline company -> anchor/high_baseline", () => {
+    const result = classifyEntityRole(
+      input({ fame: { names: ["Acme"], baselineDaily: 15, sourceBreadth: 0, storedFame: "unknown" } }),
+    );
+    expect(result).toEqual({ role: "anchor", roleReasons: ["high_baseline"] });
+  });
+
+  it("both anchor reasons fire together (country type AND a baseline clearing the threshold)", () => {
+    const result = classifyEntityRole(
+      input({ type: "country", fame: { names: ["Russia"], baselineDaily: 15, sourceBreadth: 0, storedFame: "unknown" } }),
+    );
+    expect(result.role).toBe("anchor");
+    expect(result.roleReasons.sort()).toEqual(["country_or_region_type", "high_baseline"]);
+  });
+
+  it("dictionary-famous, low volume -> famous/famous_dictionary", () => {
+    const result = classifyEntityRole(
+      input({ type: "organization", fame: { names: ["Kremlin"], baselineDaily: 0, sourceBreadth: 0, storedFame: "unknown" } }),
+    );
+    expect(result).toEqual({ role: "famous", roleReasons: ["famous_dictionary"] });
+  });
+
+  it("stored-famous -> famous/famous_stored", () => {
+    const result = classifyEntityRole(
+      input({ type: "person", fame: { names: ["Some New Person"], baselineDaily: 0, sourceBreadth: 0, storedFame: "famous" } }),
+    );
+    expect(result).toEqual({ role: "famous", roleReasons: ["famous_stored"] });
+  });
+
+  it("breadth >= threshold -> famous/famous_breadth", () => {
+    const result = classifyEntityRole(
+      input({ type: "person", fame: { names: ["Some New Person"], baselineDaily: 0, sourceBreadth: 12, storedFame: "unknown" } }),
+    );
+    expect(result).toEqual({ role: "famous", roleReasons: ["famous_breadth"] });
+  });
+
+  it("volume prong -> famous/famous_volume", () => {
+    const result = classifyEntityRole(
+      input({
+        type: "person",
+        anchorThreshold: 100,
+        fameVolumeThreshold: 5,
+        fame: { names: ["Some New Person"], baselineDaily: 6, sourceBreadth: 0, storedFame: "unknown" },
+      }),
+    );
+    expect(result).toEqual({ role: "famous", roleReasons: ["famous_volume"] });
+  });
+
+  it("multiple famous prongs firing together yields multiple reasons", () => {
+    const result = classifyEntityRole(
+      input({
+        type: "organization",
+        anchorThreshold: 100,
+        fameVolumeThreshold: 5,
+        fame: { names: ["Kremlin"], baselineDaily: 6, sourceBreadth: 12, storedFame: "famous" },
+      }),
+    );
+    expect(result.role).toBe("famous");
+    expect(result.roleReasons.sort()).toEqual(
+      ["famous_breadth", "famous_dictionary", "famous_stored", "famous_volume"].sort(),
+    );
+  });
+
+  it("plain entity -> satellite/[]", () => {
+    expect(classifyEntityRole(input())).toEqual({ role: "satellite", roleReasons: [] });
+  });
+
+  it("anchor takes precedence over famous when both would fire", () => {
+    const result = classifyEntityRole(
+      input({ type: "country", fame: { names: ["Kremlin"], baselineDaily: 0, sourceBreadth: 0, storedFame: "famous" } }),
+    );
+    expect(result.role).toBe("anchor");
   });
 });
 
@@ -331,6 +429,37 @@ describe("searchEntities — stat-tile filters", () => {
   it("rejects a fameLocked value other than 'true'", async () => {
     const { sql } = makeMockSql([]);
     await expect(searchEntities(sql, { fameLocked: "false" })).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("searchEntities — role classification", () => {
+  it("attaches role/roleReasons to each row (anchor via country type)", async () => {
+    const { sql } = makeMockSql([entityRow({ id: 1, canonical_name: "Russia", type: "country" })]);
+    const result = await searchEntities(sql, {});
+    expect(result.entities[0].role).toBe("anchor");
+    expect(result.entities[0].roleReasons).toEqual(["country_or_region_type"]);
+  });
+
+  it("scopes the breadth query to the returned PAGE's ids only, not the whole matched set", async () => {
+    const rows = [
+      entityRow({ id: 1, canonical_name: "Alpha", type: "company" }),
+      entityRow({ id: 2, canonical_name: "Bravo", type: "company" }),
+      entityRow({ id: 3, canonical_name: "Charlie", type: "company" }),
+    ];
+    const { sql, calls } = makeMockSql(rows);
+    const result = await searchEntities(sql, { limit: 1, sort: "name" });
+    expect(result.total).toBe(3);
+    expect(result.entities.map((e) => e.id)).toEqual([1]);
+
+    const breadthCall = calls.find((c) => c.query.includes("source_breadth"));
+    expect(breadthCall).toBeDefined();
+    expect(breadthCall!.values[0]).toEqual([1]);
+  });
+
+  it("does not query breadth at all when the returned page is empty", async () => {
+    const { sql, calls } = makeMockSql([]);
+    await searchEntities(sql, { q: "nonexistent" });
+    expect(calls.some((c) => c.query.includes("source_breadth"))).toBe(false);
   });
 });
 

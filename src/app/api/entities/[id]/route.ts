@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/server/db";
 import type { Sql, SqlRow } from "@/lib/server/db";
-import { toEntityAdminJson, loadMentionsInWindow, loadSourcesInWindow } from "@/lib/server/entity-admin";
+import { toEntityAdminJson, loadMentionsInWindow, loadSourcesInWindow, attachEntityRoles } from "@/lib/server/entity-admin";
 
 export const dynamic = "force-dynamic";
 
@@ -156,17 +156,20 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: "Entity not found" }, { status: 404 });
   }
 
-  const [series, articles, edges, outgoing, incoming, activity] = await Promise.all([
+  const [series, articles, edges, outgoing, incoming, activity, [entityWithRole]] = await Promise.all([
     loadHourlySeries(sql, id),
     loadRecentArticles(sql, id),
     loadTopEdges(sql, id),
     loadOutgoingRelations(sql, id),
     loadIncomingRelations(sql, id),
     loadActivitySummary(sql, id),
+    // role/roleReasons: bounded to this one entity, never the tracked
+    // roster — see entity-admin.ts's attachEntityRoles.
+    attachEntityRoles(sql, [toEntityDetailJson(entityRows[0])]),
   ]);
 
   return NextResponse.json({
-    entity: toEntityDetailJson(entityRows[0]),
+    entity: entityWithRole,
     activity,
     series,
     articles,
