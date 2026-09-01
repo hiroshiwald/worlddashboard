@@ -159,9 +159,14 @@ rejection tally by eligibility reason returned alongside cards),
 `src/lib/server/brief.ts` untouched (keeps its own cap).
 Contract: new GET endpoint `{developments, diagnostics, warmup,
 generatedAt}`; `getDevelopments` signature gains an optional options arg.
-Query cost: identical panels to the Brief path (the engine already computes
-all drafts before capping); one request-time invocation, cache headers as
-`/api/brief`. Runtime stays far under the 60s ceiling (§14b).
+Query cost: identical panels to the Brief path (verified: `CARD_CAP` is a
+pure in-memory slice applied after all SQL has run — an uncapped variant
+costs zero additional queries); one request-time invocation, cache headers
+as `/api/brief`. Runtime stays far under the 60s ceiling (§14b).
+States owned (DESIGN.md): the new fetch hook replicates `useBriefTab`'s
+`loading`/`error`/`dbUnconfigured` triad and `useSignalsTab`'s warm-up
+handling; the route 503s without `DATABASE_URL` like its siblings. The
+empty state renders the diagnostics line, never a bare blank.
 
 **Phase 2b — Developments tab (UI).**
 Files: `src/components/SignalsTab.tsx` (renamed/recomposed),
@@ -177,9 +182,9 @@ hover-only). Segments: Developments (default) | Signals.
 Files: `src/app/api/entities/route.ts`, `src/app/api/entities/[id]/route.ts`,
 `src/lib/server/entity-admin.ts` (+ tests).
 Contract (all additive): list mode gains `sort`
-(`name|first_seen|last_seen|activity`, default `last_seen` desc) and
-per-page activity aggregates (`mentions7d`, `sources7d`, `lastSeenAt`) plus
-per-page role classification (`role: anchor|satellite` + reasons, reusing
+(`name|first_seen|last_seen|activity`, default `last_seen` desc) plus
+activity aggregates (`mentions7d`, `sources7d`, `lastSeenAt`) and role
+classification (`role: anchor|satellite` + reasons, reusing
 `fame.ts`/`developments.ts` helpers — never duplicating their thresholds);
 stats-tile filters (`fameChecked=never`, `fameLocked=true`, parked ≡
 existing `status=dismissed`); detail endpoint gains the fame block
@@ -187,9 +192,19 @@ existing `status=dismissed`); detail endpoint gains the fame block
 `wikiPageviewsMonthly`, `fameCheckedAt`), `aliases`, a 30-day activity
 summary (`mentions30d`, `sources30d`), relations gain
 `evidence: {title, link} | null`, edges gain `firstSeenAt`.
-Query cost note: list mode adds ~3 bounded queries per request (page-id
-aggregates + two percentile population queries); detail adds 1. All
-read-only, Neon-safe.
+Query cost note (per review gate, honest framing): `searchEntities`
+already loads the whole filtered set into JS and slices there, so
+`sort=activity` is computed over the **full matched population**, not the
+page — one GROUP BY aggregate over `entity_mentions_hourly` (7-day slice)
+for the matched ids, the same cost class as the 15-day
+`loadEntityBaselinePanel` scan that already runs on every Brief request;
+sort happens in JS on the matched set before the existing slice. Role
+classification reuses **one** population baseline query, with both
+percentile thresholds (`computeAnchorThreshold`,
+`computeFameVolumeThreshold`) derived in JS from that single result —
+never two population scans. Net: list mode adds 2 population-bounded
+read-only queries (activity aggregate + baseline panel); detail adds 1.
+Neon-safe, well under the 60s ceiling (§14b).
 
 **Phase 3b — Entities tab (UI).**
 Files: `src/components/entities/*` (EntitiesTable, EntityRow, StatsStrip,
@@ -234,6 +249,24 @@ Network/Map — all excluded.
 
 Keep one repo. Nothing here is domain-specific; no split trigger from §8.2
 is true.
+
+## Review gate record (§10)
+
+Second-pass review ran 2026-09-01: verdict REVISE; every factual claim in
+the packet verified against code (none found wrong). Revisions applied:
+the `sort=activity` cost note now states the population-bounded framing
+(blocking finding); the percentile-threshold wording now specifies one
+shared population query; the new developments route/hook explicitly owns
+its loading/error/dbUnconfigured/warm-up states. Two advisory notes stand
+for the operator's PR review rather than blocking implementation: (1) the
+Signals→Developments tab rename is a navigation change — FABLE-ROADMAP §6
+recommends exactly this nav and the operator's redesign request covers
+these tabs, but RADAR-STRATEGY's preamble asks for explicit operator
+sign-off on surface changes, so the rename is flagged prominently in the
+PR description and is a one-line revert if declined; (2) defaults must
+stay opinionated enough that a daily reader never touches the filters
+(Developments segment default, `last_seen` desc default sort) — to be
+confirmed visually during Playwright verification.
 
 ## Out of scope (binding)
 
