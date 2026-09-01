@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CandidateRowData, ENTITY_TYPES } from "./types";
+import { formatReportedWindow } from "./activity-format";
 import SampleTitleLink from "./SampleTitleLink";
 
 function SelectCell({ selected, busy, onToggle }: { selected: boolean; busy: boolean; onToggle: () => void }) {
@@ -26,11 +27,16 @@ function NameTypeCell({
   );
 }
 
+// Candidate firstSeenAt/lastSeenAt are NEWS time (publish-derived), not
+// arrival time (DEVELOPMENTS-PLAN.md §3) — the second line is always worded
+// "reported", never "seen"/"observed" (DESIGN.md spine #4: honest time).
 function CountsCell({ candidate, dark }: { candidate: CandidateRowData; dark: boolean }) {
+  const muted = `text-xs whitespace-nowrap ${dark ? "text-slate-400" : "text-gray-500"}`;
   return (
-    <span className={`text-xs whitespace-nowrap ${dark ? "text-slate-400" : "text-gray-500"}`}>
-      {candidate.mentionCount} mentions &middot; {candidate.sourceCount} sources &middot; {candidate.dayCount} days
-    </span>
+    <div className={muted}>
+      <div>{candidate.mentionCount} mentions &middot; {candidate.sourceCount} sources &middot; {candidate.dayCount} days</div>
+      <div>{formatReportedWindow(candidate.firstSeenAt, candidate.lastSeenAt)}</div>
+    </div>
   );
 }
 

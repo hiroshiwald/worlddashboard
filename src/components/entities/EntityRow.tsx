@@ -2,6 +2,8 @@
 
 import { timeAgo } from "@/lib/date-utils";
 import { EntityPatch, EntityRowData, ENTITY_TYPES } from "./types";
+import { roleLabel, roleTooltip } from "./role-format";
+import { formatActivity7d, formatLastSeen } from "./activity-format";
 
 interface RowCellProps {
   row: EntityRowData;
@@ -41,6 +43,32 @@ function NameCell({ row, dark, busy, onSelect }: { row: EntityRowData; dark: boo
         </a>
       )}
     </div>
+  );
+}
+
+// Static (non-interactive) chip: the engine's own anchor/famous/satellite
+// classification, previously invisible on this tab (TABS-REDESIGN-PLAN.md
+// §2 "Entities" — the biggest confusion the redesign fixes). "famous"
+// displays as "Context" here: an established name the engine treats as
+// context, never a card subject.
+function RoleCell({ row, dark }: { row: EntityRowData; dark: boolean }) {
+  const cls = {
+    anchor: dark ? "bg-indigo-950 text-indigo-300" : "bg-indigo-50 text-indigo-700",
+    famous: dark ? "bg-slate-800 text-slate-400" : "bg-gray-100 text-gray-500",
+    satellite: dark ? "bg-emerald-950 text-emerald-300" : "bg-emerald-50 text-emerald-700",
+  }[row.role];
+  return (
+    <span title={roleTooltip(row.role, row.roleReasons)} className={`text-[11px] px-2 py-1 rounded-lg font-medium whitespace-nowrap ${cls}`}>
+      {roleLabel(row.role)}
+    </span>
+  );
+}
+
+function ActivityCell({ row, dark }: { row: EntityRowData; dark: boolean }) {
+  return (
+    <span className={`text-xs whitespace-nowrap ${dark ? "text-slate-400" : "text-gray-500"}`}>
+      {formatActivity7d(row.mentions7d, row.sources7d)}
+    </span>
   );
 }
 
@@ -135,11 +163,13 @@ export default function EntityRow({ row, idx, dark, busy, onPatch, onSelect, row
   return (
     <tr className={`${idx % 2 === 0 ? rowAltA : rowAltB} ${rowBorder} ${busy ? "opacity-50" : ""} transition-opacity`}>
       <td className="px-4 py-2.5"><NameCell row={row} dark={dark} busy={busy} onSelect={onSelect} /></td>
+      <td className="px-4 py-2.5"><RoleCell row={row} dark={dark} /></td>
       <td className="px-4 py-2.5"><TypeCell row={row} busy={busy} onPatch={onPatch} selectBg={selectBg} /></td>
       <td className="px-4 py-2.5"><StatusCell row={row} busy={busy} onPatch={onPatch} /></td>
       <td className="px-4 py-2.5"><FameCell row={row} busy={busy} onPatch={onPatch} dark={dark} /></td>
+      <td className="px-4 py-2.5"><ActivityCell row={row} dark={dark} /></td>
       <td className={`px-4 py-2.5 text-xs whitespace-nowrap ${dark ? "text-slate-400" : "text-gray-500"}`}>
-        {row.fameCheckedAt ? `checked ${timeAgo(row.fameCheckedAt)}` : "never checked"}
+        {formatLastSeen(row.lastSeenAt)}
       </td>
       <td className={`px-4 py-2.5 text-xs whitespace-nowrap ${dark ? "text-slate-400" : "text-gray-500"}`}>
         {timeAgo(row.firstSeenAt)}
