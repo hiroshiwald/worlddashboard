@@ -58,17 +58,77 @@ const MAX_Q_LEN = 200;
 const VALID_STATUSES = new Set(["tracked", "dismissed"]);
 const VALID_FAME = new Set(["unknown", "not_famous", "famous"]);
 
+// role/roleReasons (TABS-REDESIGN-PLAN.md §6, Phase 3a) are intentionally
+// NOT implemented in this slice. Computing them requires, per entity, the
+// same 15-day baseline daily rate developments.ts's isAnchor/isFamous use —
+// which requires developments.ts's private loadEntityBaselinePanel (not
+// exported) plus its population array feeding computeAnchorThreshold. That
+// loader cannot be reproduced here without either exporting it (forbidden
+// for this task) or duplicating its SQL (exactly the "never re-implement or
+// re-tune a threshold" this codebase's own convention forbids — see e.g.
+// fame.ts's computeFameVolumeThreshold comment). STOPPED per task
+// instructions; see the task's final report for the full writeup.
+
+export type EntitySort = "name" | "first_seen" | "last_seen" | "activity";
+const VALID_SORTS = new Set<EntitySort>(["name", "first_seen", "last_seen", "activity"]);
+const DEFAULT_SORT: EntitySort = "last_seen";
+const VALID_FAME_CHECKED = new Set(["never", "checked"]);
+// SUM/COUNT window for the list mode's activity columns (mentions7d,
+// sources7d). The detail route reuses the same loaders with its own 30-day
+// window — see loadMentionsInWindow/loadSourcesInWindow below.
+const ACTIVITY_WINDOW_DAYS = 7;
+
 export interface SearchEntitiesParams {
   q?: string;
   status?: string;
   fame?: string;
+  fameChecked?: string;
+  fameLocked?: string;
+  sort?: string;
   limit?: number;
   offset?: number;
 }
 
+export interface EntityListItemJson extends EntityAdminJson {
+  lastSeenAt: string | null;
+  mentions7d: number;
+  sources7d: number;
+}
+
 export interface SearchEntitiesResult {
-  entities: EntityAdminJson[];
+  entities: EntityListItemJson[];
   total: number;
+}
+
+function validateSort(sort: string | undefined): EntitySort {
+  if (sort === undefined || sort === "") return DEFAULT_SORT;
+  if (!VALID_SORTS.has(sort as EntitySort)) {
+    throw new ValidationError(`sort must be one of: ${[...VALID_SORTS].join(", ")}`);
+  }
+  return sort as EntitySort;
+}
+
+/** ?fameChecked=never -> fame_checked_at IS NULL (the "Never checked" stat
+ * tile). ?fameChecked=checked -> fame_checked_at IS NOT NULL — combined with
+ * ?fame=unknown this is exactly loadEntityStats's parked_count definition
+ * (checked, found nothing), so no separate "parked" param is needed. */
+function validateFameChecked(fameChecked: string | undefined): "never" | "checked" | undefined {
+  if (fameChecked === undefined || fameChecked === "") return undefined;
+  if (!VALID_FAME_CHECKED.has(fameChecked)) {
+    throw new ValidationError(`fameChecked must be one of: ${[...VALID_FAME_CHECKED].join(", ")}`);
+  }
+  return fameChecked as "never" | "checked";
+}
+
+/** Only "true" is a meaningful filter value (the "Locked" stat tile) — there
+ * is no fameLocked=false view, so any other value is rejected rather than
+ * silently accepted as a no-op. */
+function validateFameLocked(fameLocked: string | undefined): true | undefined {
+  if (fameLocked === undefined || fameLocked === "") return undefined;
+  if (fameLocked !== "true") {
+    throw new ValidationError('fameLocked must be "true"');
+  }
+  return true;
 }
 
 function validateQ(q: string | undefined): string | undefined {
@@ -124,27 +184,27 @@ async function loadFilteredRows(sql: Sql, status: string | undefined, fame: stri
   if (status !== undefined && fame !== undefined) {
     return sql`
       SELECT id, canonical_name, type, status, aliases, fame, fame_locked,
-             wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at, first_seen_at
+             wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at, first_seen_at, last_seen_at
       FROM entities WHERE status = ${status} AND fame = ${fame} ORDER BY id ASC
     `;
   }
   if (status !== undefined) {
     return sql`
       SELECT id, canonical_name, type, status, aliases, fame, fame_locked,
-             wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at, first_seen_at
+             wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at, first_seen_at, last_seen_at
       FROM entities WHERE status = ${status} ORDER BY id ASC
     `;
   }
   if (fame !== undefined) {
     return sql`
       SELECT id, canonical_name, type, status, aliases, fame, fame_locked,
-             wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at, first_seen_at
+             wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at, first_seen_at, last_seen_at
       FROM entities WHERE fame = ${fame} ORDER BY id ASC
     `;
   }
   return sql`
     SELECT id, canonical_name, type, status, aliases, fame, fame_locked,
-           wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at, first_seen_at
+           wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at, first_seen_at, last_seen_at
     FROM entities ORDER BY id ASC
   `;
 }
@@ -155,24 +215,132 @@ function matchesQuery(row: SqlRow, normalizedQ: string): boolean {
   return aliases.some((alias) => normalizeName(alias).includes(normalizedQ));
 }
 
+function matchesFameChecked(row: SqlRow, fameChecked: "never" | "checked"): boolean {
+  const checked = row.fame_checked_at != null;
+  return fameChecked === "never" ? !checked : checked;
+}
+
+/** q/fameChecked/fameLocked all filter in JS over the status/fame-filtered
+ * SQL rows — the same reasoning as matchesQuery's own comment (no
+ * query-builder escape hatch for the plain Sql tagged-template contract, and
+ * these are all cheap column checks over rows already in memory). */
+function filterMatchedRows(
+  rows: SqlRow[],
+  normalizedQ: string | undefined,
+  fameChecked: "never" | "checked" | undefined,
+  fameLocked: true | undefined,
+): SqlRow[] {
+  return rows.filter((row) => {
+    if (normalizedQ !== undefined && !matchesQuery(row, normalizedQ)) return false;
+    if (fameChecked !== undefined && !matchesFameChecked(row, fameChecked)) return false;
+    if (fameLocked !== undefined && !row.fame_locked) return false;
+    return true;
+  });
+}
+
+function toEntityListItemJson(
+  row: SqlRow,
+  mentions7dById: Map<number, number>,
+  sources7dById: Map<number, number>,
+): EntityListItemJson {
+  const base = toEntityAdminJson(row);
+  return {
+    ...base,
+    lastSeenAt: row.last_seen_at != null ? toIsoString(row.last_seen_at) : null,
+    mentions7d: mentions7dById.get(base.id) ?? 0,
+    sources7d: sources7dById.get(base.id) ?? 0,
+  };
+}
+
+/** last_seen sorts nulls (an entity with no recorded mention yet) after
+ * every real timestamp in either comparison direction — a null last-seen is
+ * never "more recent" than a real one. */
+function compareLastSeenDesc(a: EntityListItemJson, b: EntityListItemJson): number {
+  if (a.lastSeenAt === b.lastSeenAt) return 0;
+  if (a.lastSeenAt === null) return 1;
+  if (b.lastSeenAt === null) return -1;
+  return b.lastSeenAt.localeCompare(a.lastSeenAt);
+}
+
+/** Each sort option is a fixed, opinionated direction (TABS-REDESIGN-PLAN.md
+ * §6: no direction param). ISO-8601 timestamp strings sort correctly under
+ * plain string comparison, so no Date parsing is needed here. */
+function compareEntities(a: EntityListItemJson, b: EntityListItemJson, sort: EntitySort): number {
+  if (sort === "name") return a.canonicalName.localeCompare(b.canonicalName);
+  if (sort === "first_seen") return b.firstSeenAt.localeCompare(a.firstSeenAt);
+  if (sort === "activity") return b.mentions7d - a.mentions7d;
+  return compareLastSeenDesc(a, b);
+}
+
+/** SUM(mentions) per entity over the trailing windowDays, for the given
+ * entity ids only. Shared by list mode's 7-day activity column and detail
+ * mode's 30-day activity summary. */
+export async function loadMentionsInWindow(sql: Sql, entityIds: number[], windowDays: number): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  if (entityIds.length === 0) return map;
+  const rows = await sql`
+    SELECT entity_id, SUM(mentions) AS mentions_in_window
+    FROM entity_mentions_hourly
+    WHERE entity_id = ANY(${entityIds}::bigint[])
+      AND bucket >= now() - make_interval(days => ${windowDays}::int)
+    GROUP BY entity_id
+  `;
+  for (const row of rows) map.set(Number(row.entity_id), Number(row.mentions_in_window));
+  return map;
+}
+
+/** Distinct source_name count per entity over the trailing windowDays, via
+ * article_entities/articles windowed on articles.first_seen_at — mirrors
+ * fame.ts's loadLifetimeSourceBreadth, windowed. NEVER summed from
+ * entity_mentions_hourly.source_count across hourly buckets: a source
+ * appearing in multiple hours would be double-counted that way. */
+export async function loadSourcesInWindow(sql: Sql, entityIds: number[], windowDays: number): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  if (entityIds.length === 0) return map;
+  const rows = await sql`
+    SELECT ae.entity_id, COUNT(DISTINCT a.source_name) AS sources_in_window
+    FROM article_entities ae
+    JOIN articles a ON a.id = ae.article_id
+    WHERE ae.entity_id = ANY(${entityIds}::bigint[])
+      AND a.first_seen_at >= now() - make_interval(days => ${windowDays}::int)
+    GROUP BY ae.entity_id
+  `;
+  for (const row of rows) map.set(Number(row.entity_id), Number(row.sources_in_window));
+  return map;
+}
+
 /** Case-insensitive search over canonical_name and aliases, filterable by
- * status/fame, bounded and paged (default 50, max 200 per page). Every
- * input is validated at this module boundary — a malformed limit, offset,
- * status, or fame is REJECTED, never silently coerced to a default. */
+ * status/fame/fameChecked/fameLocked, sortable, bounded and paged (default
+ * 50, max 200 per page). Every input is validated at this module boundary —
+ * a malformed value is REJECTED, never silently coerced to a default.
+ * Activity aggregates (mentions7d/sources7d) and sort are computed over the
+ * FULL matched set — one GROUP BY query each, per TABS-REDESIGN-PLAN.md §6's
+ * query-cost note — before the existing offset/limit slice is applied. */
 export async function searchEntities(sql: Sql, params: SearchEntitiesParams): Promise<SearchEntitiesResult> {
   const q = validateQ(params.q);
   const status = validateStatus(params.status);
   const fame = validateFame(params.fame);
+  const fameChecked = validateFameChecked(params.fameChecked);
+  const fameLocked = validateFameLocked(params.fameLocked);
+  const sort = validateSort(params.sort);
   const limit = validateLimit(params.limit);
   const offset = validateOffset(params.offset);
 
   const rows = await loadFilteredRows(sql, status, fame);
   const normalizedQ = q !== undefined ? normalizeName(q) : undefined;
-  const matched = normalizedQ !== undefined ? rows.filter((row) => matchesQuery(row, normalizedQ)) : rows;
+  const matched = filterMatchedRows(rows, normalizedQ, fameChecked, fameLocked);
+
+  const ids = matched.map((row) => Number(row.id));
+  const [mentions7dById, sources7dById] = await Promise.all([
+    loadMentionsInWindow(sql, ids, ACTIVITY_WINDOW_DAYS),
+    loadSourcesInWindow(sql, ids, ACTIVITY_WINDOW_DAYS),
+  ]);
+  const enriched = matched.map((row) => toEntityListItemJson(row, mentions7dById, sources7dById));
+  enriched.sort((a, b) => compareEntities(a, b, sort));
 
   return {
-    entities: matched.slice(offset, offset + limit).map(toEntityAdminJson),
-    total: matched.length,
+    entities: enriched.slice(offset, offset + limit),
+    total: enriched.length,
   };
 }
 

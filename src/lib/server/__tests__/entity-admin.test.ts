@@ -3,6 +3,8 @@ import {
   searchEntities,
   loadEntityStats,
   findSimilarNames,
+  loadMentionsInWindow,
+  loadSourcesInWindow,
   ValidationError,
   type SimilarNameEntity,
 } from "../entity-admin";
@@ -13,6 +15,19 @@ function makeMockSql(rows: SqlRow[]) {
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     calls.push({ query: strings.join(" ? "), values });
     return rows;
+  }) as Sql;
+  return { sql, calls };
+}
+
+/** Unlike makeMockSql (same rows for every call), branches on query text —
+ * needed once a test cares about the mentions7d/sources7d aggregate queries
+ * returning a different row shape than the main entities query. */
+function makeHandlerMockSql(handler: (query: string) => SqlRow[]) {
+  const calls: { query: string; values: unknown[] }[] = [];
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const query = strings.join(" ? ");
+    calls.push({ query, values });
+    return handler(query);
   }) as Sql;
   return { sql, calls };
 }
@@ -29,6 +44,7 @@ function entityRow(overrides: Partial<SqlRow> & { id: number; canonical_name: st
     wiki_pageviews_monthly: null,
     fame_checked_at: null,
     first_seen_at: "2026-07-01T00:00:00Z",
+    last_seen_at: null,
     ...overrides,
   };
 }
@@ -191,6 +207,160 @@ describe("searchEntities", () => {
       expect(row).toHaveProperty("wikiPageviewsMonthly");
       expect(row).toHaveProperty("fameCheckedAt");
     }
+  });
+});
+
+describe("searchEntities — sort", () => {
+  it("defaults to last_seen desc when sort is omitted", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Bravo", last_seen_at: "2026-07-01T00:00:00Z" }),
+      entityRow({ id: 2, canonical_name: "Alpha", last_seen_at: "2026-08-01T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, {});
+    expect(result.entities.map((e) => e.id)).toEqual([2, 1]);
+  });
+
+  it("sort=name orders ascending by canonical name", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Bravo" }),
+      entityRow({ id: 2, canonical_name: "Alpha" }),
+    ]);
+    const result = await searchEntities(sql, { sort: "name" });
+    expect(result.entities.map((e) => e.canonicalName)).toEqual(["Alpha", "Bravo"]);
+  });
+
+  it("sort=first_seen orders descending", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Bravo", first_seen_at: "2026-06-01T00:00:00Z" }),
+      entityRow({ id: 2, canonical_name: "Alpha", first_seen_at: "2026-07-01T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, { sort: "first_seen" });
+    expect(result.entities.map((e) => e.id)).toEqual([2, 1]);
+  });
+
+  it("sort=last_seen orders descending, nulls sorted least-recent", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "NoLastSeen", last_seen_at: null }),
+      entityRow({ id: 2, canonical_name: "HasLastSeen", last_seen_at: "2026-08-01T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, { sort: "last_seen" });
+    expect(result.entities.map((e) => e.id)).toEqual([2, 1]);
+  });
+
+  it("rejects an invalid sort value", async () => {
+    const { sql } = makeMockSql([]);
+    await expect(searchEntities(sql, { sort: "bogus" })).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("searchEntities — activity aggregates", () => {
+  it("sort=activity orders by mentions7d descending", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      if (query.includes("FROM entities")) {
+        return [
+          entityRow({ id: 1, canonical_name: "Low" }),
+          entityRow({ id: 2, canonical_name: "High" }),
+        ];
+      }
+      if (query.includes("FROM entity_mentions_hourly")) {
+        return [
+          { entity_id: "1", mentions_in_window: "2" },
+          { entity_id: "2", mentions_in_window: "40" },
+        ];
+      }
+      return [];
+    });
+    const result = await searchEntities(sql, { sort: "activity" });
+    expect(result.entities.map((e) => e.id)).toEqual([2, 1]);
+    expect(result.entities[0].mentions7d).toBe(40);
+  });
+
+  it("zero-fills mentions7d/sources7d when no aggregate row matches", async () => {
+    const { sql } = makeHandlerMockSql((query) =>
+      query.includes("FROM entities") ? [entityRow({ id: 1, canonical_name: "Solo" })] : [],
+    );
+    const result = await searchEntities(sql, {});
+    expect(result.entities[0].mentions7d).toBe(0);
+    expect(result.entities[0].sources7d).toBe(0);
+  });
+
+  it("counts distinct sources via article_entities/articles, not summed source_count", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      if (query.includes("FROM entities")) return [entityRow({ id: 1, canonical_name: "Solo" })];
+      if (query.includes("FROM article_entities")) return [{ entity_id: "1", sources_in_window: "3" }];
+      return [];
+    });
+    const result = await searchEntities(sql, {});
+    expect(result.entities[0].sources7d).toBe(3);
+  });
+});
+
+describe("searchEntities — stat-tile filters", () => {
+  it("fameChecked=never keeps only fame_checked_at IS NULL", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Never", fame_checked_at: null }),
+      entityRow({ id: 2, canonical_name: "Checked", fame_checked_at: "2026-07-20T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, { fameChecked: "never" });
+    expect(result.entities.map((e) => e.id)).toEqual([1]);
+  });
+
+  it("fameChecked=checked keeps only fame_checked_at IS NOT NULL", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Never", fame_checked_at: null }),
+      entityRow({ id: 2, canonical_name: "Checked", fame_checked_at: "2026-07-20T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, { fameChecked: "checked" });
+    expect(result.entities.map((e) => e.id)).toEqual([2]);
+  });
+
+  it("rejects an invalid fameChecked value", async () => {
+    const { sql } = makeMockSql([]);
+    await expect(searchEntities(sql, { fameChecked: "bogus" })).rejects.toThrow(ValidationError);
+  });
+
+  it("fameLocked=true keeps only locked entities", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Locked", fame_locked: true }),
+      entityRow({ id: 2, canonical_name: "Unlocked", fame_locked: false }),
+    ]);
+    const result = await searchEntities(sql, { fameLocked: "true" });
+    expect(result.entities.map((e) => e.id)).toEqual([1]);
+  });
+
+  it("rejects a fameLocked value other than 'true'", async () => {
+    const { sql } = makeMockSql([]);
+    await expect(searchEntities(sql, { fameLocked: "false" })).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("loadMentionsInWindow", () => {
+  it("returns an empty map without querying when ids is empty", async () => {
+    const { sql, calls } = makeMockSql([]);
+    const result = await loadMentionsInWindow(sql, [], 7);
+    expect(result.size).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("parses SUM(mentions) rows keyed by entity id", async () => {
+    const { sql } = makeMockSql([{ entity_id: "3", mentions_in_window: "17" }]);
+    const result = await loadMentionsInWindow(sql, [3], 7);
+    expect(result.get(3)).toBe(17);
+  });
+});
+
+describe("loadSourcesInWindow", () => {
+  it("returns an empty map without querying when ids is empty", async () => {
+    const { sql, calls } = makeMockSql([]);
+    const result = await loadSourcesInWindow(sql, [], 7);
+    expect(result.size).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("parses COUNT(DISTINCT source_name) rows keyed by entity id", async () => {
+    const { sql } = makeMockSql([{ entity_id: "3", sources_in_window: "5" }]);
+    const result = await loadSourcesInWindow(sql, [3], 7);
+    expect(result.get(3)).toBe(5);
   });
 });
 

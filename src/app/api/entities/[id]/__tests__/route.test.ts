@@ -34,6 +34,7 @@ function entityRow(overrides: Partial<SqlRow> = {}): SqlRow {
     id: "1", canonical_name: "Russia", type: "country", status: "tracked", aliases: [],
     fame: "unknown", fame_locked: false, wiki_title: null, wiki_sitelinks: null,
     wiki_pageviews_monthly: null, fame_checked_at: null, first_seen_at: "2026-07-01T00:00:00Z",
+    last_seen_at: null,
     ...overrides,
   };
 }
@@ -71,42 +72,44 @@ describe("GET /api/entities/[id]", () => {
   it("scopes the hourly series to a 7-day window and orders ascending", async () => {
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("FROM entities WHERE id")) {
-        return [{ id: "1", canonical_name: "Russia", type: "country", status: "tracked", first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: "2026-07-15T00:00:00Z" }];
+        return [entityRow({ id: "1", last_seen_at: "2026-07-15T00:00:00Z" })];
       }
       return [];
     });
     currentSql = sql;
     await GET(req, { params: { id: "1" } });
 
-    const seriesCall = calls.find((c) => c.query.includes("FROM entity_mentions_hourly"));
+    // Disambiguated from the new mentions-aggregate query (also FROM
+    // entity_mentions_hourly) by its distinctive ORDER BY.
+    const seriesCall = calls.find((c) => c.query.includes("ORDER BY bucket ASC"));
+    expect(seriesCall!.query).toContain("FROM entity_mentions_hourly");
     expect(seriesCall!.query).toContain("make_interval(days =>");
     expect(seriesCall!.values).toContain(7);
-    expect(seriesCall!.query).toContain("ORDER BY bucket ASC");
   });
 
   it("scopes recent articles to cluster heads, newest first, limited to 20", async () => {
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("FROM entities WHERE id")) {
-        return [{ id: "1", canonical_name: "Russia", type: "country", status: "tracked", first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: null }];
+        return [entityRow({ id: "1" })];
       }
       return [];
     });
     currentSql = sql;
     await GET(req, { params: { id: "1" } });
 
-    const articlesCall = calls.find((c) => c.query.includes("FROM article_entities"));
+    const articlesCall = calls.find((c) => c.query.includes("FROM article_entities") && c.query.includes("LIMIT"));
     expect(articlesCall!.query).toContain("a.dup_group_id IS NULL");
     expect(articlesCall!.query).toContain("ORDER BY COALESCE(a.published_at, a.first_seen_at) DESC");
     expect(articlesCall!.values).toContain(20);
   });
 
-  it("resolves the 'other' entity id/name for edges regardless of a/b position", async () => {
+  it("resolves the 'other' entity id/name for edges regardless of a/b position, and carries firstSeenAt", async () => {
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("FROM entities WHERE id")) {
-        return [{ id: "5", canonical_name: "Russia", type: "country", status: "tracked", first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: null }];
+        return [entityRow({ id: "5" })];
       }
       if (call.query.includes("FROM entity_edges")) {
-        return [{ other_id: "9", other_name: "Ukraine", article_count: "12" }];
+        return [{ other_id: "9", other_name: "Ukraine", article_count: "12", first_seen_at: "2026-06-01T00:00:00Z" }];
       }
       return [];
     });
@@ -114,16 +117,18 @@ describe("GET /api/entities/[id]", () => {
     const res = await GET(req, { params: { id: "5" } });
     const body = await res.json();
 
-    expect(body.edges).toEqual([{ id: 9, name: "Ukraine", articleCount: 12 }]);
+    expect(body.edges).toEqual([
+      { id: 9, name: "Ukraine", articleCount: 12, firstSeenAt: "2026-06-01T00:00:00.000Z" },
+    ]);
     const edgesCall = calls.find((c) => c.query.includes("FROM entity_edges"));
     expect(edgesCall!.query).toContain("ORDER BY ee.article_count DESC");
     expect(edgesCall!.values).toContain(10);
   });
 
-  it("returns the full shape: entity + series + articles + edges + relations", async () => {
+  it("returns the full shape: entity + activity + series + articles + edges + relations", async () => {
     const { sql } = makeMockSql((call) => {
       if (call.query.includes("FROM entities WHERE id")) {
-        return [{ id: "1", canonical_name: "Russia", type: "country", status: "tracked", first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: "2026-07-15T00:00:00Z" }];
+        return [entityRow({ id: "1", last_seen_at: "2026-07-15T00:00:00Z" })];
       }
       return [];
     });
@@ -137,9 +142,17 @@ describe("GET /api/entities/[id]", () => {
       canonicalName: "Russia",
       type: "country",
       status: "tracked",
+      aliases: [],
+      fame: "unknown",
+      fameLocked: false,
+      wikiTitle: null,
+      wikiSitelinks: null,
+      wikiPageviewsMonthly: null,
+      fameCheckedAt: null,
       firstSeenAt: "2026-07-01T00:00:00.000Z",
       lastSeenAt: "2026-07-15T00:00:00.000Z",
     });
+    expect(body.activity).toEqual({ mentions30d: 0, sources30d: 0 });
     expect(body.series).toEqual([]);
     expect(body.articles).toEqual([]);
     expect(body.edges).toEqual([]);
@@ -149,7 +162,7 @@ describe("GET /api/entities/[id]", () => {
   it("loads outgoing (source=id) and incoming (target=id) relations as one query each, correctly shaped", async () => {
     const { sql, calls } = makeMockSql((call) => {
       if (call.query.includes("FROM entities WHERE id")) {
-        return [{ id: "5", canonical_name: "Hyundai", type: "company", status: "tracked", first_seen_at: "2026-07-01T00:00:00Z", last_seen_at: null }];
+        return [entityRow({ id: "5", canonical_name: "Hyundai", type: "company" })];
       }
       if (call.query.includes("er.source_id = ")) {
         return [{ relation: "acquisition", other_id: "9", other_name: "Boston Dynamics", article_count: "3", last_seen_at: "2026-07-10T00:00:00Z" }];
@@ -164,14 +177,96 @@ describe("GET /api/entities/[id]", () => {
     const body = await res.json();
 
     expect(body.relations.outgoing).toEqual([
-      { relation: "acquisition", id: 9, name: "Boston Dynamics", articleCount: 3, lastSeenAt: "2026-07-10T00:00:00.000Z" },
+      { relation: "acquisition", id: 9, name: "Boston Dynamics", articleCount: 3, lastSeenAt: "2026-07-10T00:00:00.000Z", evidence: null },
     ]);
     expect(body.relations.incoming).toEqual([
-      { relation: "investment", id: 12, name: "SoftBank", articleCount: 2, lastSeenAt: "2026-07-11T00:00:00.000Z" },
+      { relation: "investment", id: 12, name: "SoftBank", articleCount: 2, lastSeenAt: "2026-07-11T00:00:00.000Z", evidence: null },
     ]);
 
     const relationsCalls = calls.filter((c) => c.query.includes("FROM entity_relations"));
     expect(relationsCalls).toHaveLength(2);
+  });
+
+  it("relations LEFT JOIN articles on evidence_article_id, excluding demoted duplicate members", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM entities WHERE id")) return [entityRow({ id: "5" })];
+      return [];
+    });
+    currentSql = sql;
+    await GET(req, { params: { id: "5" } });
+
+    const outgoingCall = calls.find((c) => c.query.includes("er.source_id = "));
+    expect(outgoingCall!.query).toContain("LEFT JOIN articles ev ON ev.id = er.evidence_article_id");
+    expect(outgoingCall!.query).toContain("ev.dup_group_id IS NULL");
+  });
+
+  it("carries relation evidence {title, link} when the article resolves, else null", async () => {
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("FROM entities WHERE id")) return [entityRow({ id: "5" })];
+      if (call.query.includes("er.source_id = ")) {
+        return [{
+          relation: "acquisition", other_id: "9", other_name: "Boston Dynamics",
+          article_count: "3", last_seen_at: "2026-07-10T00:00:00Z",
+          evidence_title: "Hyundai completes Boston Dynamics deal", evidence_link: "https://example.com/a",
+        }];
+      }
+      if (call.query.includes("er.target_id = ")) {
+        return [{
+          relation: "investment", other_id: "12", other_name: "SoftBank",
+          article_count: "2", last_seen_at: "2026-07-11T00:00:00Z",
+          evidence_title: null, evidence_link: null,
+        }];
+      }
+      return [];
+    });
+    currentSql = sql;
+    const res = await GET(req, { params: { id: "5" } });
+    const body = await res.json();
+
+    expect(body.relations.outgoing[0].evidence).toEqual({
+      title: "Hyundai completes Boston Dynamics deal",
+      link: "https://example.com/a",
+    });
+    expect(body.relations.incoming[0].evidence).toBeNull();
+  });
+});
+
+describe("GET /api/entities/[id] — activity", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+
+  it("returns mentions30d/sources30d over a 30-day window, zero-filled when no aggregate row exists", async () => {
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM entities WHERE id")) return [entityRow({ id: "1" })];
+      if (call.query.includes("FROM entity_mentions_hourly") && call.query.includes("GROUP BY entity_id")) {
+        return [{ entity_id: "1", mentions_in_window: "22" }];
+      }
+      if (call.query.includes("FROM article_entities") && call.query.includes("GROUP BY ae.entity_id")) {
+        return [{ entity_id: "1", sources_in_window: "6" }];
+      }
+      return [];
+    });
+    currentSql = sql;
+    const res = await GET(req, { params: { id: "1" } });
+    const body = await res.json();
+
+    expect(body.activity).toEqual({ mentions30d: 22, sources30d: 6 });
+    const mentionsCall = calls.find(
+      (c) => c.query.includes("FROM entity_mentions_hourly") && c.query.includes("GROUP BY entity_id"),
+    );
+    expect(mentionsCall!.values).toContain(30);
+  });
+
+  it("zero-fills when the entity has no activity in the window", async () => {
+    const { sql } = makeMockSql((call) => {
+      if (call.query.includes("FROM entities WHERE id")) return [entityRow({ id: "1" })];
+      return [];
+    });
+    currentSql = sql;
+    const res = await GET(req, { params: { id: "1" } });
+    const body = await res.json();
+    expect(body.activity).toEqual({ mentions30d: 0, sources30d: 0 });
   });
 });
 

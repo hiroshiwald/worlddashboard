@@ -186,8 +186,10 @@ Contract (all additive): list mode gains `sort`
 activity aggregates (`mentions7d`, `sources7d`, `lastSeenAt`) and role
 classification (`role: anchor|satellite` + reasons, reusing
 `fame.ts`/`developments.ts` helpers — never duplicating their thresholds);
-stats-tile filters (`fameChecked=never`, `fameLocked=true`, parked ≡
-existing `status=dismissed`); detail endpoint gains the fame block
+stats-tile filters (`fameChecked=never|checked`, `fameLocked=true`;
+"parked" turned out to mean `fame='unknown' AND fame_checked_at IS NOT
+NULL` per the stats SQL — expressible as `fame=unknown&fameChecked=checked`,
+no separate param — not `status=dismissed` as first assumed); detail endpoint gains the fame block
 (`fame`, `fameLocked`, `wikiTitle`, `wikiSitelinks`,
 `wikiPageviewsMonthly`, `fameCheckedAt`), `aliases`, a 30-day activity
 summary (`mentions30d`, `sources30d`), relations gain

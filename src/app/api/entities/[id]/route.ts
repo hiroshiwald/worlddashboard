@@ -1,28 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSql } from "@/lib/server/db";
 import type { Sql, SqlRow } from "@/lib/server/db";
-import { toEntityAdminJson } from "@/lib/server/entity-admin";
+import { toEntityAdminJson, loadMentionsInWindow, loadSourcesInWindow } from "@/lib/server/entity-admin";
 
 export const dynamic = "force-dynamic";
 
 const RECENT_ARTICLES_LIMIT = 20;
 const TOP_EDGES_LIMIT = 10;
 const SERIES_WINDOW_DAYS = 7;
+const ACTIVITY_WINDOW_DAYS = 30;
 
 function toIsoString(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
   return new Date(value as string).toISOString();
 }
 
-function toEntityJson(row: SqlRow) {
+/** Full dossier shape: every entities column (fame verdict + its Wikipedia
+ * evidence, aliases, timestamps) — DESIGN.md spine #2, nothing about the
+ * fame classification stays hidden in the detail view. */
+function toEntityDetailJson(row: SqlRow) {
   return {
-    id: Number(row.id),
-    canonicalName: String(row.canonical_name),
-    type: String(row.type),
-    status: String(row.status),
-    firstSeenAt: toIsoString(row.first_seen_at),
+    ...toEntityAdminJson(row),
     lastSeenAt: row.last_seen_at != null ? toIsoString(row.last_seen_at) : null,
   };
+}
+
+/** mentions30d/sources30d — same aggregate shapes list mode uses for its 7d
+ * activity column, windowed to 30 days and scoped to this one entity. */
+async function loadActivitySummary(sql: Sql, id: number) {
+  const [mentionsById, sourcesById] = await Promise.all([
+    loadMentionsInWindow(sql, [id], ACTIVITY_WINDOW_DAYS),
+    loadSourcesInWindow(sql, [id], ACTIVITY_WINDOW_DAYS),
+  ]);
+  return { mentions30d: mentionsById.get(id) ?? 0, sources30d: sourcesById.get(id) ?? 0 };
 }
 
 async function loadHourlySeries(sql: Sql, id: number) {
@@ -59,6 +69,11 @@ async function loadRecentArticles(sql: Sql, id: number) {
   }));
 }
 
+/** evidence is null when evidence_article_id is null OR the referenced
+ * article no longer resolves to a retained cluster head (aged out of
+ * retention, or demoted to a duplicate member) — absence is shown, not
+ * faked (DESIGN.md spine #2/#5). The row's own article_count/lastSeenAt are
+ * unaffected either way. */
 function toRelationJson(row: SqlRow) {
   return {
     relation: String(row.relation),
@@ -66,14 +81,20 @@ function toRelationJson(row: SqlRow) {
     name: String(row.other_name),
     articleCount: Number(row.article_count),
     lastSeenAt: toIsoString(row.last_seen_at),
+    evidence:
+      row.evidence_title != null && row.evidence_link != null
+        ? { title: String(row.evidence_title), link: String(row.evidence_link) }
+        : null,
   };
 }
 
 async function loadOutgoingRelations(sql: Sql, id: number) {
   const rows = await sql`
-    SELECT er.relation, er.target_id AS other_id, e.canonical_name AS other_name, er.article_count, er.last_seen_at
+    SELECT er.relation, er.target_id AS other_id, e.canonical_name AS other_name,
+           er.article_count, er.last_seen_at, ev.title AS evidence_title, ev.link AS evidence_link
     FROM entity_relations er
     JOIN entities e ON e.id = er.target_id
+    LEFT JOIN articles ev ON ev.id = er.evidence_article_id AND ev.dup_group_id IS NULL
     WHERE er.source_id = ${id}
     ORDER BY er.article_count DESC
   `;
@@ -82,9 +103,11 @@ async function loadOutgoingRelations(sql: Sql, id: number) {
 
 async function loadIncomingRelations(sql: Sql, id: number) {
   const rows = await sql`
-    SELECT er.relation, er.source_id AS other_id, e.canonical_name AS other_name, er.article_count, er.last_seen_at
+    SELECT er.relation, er.source_id AS other_id, e.canonical_name AS other_name,
+           er.article_count, er.last_seen_at, ev.title AS evidence_title, ev.link AS evidence_link
     FROM entity_relations er
     JOIN entities e ON e.id = er.source_id
+    LEFT JOIN articles ev ON ev.id = er.evidence_article_id AND ev.dup_group_id IS NULL
     WHERE er.target_id = ${id}
     ORDER BY er.article_count DESC
   `;
@@ -96,7 +119,8 @@ async function loadTopEdges(sql: Sql, id: number) {
     SELECT
       CASE WHEN ee.entity_a = ${id} THEN ee.entity_b ELSE ee.entity_a END AS other_id,
       e.canonical_name AS other_name,
-      ee.article_count
+      ee.article_count,
+      ee.first_seen_at
     FROM entity_edges ee
     JOIN entities e ON e.id = CASE WHEN ee.entity_a = ${id} THEN ee.entity_b ELSE ee.entity_a END
     WHERE ee.entity_a = ${id} OR ee.entity_b = ${id}
@@ -107,6 +131,7 @@ async function loadTopEdges(sql: Sql, id: number) {
     id: Number(row.other_id),
     name: String(row.other_name),
     articleCount: Number(row.article_count),
+    firstSeenAt: toIsoString(row.first_seen_at),
   }));
 }
 
@@ -122,23 +147,27 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   const sql = getSql();
   const entityRows = await sql`
-    SELECT id, canonical_name, type, status, first_seen_at, last_seen_at
+    SELECT id, canonical_name, type, status, aliases, fame, fame_locked,
+           wiki_title, wiki_sitelinks, wiki_pageviews_monthly, fame_checked_at,
+           first_seen_at, last_seen_at
     FROM entities WHERE id = ${id}
   `;
   if (entityRows.length === 0) {
     return NextResponse.json({ error: "Entity not found" }, { status: 404 });
   }
 
-  const [series, articles, edges, outgoing, incoming] = await Promise.all([
+  const [series, articles, edges, outgoing, incoming, activity] = await Promise.all([
     loadHourlySeries(sql, id),
     loadRecentArticles(sql, id),
     loadTopEdges(sql, id),
     loadOutgoingRelations(sql, id),
     loadIncomingRelations(sql, id),
+    loadActivitySummary(sql, id),
   ]);
 
   return NextResponse.json({
-    entity: toEntityJson(entityRows[0]),
+    entity: toEntityDetailJson(entityRows[0]),
+    activity,
     series,
     articles,
     edges,

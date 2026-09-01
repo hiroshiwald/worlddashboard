@@ -17,6 +17,20 @@ function makeMockSql(rows: SqlRow[]) {
   return { sql, calls };
 }
 
+/** Unlike makeMockSql (same rows for every call, fine when a test only
+ * cares about the main entities query), this branches on query text — needed
+ * whenever a test also cares about the mentions7d/sources7d aggregate
+ * queries, which return a different row shape than the entities query. */
+function makeHandlerMockSql(handler: (query: string) => SqlRow[]) {
+  const calls: string[] = [];
+  const sql = (async (strings: TemplateStringsArray) => {
+    const query = strings.join(" ? ");
+    calls.push(query);
+    return handler(query);
+  }) as Sql;
+  return { sql, calls };
+}
+
 function getRequest(name: string | null): NextRequest {
   const url = name === null ? "http://localhost/api/entities" : `http://localhost/api/entities?name=${encodeURIComponent(name)}`;
   return new NextRequest(url);
@@ -35,11 +49,13 @@ function statsRow(overrides: Partial<SqlRow> = {}): SqlRow {
   };
 }
 
-function entityRow(id: number, canonicalName: string): SqlRow {
+function entityRow(id: number, canonicalName: string, overrides: Partial<SqlRow> = {}): SqlRow {
   return {
     id, canonical_name: canonicalName, type: "person", status: "tracked", aliases: [],
     fame: "unknown", fame_locked: false, wiki_title: null, wiki_sitelinks: null,
     wiki_pageviews_monthly: null, fame_checked_at: null, first_seen_at: "2026-07-01T00:00:00Z",
+    last_seen_at: null,
+    ...overrides,
   };
 }
 
@@ -138,6 +154,170 @@ describe("GET /api/entities — list mode (?name= absent)", () => {
     currentSql = makeMockSql([]).sql;
     const res = await GET(listRequest("?status=bogus"));
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/entities — sort", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+
+  function rows(): SqlRow[] {
+    return [
+      entityRow(1, "Bravo", { first_seen_at: "2026-06-01T00:00:00Z", last_seen_at: "2026-07-01T00:00:00Z" }),
+      entityRow(2, "Alpha", { first_seen_at: "2026-06-15T00:00:00Z", last_seen_at: "2026-08-01T00:00:00Z" }),
+    ];
+  }
+
+  function mockRows() {
+    return makeHandlerMockSql((query) => (query.includes("FROM entities") ? rows() : []));
+  }
+
+  it("defaults to last_seen desc when sort is omitted", async () => {
+    currentSql = mockRows().sql;
+    const body = await (await GET(listRequest(""))).json();
+    expect(body.entities.map((e: { id: number }) => e.id)).toEqual([2, 1]);
+  });
+
+  it("sort=name orders ascending", async () => {
+    currentSql = mockRows().sql;
+    const body = await (await GET(listRequest("?sort=name"))).json();
+    expect(body.entities.map((e: { canonicalName: string }) => e.canonicalName)).toEqual(["Alpha", "Bravo"]);
+  });
+
+  it("sort=first_seen orders descending", async () => {
+    currentSql = mockRows().sql;
+    const body = await (await GET(listRequest("?sort=first_seen"))).json();
+    expect(body.entities.map((e: { id: number }) => e.id)).toEqual([2, 1]);
+  });
+
+  it("sort=last_seen orders descending", async () => {
+    currentSql = mockRows().sql;
+    const body = await (await GET(listRequest("?sort=last_seen"))).json();
+    expect(body.entities.map((e: { id: number }) => e.id)).toEqual([2, 1]);
+  });
+
+  it("sort=activity orders by mentions7d descending", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      if (query.includes("FROM entities")) return rows();
+      if (query.includes("FROM entity_mentions_hourly")) {
+        return [
+          { entity_id: "1", mentions_in_window: "50" },
+          { entity_id: "2", mentions_in_window: "5" },
+        ];
+      }
+      return [];
+    });
+    currentSql = sql;
+    const body = await (await GET(listRequest("?sort=activity"))).json();
+    expect(body.entities.map((e: { id: number }) => e.id)).toEqual([1, 2]);
+    expect(body.entities[0].mentions7d).toBe(50);
+  });
+
+  it("400s on an invalid sort value", async () => {
+    currentSql = mockRows().sql;
+    const res = await GET(listRequest("?sort=bogus"));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/entities — activity aggregates", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+
+  it("zero-fills mentions7d/sources7d when no aggregate row matches", async () => {
+    const { sql } = makeHandlerMockSql((query) => (query.includes("FROM entities") ? [entityRow(1, "Russia")] : []));
+    currentSql = sql;
+    const body = await (await GET(listRequest(""))).json();
+    expect(body.entities[0].mentions7d).toBe(0);
+    expect(body.entities[0].sources7d).toBe(0);
+    expect(body.entities[0].lastSeenAt).toBeNull();
+  });
+
+  it("sums mentions and counts distinct sources for the matched set", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      if (query.includes("FROM entities")) return [entityRow(1, "Russia")];
+      if (query.includes("FROM entity_mentions_hourly")) return [{ entity_id: "1", mentions_in_window: "12" }];
+      if (query.includes("FROM article_entities")) return [{ entity_id: "1", sources_in_window: "4" }];
+      return [];
+    });
+    currentSql = sql;
+    const body = await (await GET(listRequest(""))).json();
+    expect(body.entities[0].mentions7d).toBe(12);
+    expect(body.entities[0].sources7d).toBe(4);
+  });
+});
+
+describe("GET /api/entities — stat-tile filters", () => {
+  beforeEach(() => {
+    process.env.DATABASE_URL = "postgres://fake";
+  });
+
+  it("fameChecked=never keeps only fame_checked_at IS NULL", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      if (!query.includes("FROM entities")) return [];
+      return [
+        entityRow(1, "Never", { fame_checked_at: null }),
+        entityRow(2, "Checked", { fame_checked_at: "2026-07-20T00:00:00Z" }),
+      ];
+    });
+    currentSql = sql;
+    const body = await (await GET(listRequest("?fameChecked=never"))).json();
+    expect(body.entities.map((e: { id: number }) => e.id)).toEqual([1]);
+  });
+
+  it("fameChecked=checked keeps only fame_checked_at IS NOT NULL", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      if (!query.includes("FROM entities")) return [];
+      return [
+        entityRow(1, "Never", { fame_checked_at: null }),
+        entityRow(2, "Checked", { fame_checked_at: "2026-07-20T00:00:00Z" }),
+      ];
+    });
+    currentSql = sql;
+    const body = await (await GET(listRequest("?fameChecked=checked"))).json();
+    expect(body.entities.map((e: { id: number }) => e.id)).toEqual([2]);
+  });
+
+  it("400s on an invalid fameChecked value", async () => {
+    currentSql = makeMockSql([]).sql;
+    const res = await GET(listRequest("?fameChecked=bogus"));
+    expect(res.status).toBe(400);
+  });
+
+  it("fameLocked=true keeps only locked entities", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      if (!query.includes("FROM entities")) return [];
+      return [
+        entityRow(1, "Locked", { fame_locked: true }),
+        entityRow(2, "Unlocked", { fame_locked: false }),
+      ];
+    });
+    currentSql = sql;
+    const body = await (await GET(listRequest("?fameLocked=true"))).json();
+    expect(body.entities.map((e: { id: number }) => e.id)).toEqual([1]);
+  });
+
+  it("400s on a fameLocked value other than 'true'", async () => {
+    currentSql = makeMockSql([]).sql;
+    const res = await GET(listRequest("?fameLocked=false"));
+    expect(res.status).toBe(400);
+  });
+
+  it("Parked tile: fame=unknown&fameChecked=checked matches loadEntityStats' parked_count definition", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      // Simulates the DB applying WHERE fame = 'unknown' (fame is pushed
+      // down to SQL, not re-filtered in JS) — only unknown-fame rows back.
+      if (!query.includes("FROM entities")) return [];
+      return [
+        entityRow(1, "NeverChecked", { fame_checked_at: null }),
+        entityRow(2, "Parked", { fame_checked_at: "2026-07-20T00:00:00Z" }),
+      ];
+    });
+    currentSql = sql;
+    const body = await (await GET(listRequest("?fame=unknown&fameChecked=checked"))).json();
+    expect(body.entities.map((e: { id: number }) => e.id)).toEqual([2]);
   });
 });
 
