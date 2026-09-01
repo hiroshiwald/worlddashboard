@@ -22,6 +22,7 @@ import {
   dedupeCards,
   sortAndCapCards,
   getDevelopments,
+  getDevelopmentsDetailed,
 } from "../developments";
 import type { Sql, SqlRow } from "../db";
 
@@ -251,28 +252,34 @@ describe("buildWhyShown", () => {
 describe("passesEligibility", () => {
   const base = { subjectIsAnchor: false, subjectIsFamous: false, distinctSourceCount: 2, evidenceCount: 2, anchorCount: 1 };
 
-  it("passes when every condition clears", () => {
-    expect(passesEligibility(base)).toBe(true);
+  it("passes (returns null) when every condition clears", () => {
+    expect(passesEligibility(base)).toBe(null);
   });
 
-  it("fails when the subject is an anchor, no exceptions", () => {
-    expect(passesEligibility({ ...base, subjectIsAnchor: true })).toBe(false);
+  it("fails with reason anchor_subject when the subject is an anchor, no exceptions", () => {
+    expect(passesEligibility({ ...base, subjectIsAnchor: true })).toBe("anchor_subject");
   });
 
-  it("fails when the subject is famous, no exceptions", () => {
-    expect(passesEligibility({ ...base, subjectIsFamous: true })).toBe(false);
+  it("fails with reason famous_subject when the subject is famous, no exceptions", () => {
+    expect(passesEligibility({ ...base, subjectIsFamous: true })).toBe("famous_subject");
   });
 
-  it("fails below the distinct-source floor", () => {
-    expect(passesEligibility({ ...base, distinctSourceCount: 1 })).toBe(false);
+  it("fails with reason single_source below the distinct-source floor", () => {
+    expect(passesEligibility({ ...base, distinctSourceCount: 1 })).toBe("single_source");
   });
 
-  it("fails with zero evidence", () => {
-    expect(passesEligibility({ ...base, evidenceCount: 0 })).toBe(false);
+  it("fails with reason no_evidence with zero evidence", () => {
+    expect(passesEligibility({ ...base, evidenceCount: 0 })).toBe("no_evidence");
   });
 
-  it("fails with zero anchors", () => {
-    expect(passesEligibility({ ...base, anchorCount: 0 })).toBe(false);
+  it("fails with reason no_anchor with zero anchors", () => {
+    expect(passesEligibility({ ...base, anchorCount: 0 })).toBe("no_anchor");
+  });
+
+  it("reports only the first-failing reason when multiple filters fail", () => {
+    expect(passesEligibility({ ...base, subjectIsAnchor: true, subjectIsFamous: true, evidenceCount: 0 })).toBe(
+      "anchor_subject",
+    );
   });
 });
 
@@ -644,7 +651,7 @@ describe("getDevelopments — required fixtures", () => {
   it("fixture 8: single-source subject — ineligible", async () => {
     expect(
       passesEligibility({ subjectIsAnchor: false, subjectIsFamous: false, distinctSourceCount: 1, evidenceCount: 1, anchorCount: 1 }),
-    ).toBe(false);
+    ).toBe("single_source");
 
     const sql = makeDevelopmentsSql({
       ...baseResponses(),
@@ -1039,5 +1046,169 @@ describe("getDevelopments query shape", () => {
   it("returns [] with no operating history at all, without throwing", async () => {
     const sql = (async () => []) as Sql;
     expect(await getDevelopments(sql, NOW)).toEqual([]);
+  });
+});
+
+// ---- getDevelopmentsDetailed: diagnostics ----
+
+describe("getDevelopmentsDetailed — diagnostics", () => {
+  it("returns empty diagnostics (not undefined/NaN) with no operating history at all", async () => {
+    const sql = (async () => []) as Sql;
+    const { cards, diagnostics } = await getDevelopmentsDetailed(sql, NOW);
+    expect(cards).toEqual([]);
+    expect(diagnostics).toEqual({ draftCount: 0, eligibleCount: 0, rejected: {} });
+  });
+
+  it("tallies anchor_subject: a source-C candidate whose type_hint is 'region' is rejected even with a resolved anchor", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(1, "Russia", "country", 0)],
+      candidates: [
+        {
+          name_norm: "regionalbloc", display_name: "RegionalBloc", type_hint: "region",
+          first_seen_at: iso(3), last_seen_at: iso(1), source_names: ["Source A", "Source B"],
+          day_count: 2, sample_titles: ["Regional Title"], contexts: [], co_entities: ["Russia"],
+        },
+      ],
+      titleMatches: [{ title: "Regional Title", id: 701, dup_group_id: null }],
+      resolvedArticles: [
+        { id: 701, title: "Regional Title", link: "http://701", source_name: "Source A", published_at: iso(3), first_seen_at: iso(3) },
+      ],
+    });
+
+    const { cards, diagnostics } = await getDevelopmentsDetailed(sql, NOW);
+    expect(cards).toEqual([]);
+    expect(diagnostics).toEqual({ draftCount: 1, eligibleCount: 0, rejected: { anchor_subject: 1 } });
+  });
+
+  it("tallies famous_subject: fixture-20 shape (famous-by-breadth subject via source E)", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(60, "TallAnchorOrg", "organization", 140), entityRow(61, "WidelyCoveredCo", "company", 14)],
+      edgeBootstrapFloor: [{ min_first_seen: iso(90) }],
+      edges: [{ entity_a: 60, entity_b: 61, first_seen_at: iso(5), last_seen_at: iso(2) }],
+      pairEvidence: [
+        { entity_a: 60, entity_b: 61, id: 950, title: "BR1", link: "http://br1", source_name: "Source A", published_at: iso(5), first_seen_at: iso(5) },
+        { entity_a: 60, entity_b: 61, id: 951, title: "BR2", link: "http://br2", source_name: "Source B", published_at: iso(4), first_seen_at: iso(4) },
+      ],
+      breadth: [{ entity_id: 61, source_breadth: 12 }],
+    });
+
+    const { cards, diagnostics } = await getDevelopmentsDetailed(sql, NOW);
+    expect(cards).toEqual([]);
+    expect(diagnostics).toEqual({ draftCount: 1, eligibleCount: 0, rejected: { famous_subject: 1 } });
+  });
+
+  it("tallies no_evidence: a relation in-window with no resolvable evidence article", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(1, "CountryC", "country", 0), entityRow(2, "GhostCo", "company", 14)],
+      relations: [
+        { source_id: 2, target_id: 1, relation: "sanction", first_seen_at: iso(3), last_seen_at: iso(1), evidence_article_id: null },
+      ],
+    });
+
+    const { cards, diagnostics } = await getDevelopmentsDetailed(sql, NOW);
+    expect(cards).toEqual([]);
+    expect(diagnostics).toEqual({ draftCount: 1, eligibleCount: 0, rejected: { no_evidence: 1 } });
+  });
+
+  it("tallies single_source: fixture-8 shape (one distinct source name)", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [entityRow(1, "CountryA", "country", 0), entityRow(2, "Company", "company", 14)],
+      relations: [
+        { source_id: 2, target_id: 1, relation: "sanction", first_seen_at: iso(3), last_seen_at: iso(1), evidence_article_id: null },
+      ],
+      pairEvidence: [
+        { entity_a: 1, entity_b: 2, id: 220, title: "Solo", link: "http://s", source_name: "Only Source", published_at: iso(3), first_seen_at: iso(3) },
+      ],
+    });
+
+    const { cards, diagnostics } = await getDevelopmentsDetailed(sql, NOW);
+    expect(cards).toEqual([]);
+    expect(diagnostics).toEqual({ draftCount: 1, eligibleCount: 0, rejected: { single_source: 1 } });
+  });
+
+  it("combines an eligible draft and a rejected draft in one run: draftCount/eligibleCount/rejected all agree with the returned cards", async () => {
+    const sql = makeDevelopmentsSql({
+      ...baseResponses(),
+      baseline: [
+        entityRow(1, "Russia", "country", 0),
+        entityRow(2, "Company", "company", 14),
+        entityRow(3, "CountryA", "country", 0),
+        entityRow(4, "Company2", "company", 14),
+      ],
+      relations: [
+        { source_id: 2, target_id: 1, relation: "sanction", first_seen_at: iso(5), last_seen_at: iso(2), evidence_article_id: null },
+        { source_id: 4, target_id: 3, relation: "sanction", first_seen_at: iso(3), last_seen_at: iso(1), evidence_article_id: null },
+      ],
+      pairEvidence: [
+        { entity_a: 1, entity_b: 2, id: 101, title: "A", link: "http://a", source_name: "Source A", published_at: iso(5), first_seen_at: iso(5) },
+        { entity_a: 1, entity_b: 2, id: 102, title: "B", link: "http://b", source_name: "Source B", published_at: iso(4), first_seen_at: iso(4) },
+        { entity_a: 1, entity_b: 2, id: 103, title: "C", link: "http://c", source_name: "Source C", published_at: iso(3), first_seen_at: iso(3) },
+        { entity_a: 3, entity_b: 4, id: 220, title: "Solo", link: "http://s", source_name: "Only Source", published_at: iso(3), first_seen_at: iso(3) },
+      ],
+    });
+
+    const { cards, diagnostics } = await getDevelopmentsDetailed(sql, NOW);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].subjectName).toBe("Company");
+    expect(diagnostics).toEqual({ draftCount: 2, eligibleCount: 1, rejected: { single_source: 1 } });
+  });
+});
+
+// ---- getDevelopmentsDetailed: cap override ----
+
+function tenEligibleCompaniesResponses() {
+  const companyIds = Array.from({ length: 10 }, (_, i) => i + 2);
+  return {
+    ...baseResponses(),
+    baseline: [
+      entityRow(1, "Russia", "country", 0),
+      ...companyIds.map((id) => entityRow(id, `Company${id}`, "company", 14)),
+    ],
+    relations: companyIds.map((id) => ({
+      source_id: id, target_id: 1, relation: "sanction", first_seen_at: iso(2), last_seen_at: iso(1), evidence_article_id: null,
+    })),
+    pairEvidence: companyIds.flatMap((id) => [
+      { entity_a: 1, entity_b: id, id: id * 10, title: `T${id}A`, link: `http://${id}a`, source_name: `Source ${id}A`, published_at: iso(2), first_seen_at: iso(2) },
+      { entity_a: 1, entity_b: id, id: id * 10 + 1, title: `T${id}B`, link: `http://${id}b`, source_name: `Source ${id}B`, published_at: iso(1), first_seen_at: iso(1) },
+    ]),
+  };
+}
+
+describe("getDevelopmentsDetailed — cap override", () => {
+  it("defaults to CARD_CAP (8) when no cap is given, same as getDevelopments", async () => {
+    const sql = makeDevelopmentsSql(tenEligibleCompaniesResponses());
+    const { cards, diagnostics } = await getDevelopmentsDetailed(sql, NOW);
+    expect(cards).toHaveLength(8);
+    expect(diagnostics.eligibleCount).toBe(10);
+  });
+
+  it("returns more than 8 cards when more are eligible and cap is raised", async () => {
+    const sql = makeDevelopmentsSql(tenEligibleCompaniesResponses());
+    const { cards, diagnostics } = await getDevelopmentsDetailed(sql, NOW, { cap: 20 });
+    expect(cards).toHaveLength(10);
+    expect(diagnostics.eligibleCount).toBe(10);
+  });
+
+  it("getDevelopments (the brief-path entry) is unchanged: still capped at 8 on the same eligible set", async () => {
+    const sql = makeDevelopmentsSql(tenEligibleCompaniesResponses());
+    const result = await getDevelopments(sql, NOW);
+    expect(result).toHaveLength(8);
+  });
+});
+
+describe("getDevelopmentsDetailed — cap validation", () => {
+  const sql = makeDevelopmentsSql(baseResponses());
+
+  it.each([0, -1, 1.5, NaN, Infinity])("rejects a nonsense cap (%s)", async (cap) => {
+    await expect(getDevelopmentsDetailed(sql, NOW, { cap })).rejects.toThrow();
+  });
+
+  it("accepts a valid positive-integer cap", async () => {
+    const { cards } = await getDevelopmentsDetailed(sql, NOW, { cap: 1 });
+    expect(cards).toEqual([]);
   });
 });

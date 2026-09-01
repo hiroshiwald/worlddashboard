@@ -334,6 +334,10 @@ interface EligibilityInput {
   anchorCount: number;
 }
 
+// Low-cardinality keys for the rejection tally in getDevelopmentsDetailed's
+// diagnostics — one per `if` below, in the same fixed order.
+export type EligibilityReason = "anchor_subject" | "famous_subject" | "no_evidence" | "single_source" | "no_anchor";
+
 /** The hard filters, applied identically to every source's assembled card
  * before scoring. subjectIsAnchor is the uniform fix that closes the C-source
  * gap: a candidate's type_hint can be 'region' (compromise-tagged place
@@ -343,14 +347,16 @@ interface EligibilityInput {
  * companion fix: fame is deliberately broader than isAnchor (dictionary
  * membership, lifetime source breadth, or top-quartile baseline), so a
  * subject can clear the anchor bar's absence yet still be a famous entity
- * that must never headline a card. */
-export function passesEligibility(input: EligibilityInput): boolean {
-  if (input.subjectIsAnchor) return false;
-  if (input.subjectIsFamous) return false;
-  if (input.evidenceCount < 1) return false;
-  if (input.distinctSourceCount < MIN_DISTINCT_SOURCES) return false;
-  if (input.anchorCount < MIN_ANCHOR_COUNT) return false;
-  return true;
+ * that must never headline a card. Returns the first-failing reason, or
+ * null once every filter clears — doubles as the boolean gate
+ * (`passesEligibility(input) === null`) and the diagnostics tally key. */
+export function passesEligibility(input: EligibilityInput): EligibilityReason | null {
+  if (input.subjectIsAnchor) return "anchor_subject";
+  if (input.subjectIsFamous) return "famous_subject";
+  if (input.evidenceCount < 1) return "no_evidence";
+  if (input.distinctSourceCount < MIN_DISTINCT_SOURCES) return "single_source";
+  if (input.anchorCount < MIN_ANCHOR_COUNT) return "no_anchor";
+  return null;
 }
 
 /** day_count/distinct-source-name gate for candidates (source C only). A
@@ -1283,35 +1289,92 @@ async function buildAllCardDrafts(sql: Sql, ctx: CardContext): Promise<CardDraft
   return [...relationDrafts, ...newEntityDrafts, ...candidateDrafts, ...edgeDrafts];
 }
 
-// Eligibility (uniform, incl. the subject-is-anchor check) -> score ->
-// cross-source dedupe -> sort/cap, strictly in that order: dedupe needs the
-// scored relationStrength, and eligibility must run before scoring per spec.
-function finalizeCards(drafts: CardDraft[], anchorThreshold: number, now: Date): DevelopmentCardJson[] {
-  const eligible = drafts.filter((draft) => {
+export interface DevelopmentDiagnostics {
+  draftCount: number;
+  eligibleCount: number;
+  rejected: Record<string, number>;
+}
+
+export interface DevelopmentsResult {
+  cards: DevelopmentCardJson[];
+  diagnostics: DevelopmentDiagnostics;
+}
+
+/** Splits drafts into the eligible set and a rejection tally keyed by each
+ * draft's first-failing eligibility reason. One pass, so a draft failing
+ * more than one filter is counted once, under its first failure only. */
+function classifyDrafts(
+  drafts: CardDraft[],
+  anchorThreshold: number,
+): { eligible: CardDraft[]; rejected: Record<string, number> } {
+  const eligible: CardDraft[] = [];
+  const rejected: Record<string, number> = {};
+  for (const draft of drafts) {
     const subjectIsAnchor = isAnchor(draft.subjectType, draft.subjectBaselineDaily ?? 0, anchorThreshold);
-    return passesEligibility({
+    const reason = passesEligibility({
       subjectIsAnchor,
       subjectIsFamous: draft.subjectIsFamous,
       distinctSourceCount: countDistinctSources(draft.fullEvidence),
       evidenceCount: draft.fullEvidence.length,
       anchorCount: draft.anchorNames.length,
     });
-  });
-  const scored = eligible.map((draft) => scoreCard(draft, anchorThreshold, now));
-  const deduped = dedupeCards(scored);
-  const capped = sortAndCapCards(deduped, CARD_CAP);
-  return capped.map(toDevelopmentCardJson);
+    if (reason === null) eligible.push(draft);
+    else rejected[reason] = (rejected[reason] ?? 0) + 1;
+  }
+  return { eligible, rejected };
 }
 
-/** Read-only, request-time-computed development cards: lower-frequency
- * satellite entities surfaced with high-volume anchor context, evidence,
- * and honest (arrival-based) observation times. Returns [] before the
- * system has any operating history at all — callers that already gate on
- * computeWarmupState (getBrief) never reach that case, but this must still
- * tolerate being called directly (e.g. from a test) with no epoch yet. */
-export async function getDevelopments(sql: Sql, now: Date = new Date()): Promise<DevelopmentCardJson[]> {
+// Eligibility (uniform, incl. the subject-is-anchor check) -> score ->
+// cross-source dedupe -> sort/cap, strictly in that order: dedupe needs the
+// scored relationStrength, and eligibility must run before scoring per spec.
+// eligibleCount is measured right after the eligibility gate (before
+// cross-source dedupe/cap), matching the pipeline stage its name describes.
+function finalizeCards(drafts: CardDraft[], anchorThreshold: number, now: Date, cap: number): DevelopmentsResult {
+  const { eligible, rejected } = classifyDrafts(drafts, anchorThreshold);
+  const scored = eligible.map((draft) => scoreCard(draft, anchorThreshold, now));
+  const deduped = dedupeCards(scored);
+  const capped = sortAndCapCards(deduped, cap);
+  return {
+    cards: capped.map(toDevelopmentCardJson),
+    diagnostics: { draftCount: drafts.length, eligibleCount: eligible.length, rejected },
+  };
+}
+
+export interface GetDevelopmentsOptions {
+  cap?: number;
+}
+
+/** cap defaults to the brief-path CARD_CAP; any override must still be a
+ * sane, positive whole number — fail fast on anything else rather than
+ * letting NaN/0/negative silently slice the result to nothing or throw
+ * deeper inside Array.slice's own tolerant-of-garbage behavior. */
+function resolveCap(cap: number | undefined): number {
+  const value = cap ?? CARD_CAP;
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`getDevelopmentsDetailed: cap must be a positive integer, got ${value}`);
+  }
+  return value;
+}
+
+const EMPTY_DIAGNOSTICS: DevelopmentDiagnostics = { draftCount: 0, eligibleCount: 0, rejected: {} };
+
+/** Read-only, request-time-computed development cards plus the rejection
+ * diagnostics behind them: lower-frequency satellite entities surfaced with
+ * high-volume anchor context, evidence, and honest (arrival-based)
+ * observation times. Returns an empty result before the system has any
+ * operating history at all — callers that already gate on
+ * computeWarmupState (getBrief, /api/developments) never reach that case,
+ * but this must still tolerate being called directly (e.g. from a test)
+ * with no epoch yet. `options.cap` overrides CARD_CAP for callers (the
+ * /api/developments route) that want more than Brief's top-8 digest slice. */
+export async function getDevelopmentsDetailed(
+  sql: Sql,
+  now: Date = new Date(),
+  options: GetDevelopmentsOptions = {},
+): Promise<DevelopmentsResult> {
+  const cap = resolveCap(options.cap);
   const epoch = await getSystemEpoch(sql);
-  if (!epoch) return [];
+  if (!epoch) return { cards: [], diagnostics: EMPTY_DIAGNOSTICS };
 
   const effectiveBaselineDays = computeEffectiveBaselineDays(computeDaysSinceEpoch(now, epoch));
   const baselineRows = await loadEntityBaselinePanel(sql);
@@ -1327,5 +1390,11 @@ export async function getDevelopments(sql: Sql, now: Date = new Date()): Promise
     fameVolumeThreshold,
   };
   const drafts = await buildAllCardDrafts(sql, ctx);
-  return finalizeCards(drafts, anchorThreshold, now);
+  return finalizeCards(drafts, anchorThreshold, now, cap);
+}
+
+/** Brief's top-8 digest slice — a thin delegate over getDevelopmentsDetailed
+ * that discards diagnostics. Signature and behavior unchanged for brief.ts. */
+export async function getDevelopments(sql: Sql, now: Date = new Date()): Promise<DevelopmentCardJson[]> {
+  return (await getDevelopmentsDetailed(sql, now)).cards;
 }
