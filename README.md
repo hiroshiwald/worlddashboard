@@ -92,7 +92,6 @@ src/
     ├── entity-extractor.ts     # Named entity recognition (NER)
     ├── entity-dictionaries.ts  # Country, org, region dictionaries
     ├── signal-detector.ts      # Anomaly detection algorithms
-    ├── signal-storage.ts       # Signal muting and entity snapshot persistence
     ├── cascade-graph.ts        # Second/third-order impact chain modeling
     ├── urgency.ts              # Category-to-urgency mapping and styling
     ├── theme.ts                # Dark/light theme class definitions

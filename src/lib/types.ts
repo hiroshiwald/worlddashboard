@@ -103,30 +103,3 @@ export interface Signal {
   metric: number;
 }
 
-/** Extended entity with novelty-relevant fields */
-export interface EnrichedEntity extends ExtractedEntity {
-  categorySpread: number;
-  categories: string[];
-  sourceCount: number;
-  noveltyScore: number;
-  noveltyReasons: NoveltyReason[];
-}
-
-export type NoveltyReasonType =
-  | "novel_edge"
-  | "category_crossover"
-  | "quiet_mover"
-  | "entity_emergence"
-  | "baseline_surprise";
-
-export interface NoveltyReason {
-  type: NoveltyReasonType;
-  label: string;
-  score: number;
-}
-
-export interface EdgeHistoryEntry {
-  firstSeen: string;
-  lastSeen: string;
-  count: number;
-}
