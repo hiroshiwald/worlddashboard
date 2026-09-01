@@ -2,22 +2,42 @@
 
 import { useState } from "react";
 import { severityColor, timeAgo } from "./utils";
+import { formatEvidenceNumbers } from "./evidence-format";
 import { SignalCardData, SignalAction } from "./types";
 
+function expanderLabel(articleCount: number, expanded: boolean): string {
+  if (expanded) return "Hide details";
+  return articleCount > 0 ? `Show sources (${articleCount})` : "Show detector data";
+}
+
+// Detector numbers (from evidence-format.ts) come first when present — the
+// math behind the claim, one click away (DESIGN.md spine #2) — followed by
+// the resolved article list, if any. Renders for a type/state combo that has
+// neither (e.g. a surge signal has no articleIds) only when there's nothing
+// to show at all, in which case the whole expander is suppressed.
 function EvidenceExpander({ signal, dark }: { signal: SignalCardData; dark: boolean }) {
   const [expanded, setExpanded] = useState(false);
-  if (signal.articles.length === 0) return null;
+  const detectorLines = formatEvidenceNumbers(signal.type, signal.evidence);
+  if (signal.articles.length === 0 && detectorLines.length === 0) return null;
 
   return (
     <div className="mb-2.5">
       <button
         onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
         className={`text-[10px] font-semibold uppercase tracking-wider ${dark ? "text-slate-500 hover:text-slate-300" : "text-gray-400 hover:text-gray-600"}`}
       >
-        {expanded ? "Hide sources" : `Show sources (${signal.articles.length})`}
+        {expanderLabel(signal.articles.length, expanded)}
       </button>
       {expanded && (
         <div className={`mt-1.5 rounded-lg border px-3 py-2 space-y-1 ${dark ? "bg-slate-800/50 border-slate-700" : "bg-gray-50 border-gray-200"}`}>
+          {detectorLines.length > 0 && (
+            <div
+              className={`text-[11px] pb-1 mb-1 ${signal.articles.length > 0 ? "border-b" : ""} ${dark ? "text-slate-400 border-slate-700" : "text-gray-500 border-gray-200"}`}
+            >
+              {detectorLines.join(" · ")}
+            </div>
+          )}
           {signal.articles.map((a) => (
             <div key={a.id} className="flex items-center gap-1.5 text-[11px]">
               <span className={`font-medium flex-shrink-0 ${dark ? "text-slate-400" : "text-gray-500"}`}>{a.sourceName}</span>
@@ -37,9 +57,12 @@ function EvidenceExpander({ signal, dark }: { signal: SignalCardData; dark: bool
   );
 }
 
+// "Watch" (UI label only) — the POST action value stays "promoted"; nothing
+// downstream ever consumed a distinct meaning for the word "promote", so
+// relabeling costs nothing and repairs the dead-end language.
 const ACTION_LABELS: Record<SignalAction, string> = {
   seen: "Seen",
-  promoted: "Promote",
+  promoted: "Watch",
   dismissed: "Dismiss",
   reopen: "Reopen",
 };
@@ -70,6 +93,46 @@ function ActionButtons({
   );
 }
 
+function WatchingBadge({ dark }: { dark: boolean }) {
+  return (
+    <span
+      className={`text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full border flex-shrink-0 ${dark ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/40" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}
+    >
+      watching
+    </span>
+  );
+}
+
+const STATE_LABELS: Record<string, string> = { seen: "seen", dismissed: "dismissed", promoted: "watching" };
+
+function TimingLines({ signal, dark }: { signal: SignalCardData; dark: boolean }) {
+  const cls = `text-[10px] ${dark ? "text-slate-500" : "text-gray-400"}`;
+  return (
+    <div className="mb-1.5">
+      <p className={cls}>first detected {timeAgo(signal.firstDetectedAt)}</p>
+      {signal.state !== "new" && signal.stateChangedAt && (
+        <p className={cls}>
+          {STATE_LABELS[signal.state] ?? signal.state} &middot; {timeAgo(signal.stateChangedAt)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+const EXPIRING_TYPES = new Set(["surge", "first_seen", "cross_category", "sentiment"]);
+
+// Honest lifecycle hints (DESIGN.md spine #4). The 7-quiet-day expiry is a
+// hardcoded server product decision (ingest-writer.ts's SIGNAL_EXPIRY_DAYS),
+// safe to state; the dismiss cooldown length is a server *setting* the API
+// never exposes, so its duration is deliberately never hardcoded here.
+function LifecycleHint({ signal, dark }: { signal: SignalCardData; dark: boolean }) {
+  let text: string | null = null;
+  if (signal.state === "new" && EXPIRING_TYPES.has(signal.type)) text = "expires after 7 quiet days";
+  else if (signal.state === "dismissed") text = "suppressed from re-firing for a cooldown after dismissal";
+  if (!text) return null;
+  return <p className={`text-[10px] mb-2 ${dark ? "text-slate-600" : "text-gray-400"}`}>{text}</p>;
+}
+
 interface ManagedSignalCardProps {
   signal: SignalCardData;
   dark: boolean;
@@ -87,6 +150,7 @@ export default function ManagedSignalCard({ signal, dark, busy, actions, onActio
     <div className={`border border-l-4 rounded-xl ${sc.border} ${cardBg} px-4 py-3`}>
       <div className="flex items-start gap-2.5 mb-2">
         <span className={`text-xs font-bold uppercase tracking-wide ${sc.text} flex-1 min-w-0 truncate`}>{signal.title}</span>
+        {signal.state === "promoted" && <WatchingBadge dark={dark} />}
         <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${dark ? "bg-slate-800 text-slate-500" : "bg-gray-100 text-gray-400"}`}>
           {signal.type.replace(/_/g, " ")}
         </span>
@@ -112,6 +176,8 @@ export default function ManagedSignalCard({ signal, dark, busy, actions, onActio
         ))}
       </div>
 
+      <TimingLines signal={signal} dark={dark} />
+      <LifecycleHint signal={signal} dark={dark} />
       <EvidenceExpander signal={signal} dark={dark} />
       <ActionButtons signal={signal} busy={busy} dark={dark} actions={actions} onAction={onAction} />
     </div>

@@ -1,5 +1,11 @@
 export { default as ManagedSignalCard } from "./ManagedSignalCard";
 export { default as ManagedSignalGrid } from "./ManagedSignalGrid";
 export { default as StateFilterBar } from "./StateFilterBar";
+export { default as SeverityFilterBar, SEVERITY_FILTERS } from "./SeverityFilterBar";
+export { default as TypeFilterBar, TYPE_FILTERS } from "./TypeFilterBar";
+export { default as SignalsSegment } from "./SignalsSegment";
 export { severityColor, timeAgo } from "./utils";
+export { formatEvidenceNumbers } from "./evidence-format";
 export type { SignalCardData, SignalAction } from "./types";
+export type { SeverityFilter } from "./SeverityFilterBar";
+export type { TypeFilter } from "./TypeFilterBar";

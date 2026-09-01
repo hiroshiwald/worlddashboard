@@ -10,6 +10,8 @@ export interface SignalCardData {
   confidence: number;
   evidence: Record<string, unknown>;
   articles: { id: number; title: string; link: string; sourceName: string }[];
+  firstDetectedAt: string;
+  stateChangedAt: string | null;
   lastEvidenceAt: string;
 }
 

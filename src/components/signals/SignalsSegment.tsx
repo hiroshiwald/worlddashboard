@@ -1,9 +1,14 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useSignalsTab } from "@/hooks/useSignalsTab";
-import { StateFilterBar, ManagedSignalGrid } from "./signals";
+import StateFilterBar from "./StateFilterBar";
+import SeverityFilterBar, { SeverityFilter } from "./SeverityFilterBar";
+import TypeFilterBar, { TypeFilter } from "./TypeFilterBar";
+import ManagedSignalGrid from "./ManagedSignalGrid";
+import { SignalCardData } from "./types";
 
-interface SignalsTabProps {
+interface SignalsSegmentProps {
   dark: boolean;
   onEntityClick: (name: string) => void;
 }
@@ -26,16 +31,26 @@ function WarmupEmptyState({ dark, daysRemaining }: { dark: boolean; daysRemainin
   );
 }
 
-export default function SignalsTab({ dark, onEntityClick }: SignalsTabProps) {
+function bySeverityAndType(signals: SignalCardData[], severity: SeverityFilter, type: TypeFilter): SignalCardData[] {
+  return signals.filter((s) => (severity === "all" || s.severity === severity) && (type === "all" || s.type === type));
+}
+
+export default function SignalsSegment({ dark, onEntityClick }: SignalsSegmentProps) {
   const {
     visibleSignals, stateCounts, stateFilter, setStateFilter,
     loading, error, dbUnconfigured, busyIds, act, warmup,
   } = useSignalsTab({ dark, onEntityClick });
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
 
+  const shownSignals = useMemo(
+    () => bySeverityAndType(visibleSignals, severityFilter, typeFilter),
+    [visibleSignals, severityFilter, typeFilter],
+  );
   const showWarmupEmpty = warmup !== null && warmup.active && stateCounts.all === 0;
 
   return (
-    <div className="max-w-[1920px] mx-auto px-4 md:px-6 py-4">
+    <>
       {dbUnconfigured && <EmptyState dark={dark} message="Signal management requires a configured database." />}
 
       {!dbUnconfigured && error && (
@@ -55,9 +70,11 @@ export default function SignalsTab({ dark, onEntityClick }: SignalsTabProps) {
       {!dbUnconfigured && !loading && !showWarmupEmpty && (
         <>
           <StateFilterBar counts={stateCounts} active={stateFilter} dark={dark} onChange={setStateFilter} />
-          <ManagedSignalGrid signals={visibleSignals} busyIds={busyIds} dark={dark} onAction={act} onEntityClick={onEntityClick} />
+          <SeverityFilterBar active={severityFilter} dark={dark} onChange={setSeverityFilter} />
+          <TypeFilterBar active={typeFilter} dark={dark} onChange={setTypeFilter} />
+          <ManagedSignalGrid signals={shownSignals} busyIds={busyIds} dark={dark} onAction={act} onEntityClick={onEntityClick} />
         </>
       )}
-    </div>
+    </>
   );
 }
