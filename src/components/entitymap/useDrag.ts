@@ -16,7 +16,9 @@ export function useDrag(offsets: Record<string, Offset>, moveBy: (key: string, o
     if (el === null || svg === null || e.button !== 0) return;
     const key = el.getAttribute("data-drag") as string;
     const start = offsets[key] ?? { dx: 0, dy: 0 };
-    const scale = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width;
+    // preserveAspectRatio "meet": the drawing scales by the tighter of the two axes.
+    const rect = svg.getBoundingClientRect();
+    const scale = Math.min(rect.width / svg.viewBox.baseVal.width, rect.height / svg.viewBox.baseVal.height);
     const x0 = e.clientX;
     const y0 = e.clientY;
     let moved = false;

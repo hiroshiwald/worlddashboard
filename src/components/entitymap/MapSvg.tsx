@@ -6,7 +6,7 @@ import { ratioText } from "@/lib/entity-growth";
 import { buildAdjacency, connectedGroups } from "@/lib/entity-paths";
 import { layoutMap, placeLabels, type LabelItem, type Point } from "@/lib/map-layout";
 import type { EntityMapState } from "@/hooks/useEntityMap";
-import { isContext, isGrowing, isNewLink, planUnits, type MapData } from "./model";
+import { contentBand, isContext, isGrowing, isNewLink, planUnits, type MapData } from "./model";
 import { useDrag } from "./useDrag";
 
 const W = 900;
@@ -96,13 +96,13 @@ export default function MapSvg({ dark, data, generatedAt, state }: Props) {
   const ink = dark ? "#e2e8f0" : "#1e293b";
   const newKeys = newLinkKeys(data, plan.unitOf, generatedAt);
   const frames = islandFrames(plan, points);
-  const height = Math.max(layout.height, 320);
+  const band = contentBand(layout.positions);
 
   return (
     <svg
       ref={svgRef}
-      viewBox={`0 0 ${W} ${height}`}
-      className="w-full select-none"
+      viewBox={`0 ${band.y} ${W} ${band.height}`}
+      className="w-full max-h-[calc(100vh-11rem)] select-none"
       role="group"
       aria-label="Entity map"
       onPointerDown={onPointerDown}

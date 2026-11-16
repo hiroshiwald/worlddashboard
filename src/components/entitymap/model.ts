@@ -314,3 +314,16 @@ export function layoutEntity(data: MapData, id: string, width: number): EntityLa
   });
   return { center, bubbles, width, height };
 }
+
+const VIEW_PAD = 90;
+const MIN_VIEW_HEIGHT = 320;
+
+/** Pure. The vertical slice of the layout that holds nodes, with room for
+ * labels and outlines. Base positions only, so a drag does not move the view. */
+export function contentBand(positions: Record<string, { y: number }>): { y: number; height: number } {
+  const ys = Object.values(positions).map((p) => p.y);
+  if (ys.length === 0) return { y: 0, height: MIN_VIEW_HEIGHT };
+  const top = Math.max(0, Math.min(...ys) - VIEW_PAD);
+  const bottom = Math.max(...ys) + VIEW_PAD;
+  return { y: top, height: Math.max(bottom - top, MIN_VIEW_HEIGHT) };
+}

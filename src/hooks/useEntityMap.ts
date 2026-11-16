@@ -63,7 +63,9 @@ export function useEntityMap(focus: MapFocus) {
   const [entityId, setEntityId] = useState<string | null>(null);
   const [sel, setSel] = useState<Sel | null>(null);
   const [off, setOff] = useState<Record<string, Offset>>({});
-  const [anchors, setAnchors] = useState(true);
+  // Context entities link nearly everything into one tangle on live data, so the
+  // readable view is the default. The switch still shows them.
+  const [anchors, setAnchors] = useState(false);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 

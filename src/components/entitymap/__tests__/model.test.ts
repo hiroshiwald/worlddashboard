@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GraphEdge, GraphNode } from "@/lib/server/graph";
 import {
+  contentBand,
   alsoTouches, buildMapData, countStats, filterGraph, layoutEntity, parseGraph, planUnits, traceConnection,
 } from "../model";
 
@@ -116,5 +117,16 @@ describe("layoutEntity and parseGraph", () => {
   it("rejects a malformed graph payload", () => {
     expect(() => parseGraph({ nodes: [] })).toThrow();
     expect(() => parseGraph(null)).toThrow();
+  });
+});
+
+describe("contentBand", () => {
+  it("trims empty space above and below the nodes", () => {
+    expect(contentBand({ a: { y: 1700 }, b: { y: 2100 } })).toEqual({ y: 1610, height: 580 });
+  });
+
+  it("keeps a minimum height and never starts above 0", () => {
+    expect(contentBand({ a: { y: 20 } })).toEqual({ y: 0, height: 320 });
+    expect(contentBand({})).toEqual({ y: 0, height: 320 });
   });
 });
