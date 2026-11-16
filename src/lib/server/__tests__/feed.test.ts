@@ -167,6 +167,12 @@ describe("candidate matching", () => {
     expect(found[0]).not.toHaveProperty("displayName");
   });
 
+  it("skips the article's own source name", () => {
+    const matcher = buildCandidateMatcher([toFeedCandidate({ ...candidateRow, name_norm: "bangkok post", display_name: "Bangkok Post" })]);
+    const row = { title: "Bangkok Post staff vote", summary: null, source_name: "Bangkok Post" };
+    expect(matchArticleCandidates(row, [], matcher)).toEqual([]);
+  });
+
   it("handles a null summary", () => {
     const matcher = buildCandidateMatcher([toFeedCandidate(candidateRow)]);
     expect(matchArticleCandidates({ title: "No names here", summary: null }, [], matcher)).toEqual([]);

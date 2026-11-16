@@ -1,7 +1,7 @@
 import type { Sql, SqlRow } from "./db";
 import { attachEntityRoles, type EntityRole } from "./entity-admin";
 import { getLastIngestAt } from "./tick";
-import { buildCandidateMatcher, foldText, type CandidateMatcher } from "../candidate-match";
+import { buildCandidateMatcher, foldText, stripPublisherSuffix, type CandidateMatcher } from "../candidate-match";
 
 export class FeedParamError extends Error {}
 
@@ -142,15 +142,15 @@ export function toFeedCandidate(row: SqlRow): FeedCandidate & { displayName: str
   };
 }
 
-/** Pure. Candidates whose name is in the title or summary, minus names
- * already linked to the article as entities. */
+/** Pure. Candidates whose name is in the title (publisher suffix removed) or
+ * summary, minus names already linked as entities and the source's own name. */
 export function matchArticleCandidates(
   row: SqlRow,
   entities: FeedEntity[],
   matcher: CandidateMatcher<FeedCandidate & { displayName: string }>,
 ): FeedCandidate[] {
-  const text = `${String(row.title)}\n${row.summary == null ? "" : String(row.summary)}`;
-  const exclude = new Set(entities.map((e) => foldText(e.name)));
+  const text = `${stripPublisherSuffix(String(row.title))}\n${row.summary == null ? "" : String(row.summary)}`;
+  const exclude = new Set([...entities.map((e) => foldText(e.name)), foldText(String(row.source_name))]);
   return matcher.match(text, exclude).map(({ displayName: _unused, ...candidate }) => candidate);
 }
 
