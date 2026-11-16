@@ -9,7 +9,7 @@ function facts(id: string, overrides: Partial<EntityFacts>): EntityFacts {
     id,
     mentions14d: 0,
     recent72h: 0,
-    usualPerDay: 0, baselineDays: 11,
+    usualPerDay: 0,
     ratio: 0,
     state: "Steady",
     daily: new Array<number>(14).fill(0),

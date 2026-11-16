@@ -5,6 +5,7 @@ const DAY_MS = 24 * HOUR_MS;
 const RECENT_MS = 72 * HOUR_MS;
 const WINDOW_MS = 336 * HOUR_MS;
 const RECENT_DAYS = RECENT_MS / DAY_MS;
+const PRIOR_DAYS = 11;
 const RATIO_FLOOR = 0.3;
 const DAILY_DAYS = 14;
 const RISING_MIN_RECENT = 3;
@@ -12,20 +13,14 @@ const RISING_MIN_RATIO = 3;
 const FALLING_MIN_USUAL = 0.5;
 const FALLING_MAX_RATIO = 0.5;
 const RATIO_CAP = 10;
-const PRIOR_INDEXES = DAILY_DAYS - RECENT_DAYS; // daily indexes 0..10 are the usual window
-const MIN_BASELINE_DAYS = 3;
 
 export type GrowthState = "New" | "Rising" | "Falling" | "Steady" | "WarmingUp";
 export interface HourlyCount { hourStart: Date; count: number }
-// coverage: 14 values in [0, 1], same order as `daily`. Each is how much was
-// collected that day relative to the fullest day (see buildCoverage). A
-// collection gap counts as a fraction of a day in both rates.
-export interface GrowthInput { hourly: HourlyCount[]; coverage: number[]; firstSeenAt: Date | null; tracked: boolean; now: Date }
+export interface GrowthInput { hourly: HourlyCount[]; firstSeenAt: Date | null; tracked: boolean; now: Date }
 export interface Growth {
   recent72h: number;      // sum of counts with now-72h <= hourStart < now
-  usualPerDay: number;    // sum over now-336h <= hourStart < now-72h, divided by baselineDays (raw, no floor)
-  ratio: number;          // (recent72h / active recent days) / max(usualPerDay, 0.3)
-  baselineDays: number;   // sum of coverage over the usual window, 0 to 11
+  usualPerDay: number;    // sum over now-336h <= hourStart < now-72h, divided by 11 (raw, no floor)
+  ratio: number;          // (recent72h / 3) / max(usualPerDay, 0.3)
   state: GrowthState;
   daily: number[];        // length 14, index 0 = oldest day (13 to 14 days ago), index 13 = last 24h
 }
@@ -52,14 +47,6 @@ function validateInput(input: GrowthInput): void {
   for (const entry of input.hourly) {
     assertValidDate(entry.hourStart, "hourStart");
     assertValidCount(entry.count);
-  }
-  if (!Array.isArray(input.coverage) || input.coverage.length !== DAILY_DAYS) {
-    throw new Error(`coverage must be an array of ${DAILY_DAYS} numbers`);
-  }
-  for (const value of input.coverage) {
-    if (!Number.isFinite(value) || value < 0 || value > 1) {
-      throw new Error(`coverage values must be in [0, 1], got ${value}`);
-    }
   }
 }
 
@@ -97,34 +84,6 @@ function buildDaily(hourly: HourlyCount[], nowMs: number): number[] {
   return daily;
 }
 
-/** Pure. hourTotals: mentions of all entities per hour. Returns, per day in
- * `daily` order, that day's total divided by the largest day total. All zeros
- * when nothing was collected. */
-export function buildCoverage(hourTotals: HourlyCount[], now: Date): number[] {
-  assertValidDate(now, "now");
-  for (const entry of hourTotals) {
-    assertValidDate(entry.hourStart, "hourStart");
-    assertValidCount(entry.count);
-  }
-  const totals = buildDaily(hourTotals, now.getTime());
-  const fullest = Math.max(...totals);
-  if (fullest === 0) {
-    return totals;
-  }
-  return totals.map((total) => total / fullest);
-}
-
-function sum(values: number[]): number {
-  return values.reduce((acc, value) => acc + value, 0);
-}
-
-function perDay(total: number, days: number): number {
-  if (days === 0) {
-    return 0;
-  }
-  return total / days;
-}
-
 function isNewState(input: GrowthInput, nowMs: number): boolean {
   if (input.tracked || input.firstSeenAt === null) {
     return false;
@@ -139,15 +98,12 @@ function isWarmingUpState(input: GrowthInput, nowMs: number): boolean {
   return input.firstSeenAt.getTime() > nowMs - RECENT_MS;
 }
 
-interface Rates { recent72h: number; usualPerDay: number; ratio: number; baselineDays: number }
-
-function classifyState(input: GrowthInput, rates: Rates): GrowthState {
-  const { recent72h, usualPerDay, ratio } = rates;
+function classifyState(input: GrowthInput, recent72h: number, usualPerDay: number, ratio: number): GrowthState {
   const nowMs = input.now.getTime();
   if (isNewState(input, nowMs)) {
     return "New";
   }
-  if (isWarmingUpState(input, nowMs) || rates.baselineDays < MIN_BASELINE_DAYS) {
+  if (isWarmingUpState(input, nowMs)) {
     return "WarmingUp";
   }
   if (recent72h >= RISING_MIN_RECENT && ratio >= RISING_MIN_RATIO) {
@@ -162,14 +118,17 @@ function classifyState(input: GrowthInput, rates: Rates): GrowthState {
 export function computeGrowth(input: GrowthInput): Growth {
   validateInput(input);
   const nowMs = input.now.getTime();
-  const baselineDays = sum(input.coverage.slice(0, PRIOR_INDEXES));
-  const recentDays = sum(input.coverage.slice(PRIOR_INDEXES));
   const recent72h = sumCounts(input.hourly, nowMs - RECENT_MS, nowMs);
   const priorTotal = sumCounts(input.hourly, nowMs - WINDOW_MS, nowMs - RECENT_MS);
-  const usualPerDay = perDay(priorTotal, baselineDays);
-  const ratio = perDay(recent72h, recentDays) / Math.max(usualPerDay, RATIO_FLOOR);
-  const rates = { recent72h, usualPerDay, ratio, baselineDays };
-  return { ...rates, state: classifyState(input, rates), daily: buildDaily(input.hourly, nowMs) };
+  const usualPerDay = priorTotal / PRIOR_DAYS;
+  const ratio = (recent72h / RECENT_DAYS) / Math.max(usualPerDay, RATIO_FLOOR);
+  return {
+    recent72h,
+    usualPerDay,
+    ratio,
+    state: classifyState(input, recent72h, usualPerDay, ratio),
+    daily: buildDaily(input.hourly, nowMs),
+  };
 }
 
 export function ratioText(ratio: number): string {

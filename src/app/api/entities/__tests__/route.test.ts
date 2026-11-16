@@ -11,7 +11,7 @@ vi.mock("@/lib/server/db", () => ({
 /** Row-shape-specific queries added for growth/sources/nearestTracked; the
  * single-rowset mock must not answer them with entity rows. */
 function isFactsQuery(query: string): boolean {
-  return query.includes("bucket, mentions") || query.includes("collected_mentions") || query.includes("entity_edges") || query.includes("AS article_count");
+  return query.includes("bucket, mentions") || query.includes("entity_edges") || query.includes("AS article_count");
 }
 
 function makeMockSql(rows: SqlRow[]) {
@@ -207,7 +207,7 @@ describe("GET /api/entities — sort", () => {
   it("sort=activity orders by mentions7d descending", async () => {
     const { sql } = makeHandlerMockSql((query) => {
       if (query.includes("FROM entities")) return rows();
-      if (query.includes("SUM(mentions)") && !query.includes("collected_mentions")) {
+      if (query.includes("SUM(mentions)")) {
         return [
           { entity_id: "1", mentions_in_window: "50" },
           { entity_id: "2", mentions_in_window: "5" },
@@ -245,7 +245,7 @@ describe("GET /api/entities — activity aggregates", () => {
   it("sums mentions and counts distinct sources for the matched set", async () => {
     const { sql } = makeHandlerMockSql((query) => {
       if (query.includes("FROM entities")) return [entityRow(1, "Russia")];
-      if (query.includes("SUM(mentions)") && !query.includes("collected_mentions")) return [{ entity_id: "1", mentions_in_window: "12" }];
+      if (query.includes("SUM(mentions)")) return [{ entity_id: "1", mentions_in_window: "12" }];
       if (query.includes("FROM article_entities")) return [{ entity_id: "1", sources_in_window: "4" }];
       return [];
     });
