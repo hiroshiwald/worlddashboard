@@ -21,6 +21,7 @@ describe("buildCandidateMatcher", () => {
   it("keeps only the longest of overlapping names", () => {
     const m = buildCandidateMatcher([c("Daily News"), c("Hürriyet Daily News"), c("Hürriyet Daily")]);
     expect(m.match("Report in Hurriyet Daily News today", new Set()).map((x) => x.displayName)).toEqual(["Hürriyet Daily News"]);
+    expect(m.match("Report in Hurriyet Daily News today", new Set(["hurriyet daily news"]))).toEqual([]);
   });
 
   it("matches multi-word names and skips excluded names", () => {

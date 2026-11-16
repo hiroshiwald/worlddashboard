@@ -39,11 +39,12 @@ export function stripPublisherSuffix(title: string): string {
   return title.replace(PUBLISHER_SUFFIX, "");
 }
 
-/** Drops a match whose name sits inside a longer matched name
+/** Drops a match whose name sits inside a longer matched or excluded name
  * ("Daily News" inside "Hurriyet Daily News"). */
-function keepLongest<T>(found: { candidate: T; folded: string }[]): T[] {
+function keepLongest<T>(found: { candidate: T; folded: string }[], exclude: Set<string>): T[] {
+  const covering = [...found.map((entry) => entry.folded), ...exclude];
   return found
-    .filter((entry) => !found.some((other) => other.folded.length > entry.folded.length && other.folded.includes(entry.folded)))
+    .filter((entry) => !covering.some((other) => other.length > entry.folded.length && other.includes(entry.folded)))
     .map((entry) => entry.candidate);
 }
 
@@ -69,7 +70,7 @@ export function buildCandidateMatcher<T extends CandidateName>(candidates: T[]):
         if (exclude.has(entry.folded)) continue;
         if (haystack.includes(entry.folded) && entry.pattern.test(haystack)) found.push(entry);
       }
-      return keepLongest(found);
+      return keepLongest(found, exclude);
     },
   };
 }
