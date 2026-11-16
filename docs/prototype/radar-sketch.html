@@ -1,0 +1,1240 @@
+<title>Radar Three Views</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: three views from the sketch (Newsfeed, Entities, Quick hits) on one shared world. A popup is shared by all views. */
+:root{
+  --bg:#F4F5F8; --surface:#FFFFFF; --surface-2:#EAEDF3; --line:#D8DDE7;
+  --fg:#111827; --muted:#5B6579;
+  --accent:#2956E8; --accent-soft:#E3EAFE; --on-accent:#FFFFFF;
+  --good:#1B7F53; --good-soft:#DDF2E7;
+  --warn:#8F5A06; --warn-soft:#FBEBCB;
+  --bad:#B6410F; --bad-soft:#FADFD2;
+  --k-ports:#2F6FDB; --k-energy:#7A4CC2; --k-grid:#0E8A8A; --k-fin:#A8741A;
+  --font-display:'Space Grotesk','Inter',system-ui,sans-serif;
+  --font-body:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0C111A; --surface:#141B27; --surface-2:#1B2434; --line:#2A3548;
+    --fg:#E7ECF5; --muted:#9AA6BC;
+    --accent:#8AA8FF; --accent-soft:#1C2A52; --on-accent:#0C111A;
+    --good:#4FCB8E; --good-soft:#12301F;
+    --warn:#E3B04B; --warn-soft:#3A2D10;
+    --bad:#F08A5D; --bad-soft:#3B1D10;
+    --k-ports:#6FA0F5; --k-energy:#B592F0; --k-grid:#4FC9C9; --k-fin:#E0B15A;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0C111A; --surface:#141B27; --surface-2:#1B2434; --line:#2A3548;
+  --fg:#E7ECF5; --muted:#9AA6BC;
+  --accent:#8AA8FF; --accent-soft:#1C2A52; --on-accent:#0C111A;
+  --good:#4FCB8E; --good-soft:#12301F;
+  --warn:#E3B04B; --warn-soft:#3A2D10;
+  --bad:#F08A5D; --bad-soft:#3B1D10;
+  --k-ports:#6FA0F5; --k-energy:#B592F0; --k-grid:#4FC9C9; --k-fin:#E0B15A;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14px;line-height:1.5}
+.wrap{max-width:1240px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1,h2,h3{font-family:var(--font-display);font-weight:600;margin:0;text-wrap:balance}
+p{margin:0}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--font-mono)}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.eyebrow{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+svg text{fill:var(--muted);font-family:var(--font-body);font-size:11px}
+
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.top .wrap{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px;padding-block:10px}
+.brand{font-family:var(--font-display);font-weight:600;font-size:16px}
+.mockflag{font-family:var(--font-mono);font-size:11px;color:var(--warn);background:var(--warn-soft);padding:2px 8px;border-radius:4px}
+nav{display:flex;flex-wrap:wrap;gap:4px}
+nav a{color:var(--muted);text-decoration:none;padding:6px 12px;border-radius:6px;font-weight:500}
+nav a:hover{background:var(--surface-2);color:var(--fg)}
+nav a[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}
+main{padding-block:18px 72px}
+
+.read{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:8px 32px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.read h2{font-size:24px}
+.read p{font-size:13px;color:var(--muted);max-width:70ch}
+.read b{color:var(--fg);font-weight:600}
+.fresh{font-size:12px;color:var(--muted);margin:0 0 12px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 14px;font-weight:500}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.sm{padding:3px 10px;font-size:13px}
+.btn.danger:hover{border-color:var(--bad);color:var(--bad)}
+.btn[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.linklike{background:none;border:0;padding:0;text-align:left;color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+.chip{display:inline-block;font-size:12px;padding:1px 8px;border-radius:99px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
+.chip.accent{background:var(--accent-soft);color:var(--accent)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.good{background:var(--good-soft);color:var(--good)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.k-ports{background:var(--k-ports)}.k-energy{background:var(--k-energy)}.k-grid{background:var(--k-grid)}.k-fin{background:var(--k-fin)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{border:0;background:none;padding:6px 12px;font-weight:500;color:var(--muted)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 14px;margin-bottom:12px}
+.evlist{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:8px}
+.evmeta{font-size:12px;color:var(--muted)}
+.evmeta .lag{color:var(--warn)}
+.livedot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:6px}
+.livedot.off{background:var(--muted)}
+.newpill{display:block;width:100%;border:0;background:var(--accent);color:var(--on-accent);padding:8px;font-weight:600}
+.newtag{font-family:var(--font-mono);font-size:9px;background:var(--good-soft);color:var(--good);border-radius:3px;padding:0 4px;margin-left:4px}
+.chk{color:var(--good);font-weight:700}
+
+/* 1 newsfeed, laid out like the sketch: headline and box | source and url | entities found and status */
+.feed{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.fh,.frow{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr) minmax(0,1.3fr);gap:6px 20px;padding:12px 16px}
+.fh{background:var(--surface-2);font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.frow{border-top:1px solid var(--line);border-left:3px solid transparent}
+.frow.rel{border-left-color:var(--accent)}
+.hl{font-weight:600;font-size:15px;line-height:1.35}
+.hl .linklike{text-align:left}
+.box{margin-top:8px;border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--muted);display:grid;gap:2px}
+.box b{color:var(--fg);font-weight:500}
+.srcname{font-weight:600;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--line)}
+.url{font-family:var(--font-mono);font-size:11px;color:var(--muted);word-break:break-all;margin-top:2px}
+.elist{list-style:none;margin:0;padding:0;display:grid;gap:3px}
+.elist li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:6px;align-items:center}
+.idx{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.ename{background:none;border:0;padding:0;text-align:left;font-weight:500}
+.ename:hover{color:var(--accent);text-decoration:underline}
+.ename.cand{border-bottom:1px dashed var(--muted)}
+.ename.dis{color:var(--muted);text-decoration:line-through}
+.ectrack{font-size:11px;border:1px solid var(--accent);color:var(--accent);background:var(--surface);border-radius:99px;padding:0 8px}
+.ectrack:hover{background:var(--accent);color:var(--on-accent)}
+
+/* popup */
+.pop{position:fixed;z-index:30;width:360px;max-height:calc(100vh - 100px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:0 12px 40px rgba(10,20,40,.22)}
+.pop[hidden]{display:none}
+.pop h3{font-size:19px;margin:6px 0 2px}
+.pop .x{position:absolute;top:8px;right:10px;border:0;background:none;font-size:18px;color:var(--muted)}
+.kv{display:grid;grid-template-columns:90px minmax(0,1fr);gap:3px 10px;font-size:13px;margin:10px 0}
+.kv dt{color:var(--muted);font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding-top:2px}
+.kv dd{margin:0}
+.rel-row{display:flex;justify-content:space-between;gap:8px;font-size:13px;padding:3px 0}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+
+/* 2 entities spreadsheet */
+.split{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(300px,1fr);gap:16px;align-items:start}
+.sheet{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:640px}
+.sheet table{border-collapse:separate;border-spacing:0;width:100%}
+.sheet th,.sheet td{padding:7px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);text-align:left;vertical-align:top;font-size:13px}
+.sheet th:last-child,.sheet td:last-child{border-right:0}
+.sheet thead th{position:sticky;top:0;background:var(--surface-2);font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:500;cursor:pointer;white-space:nowrap;z-index:1}
+.sheet th.rn,.sheet td.rn{width:34px;text-align:right;color:var(--muted);font-family:var(--font-mono);font-size:11px;background:var(--surface-2);cursor:default}
+.sheet tbody tr{cursor:pointer}
+.sheet tbody tr:hover td{background:var(--accent-soft)}
+.sheet tbody tr[aria-selected="true"] td{background:var(--accent-soft);box-shadow:inset 0 1px 0 var(--accent),inset 0 -1px 0 var(--accent)}
+.sheet td.rn{background:var(--surface-2)!important}
+.sheet .more{color:var(--muted)}
+.sheet td:nth-child(3){white-space:nowrap}
+.sheet thead th.act{color:var(--accent)}
+.sheet thead th.ns{cursor:default}
+.sheet table{min-width:780px;table-layout:fixed}
+.sheet td{vertical-align:top;overflow-wrap:anywhere}
+.split.map{grid-template-columns:minmax(0,2fr) minmax(300px,1fr)}
+.mapbox{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.mapbox svg{width:100%;height:auto;display:block}
+select.btn{padding:6px 10px}
+.spark{display:inline-flex;align-items:flex-end;gap:2px;height:22px;vertical-align:middle}
+.spark i{display:inline-block;width:4px;background:var(--line);border-radius:1px}
+.spark i.hot{background:var(--accent)}
+.rise{color:var(--accent);font-size:11px;font-weight:700}
+.crumbs{font-size:14px}
+.band{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.07em}
+.halo{fill:none;stroke:var(--accent);stroke-width:2.5}
+.ne{stroke:var(--muted);fill:none;stroke-opacity:.45}
+.ne.new{stroke:var(--accent);stroke-opacity:.7}
+.ne.hl{stroke:var(--accent);stroke-opacity:1;stroke-width:4px!important}
+.gn.dim,.tb.dim{opacity:.2}
+.gn text{pointer-events:none}
+[data-drag]{cursor:grab;touch-action:none}
+[data-drag]:active{cursor:grabbing}
+#netsvg{user-select:none;-webkit-user-select:none}
+.gn.pick circle.b{stroke-width:4px}
+.gn:hover circle.b{stroke-width:4px}
+.trace{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:6px;align-items:center;margin-top:6px}
+.trace select{min-width:0;width:100%}
+.path{margin-top:10px;line-height:1.9}
+.gn text.hot{fill:var(--accent);font-weight:600}
+.mapbox .gn text.lbl{font-size:12.5px}
+.ent .ln{opacity:0;pointer-events:none;transition:opacity .12s}
+.ent .ln line{stroke:var(--accent);fill:none}
+.ent:hover .ln{opacity:.85}
+.x2{border:0;background:none;color:var(--muted);padding:0 0 0 4px;font-size:13px}
+.panel .rel-row{align-items:center;gap:8px}
+.panel .rel-row .chips{flex-wrap:nowrap;gap:6px;justify-content:flex-end}
+.sheet.wide table{min-width:980px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;position:sticky;top:calc(64px + env(safe-area-inset-top,0px))}
+.panel svg{width:100%;height:auto;display:block}
+.gn circle.b{stroke-width:2.5}
+.gn.tracked circle.b{fill:var(--surface)}
+.gn.cand circle.b{fill:var(--bg);stroke-dasharray:4 3}
+.gn.anchor circle.b{fill:var(--fg);stroke:var(--fg)}
+.gn text{fill:var(--fg);font-size:11px}
+.gn.cand text{fill:var(--muted)}
+.gn.focus circle.ring,.gn circle.ring{fill:none;stroke:var(--accent);stroke-width:2.5}
+.ge{stroke:var(--line);fill:none}
+.ge.new{stroke:var(--accent)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin:4px 0 8px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+input[type=search]{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:6px 10px;min-width:220px}
+
+/* 3 quick hits */
+.hits{max-width:860px}
+.list{list-style:none;margin:0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.row{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:6px 14px;padding:14px 16px;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.rank{font-family:var(--font-mono);font-size:12px;color:var(--muted);padding-top:3px}
+.sent{font-size:16px;line-height:1.45}
+.sent b{font-weight:600}
+.nextto{font-size:12px;color:var(--muted);margin-top:4px}
+.act{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end}
+.row.done{opacity:.55}
+.row .proof{grid-column:2/-1}
+.cap{margin-top:14px;font-size:13px;color:var(--muted)}
+.cap a{color:var(--accent);font-weight:500}
+
+.toast{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:40;max-width:92vw;display:flex;gap:12px;align-items:center}
+.toast[hidden]{display:none}
+.toast button{background:none;border:0;color:var(--bg);text-decoration:underline;font-weight:600;padding:0}
+
+@media (max-width:860px){
+  .read,.split,.split.map{grid-template-columns:minmax(0,1fr)}
+  .panel{position:static}
+  .fh{display:none}
+  .frow{grid-template-columns:minmax(0,1fr)}
+  .row{grid-template-columns:24px minmax(0,1fr)}
+  .row .act{grid-column:2;justify-content:flex-start}
+}
+@media (max-width:640px){
+  .pop{left:0!important;right:0;top:auto!important;bottom:0;width:auto;max-height:70vh;border-radius:14px 14px 0 0}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<header class="top"><div class="wrap">
+  <span class="brand">Radar, three views</span>
+  <span class="mockflag">MOCK DATA · fictional names</span>
+  <nav id="nav" aria-label="Views">
+    <a href="#newsfeed">Newsfeed</a>
+    <a href="#entities">Entities</a>
+    <a href="#emap">Entity map</a>
+    <a href="#quick">Quick hits</a>
+  </nav>
+</div></header>
+
+<main class="wrap">
+  <p id="fresh" class="fresh"></p>
+  <section id="v-newsfeed"></section>
+  <section id="v-entities" hidden></section>
+  <section id="v-emap" hidden></section>
+  <section id="v-quick" hidden></section>
+</main>
+<div id="pop" class="pop" role="dialog" aria-label="Entity" hidden></div>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ================= helpers ================= */
+  const NOW0 = Date.parse("2026-11-16T18:00:00Z");
+  const HR = 3600000;
+  const T0 = Date.now();
+  const clock = () => NOW0 + (Date.now() - T0);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function agoMs(d) {
+    const s = Math.max(0, Math.round(d / 1000));
+    if (s < 60) return s + "s ago";
+    const m = Math.round(s / 60);
+    if (m < 60) return m + "m ago";
+    const h = Math.round(m / 60);
+    if (h < 48) return h + "h ago";
+    return Math.round(h / 24) + "d ago";
+  }
+  const whenMs = (ms) => new Date(ms).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC";
+  const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+  const andList = (a) => (a.length > 1 ? a.slice(0, -1).join(", ") + " and " + a[a.length - 1] : a[0] || "");
+  const link = (t) => '<button type="button" class="linklike" data-mock="1">' + esc(t) + "</button>";
+  const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 46);
+  function urlOf(a) {
+    const d = new Date(a.pub);
+    return "https://" + a.s.toLowerCase().replace(/[^a-z0-9]+/g, "") + ".example/" + d.getUTCFullYear() + "/" + String(d.getUTCMonth() + 1).padStart(2, "0") + "/" + slug(a.t);
+  }
+  function timeHtml(arr, pub) {
+    let s = "Arrived " + agoMs(clock() - arr);
+    if (arr - pub >= 6 * HR) s += ' · <span class="lag">published ' + agoMs(clock() - pub) + "</span>";
+    return s;
+  }
+  const timeSpan = (a) => '<span data-arr="' + a.arr + '" data-pub="' + a.pub + '">' + timeHtml(a.arr, a.pub) + "</span>";
+  const evHtml = (a) => "<li><div>" + link(a.t) + '</div><div class="evmeta">' + esc(a.s) + " · " + esc(a.c) + " · " + timeSpan(a) + "</div></li>";
+
+  /* ================= mock world (fictional) ================= */
+  const CL = { ports: "Ports & trade", energy: "Energy & nuclear", grid: "Grid & standards", fin: "Finance & rates" };
+  const DEFS = [
+    ["Kaldoria", "country", "ports", "tracked", true, 3],
+    ["Orsund Federation", "country", "energy", "tracked", true, 2],
+    ["Helix Grid Authority", "organization", "grid", "tracked", true, 1.5],
+    ["Meridian Bank", "organization", "fin", "tracked", true, 1.5],
+    ["Port of Tessen", "facility", "ports", "tracked", false, 0.2],
+    ["Brannock Cable Co.", "organization", "grid", "tracked", false, 0.3],
+    ["Norvik-7 reactor", "facility", "energy", "tracked", false, 0.2],
+    ["Lysa Orvane", "person", "fin", "tracked", false, 0.3],
+    ["Veyra Harbour Board", "organization", "ports", "tracked", false, 1],
+    ["Sable Strait Pilots Guild", "organization", "ports", "candidate", false, 0],
+    ["Dunmere Protocol", "other", "grid", "candidate", false, 0],
+    ["Harlow Institute", "organization", "fin", "candidate", false, 0],
+    ["Tarn Capital", "organization", "fin", "candidate", false, 0],
+    ["Ashlen Ferry Co.", "organization", "ports", "candidate", false, 0],
+    ["Quillan Freight", "organization", "ports", "candidate", false, 0],
+    ["Teller Grain Co-op", "organization", "ports", "candidate", false, 0],
+    ["Marl Island Terminal", "facility", "ports", "candidate", false, 0],
+    ["Kaldoria Customs Authority", "organization", "ports", "candidate", false, 0],
+    ["Orsund Nuclear Board", "organization", "energy", "candidate", false, 0],
+    ["Ulwen Metering Ltd", "organization", "grid", "candidate", false, 0],
+    ["Corvane Substation", "facility", "grid", "candidate", false, 0],
+    ["Sable Strait cable", "facility", "grid", "candidate", false, 0],
+    ["Orsund Fed.", "organization", "energy", "candidate", false, 0, { dupOf: "Orsund Federation" }],
+    ["Q3 results", "other", "fin", "candidate", false, 0, { flag: "generic" }]
+  ];
+  const PENDING = { "Veyra Dock Workers Union": ["organization", "ports"], "Orrin Spec": ["other", "grid"] };
+  const RAW = [
+    ["Pilots serve strike notice at Kaldoria ports", "Trade Ledger", "Trade", 10, 9, ["Sable Strait Pilots Guild", "Kaldoria"]],
+    ["Strait pilots threaten walkout over night shifts", "Kaldoria Gazette", "Mainstream", 7, 6, ["Sable Strait Pilots Guild", "Kaldoria", "Port of Tessen"]],
+    ["Port ministry says it received guild notice", "Kaldoria Ports Ministry", "Government", 4, 4, ["Sable Strait Pilots Guild", "Kaldoria"]],
+    ["Norvik-7 inspection moved to January", "Orsund Nuclear Board", "Government", 8, 7, ["Norvik-7 reactor", "Orsund Nuclear Board", "Orsund Federation"]],
+    ["Second delay for Norvik-7 safety review", "Orsund Business Daily", "Mainstream", 5, 4, ["Norvik-7 reactor", "Orsund Federation", "Orsund Nuclear Board"]],
+    ["Norvik-7 coolant loop data posted for review", "OpenWatch Energy", "Technical", 3, 3, ["Norvik-7 reactor"]],
+    ["Meridian halts new mortgage offers for one week", "Kaldoria Gazette", "Mainstream", 6, 5, ["Meridian Bank", "Kaldoria"]],
+    ["Meridian statement on funding costs", "Meridian Bank", "Government", 5, 4, ["Meridian Bank", "Tarn Capital"]],
+    ["Analysts split on Meridian pause", "Trade Ledger", "Trade", 3, 3, ["Meridian Bank", "Lysa Orvane", "Tarn Capital"]],
+    ["Meridian economist Orvane named to rate panel", "Trade Ledger", "Trade", 6, 5, ["Lysa Orvane", "Meridian Bank"]],
+    ["Draft standard Dunmere Protocol v0.9 published", "Grid Standards Forum", "Technical", 20, 18, ["Dunmere Protocol", "Helix Grid Authority"]],
+    ["Helix consults on Dunmere metering rules", "Helix Authority notices", "Government", 16, 14, ["Helix Grid Authority", "Dunmere Protocol", "Ulwen Metering Ltd"]],
+    ["Meter makers weigh Dunmere switch costs", "Trade Ledger", "Trade", 10, 9, ["Dunmere Protocol", "Ulwen Metering Ltd"]],
+    ["A new metering standard, explained", "Kaldoria Gazette", "Mainstream", 4, 3, ["Dunmere Protocol", "Helix Grid Authority"]],
+    ["Tender 7731 awarded to Brannock Cable Co.", "Helix Authority tender register", "Government", 20, 19, ["Brannock Cable Co.", "Helix Grid Authority", "Sable Strait cable"]],
+    ["Cable repair award draws bids from two rivals", "Trade Ledger", "Trade", 12, 11, ["Brannock Cable Co.", "Sable Strait cable"]],
+    ["Brannock vessel leaves dock for Sable Strait survey", "Subsea Notes", "Technical", 52, 50, ["Brannock Cable Co.", "Sable Strait cable", "Sable Strait Pilots Guild"]],
+    ["Repair window opens for damaged Sable Strait cable", "Subsea Notes", "Technical", 44, 42, ["Sable Strait cable", "Helix Grid Authority"]],
+    ["Kaldoria sets licence rules for grain and fuel exports", "Kaldoria Gazette", "Mainstream", 70, 68, ["Kaldoria", "Port of Tessen", "Teller Grain Co-op"]],
+    ["Tessen named as sole licensed transit port in draft rule", "Trade Ledger", "Trade", 66, 64, ["Port of Tessen", "Kaldoria"]],
+    ["Shippers ask Orsund ministry about Tessen queue times", "Orsund Business Daily", "Trade", 40, 38, ["Port of Tessen", "Orsund Federation", "Quillan Freight"]],
+    ["Customs notice 14/26: Tessen berth allocation", "Kaldoria Customs Authority", "Government", 30, 29, ["Port of Tessen", "Kaldoria Customs Authority", "Kaldoria"]],
+    ["Satellite imagery shows tanker backlog at Tessen", "OpenWatch Maritime", "Technical", 9, 7, ["Port of Tessen", "Kaldoria", "Marl Island Terminal"]],
+    ["Orvane expects slower rate cuts next year", "Veyra Courier", "Regional", 130, 41, ["Lysa Orvane", "Meridian Bank"]],
+    ["Regional lenders brace for Meridian guidance", "Dunmere Echo", "Regional", 96, 40, ["Meridian Bank", "Lysa Orvane"]],
+    ["Orvane on household credit: no quick relief", "Ashlen Ledger", "Regional", 60, 39, ["Lysa Orvane", "Meridian Bank"]],
+    ["Harlow Institute: port delays could lift import prices", "Trade Ledger", "Trade", 28, 26, ["Harlow Institute", "Port of Tessen", "Meridian Bank"]],
+    ["Harlow Institute briefs ports ministry", "Kaldoria Gazette", "Mainstream", 74, 72, ["Harlow Institute", "Kaldoria"]],
+    ["Ashlen Ferry pauses Tessen route", "Ashlen Ledger", "Regional", 88, 86, ["Ashlen Ferry Co.", "Port of Tessen"]],
+    ["Quillan Freight reroutes grain via Marl Island", "Orsund Business Daily", "Trade", 34, 33, ["Quillan Freight", "Marl Island Terminal", "Orsund Federation", "Teller Grain Co-op"]],
+    ["Marl Island terminal adds fuel berth", "Orsund Ministry of Trade", "Government", 22, 21, ["Marl Island Terminal", "Orsund Federation"]],
+    ["Orsund Fed. confirms review of export licences", "Orsund Business Daily", "Mainstream", 15, 14, ["Orsund Fed.", "Port of Tessen"]],
+    ["Corvane substation upgrade begins", "Subsea Notes", "Technical", 60, 58, ["Corvane Substation", "Helix Grid Authority"]],
+    ["Ulwen Metering wins pilot meter contract", "Trade Ledger", "Trade", 26, 25, ["Ulwen Metering Ltd", "Corvane Substation", "Brannock Cable Co."]],
+    ["Q3 results season opens", "Trade Ledger", "Trade", 18, 17, ["Q3 results", "Meridian Bank"]],
+    ["Tarn Capital eyes grid assets", "Trade Ledger", "Trade", 36, 35, ["Tarn Capital", "Corvane Substation", "Helix Grid Authority"]],
+    ["Harbour board approves dredging plan", "Veyra Courier", "Regional", 300, 298, ["Veyra Harbour Board", "Kaldoria"]]
+  ];
+  const INCOMING = [
+    ["Tarn Capital bids for stake in Brannock Cable Co.", "Trade Ledger", "Trade", 0.3, ["Tarn Capital", "Brannock Cable Co."]],
+    ["Veyra dock workers back strait pilots", "Veyra Courier", "Regional", 1, ["Veyra Dock Workers Union", "Sable Strait Pilots Guild"]],
+    ["Kaldoria Customs publishes Tessen queue figures", "Kaldoria Customs Authority", "Government", 0.2, ["Port of Tessen", "Kaldoria Customs Authority", "Kaldoria"]],
+    ["Rival metering spec circulated to grid operators", "Grid Standards Forum", "Technical", 2, ["Orrin Spec", "Dunmere Protocol"]],
+    ["Pilots guild rejects ministry offer", "Kaldoria Gazette", "Mainstream", 0.5, ["Sable Strait Pilots Guild", "Kaldoria"]],
+    ["Orsund Nuclear Board names new inspection panel", "Orsund Nuclear Board", "Government", 0.4, ["Orsund Nuclear Board", "Norvik-7 reactor"]]
+  ];
+
+
+  // One topic per article. Mock tags. In the real system an extraction step would derive them.
+  const TOPIC = {
+    "Pilots serve strike notice at Kaldoria ports": "Strike action", "Strait pilots threaten walkout over night shifts": "Strike action", "Port ministry says it received guild notice": "Strike action",
+    "Veyra dock workers back strait pilots": "Strike action", "Pilots guild rejects ministry offer": "Strike action",
+    "Norvik-7 inspection moved to January": "Nuclear safety", "Second delay for Norvik-7 safety review": "Nuclear safety", "Norvik-7 coolant loop data posted for review": "Nuclear safety", "Orsund Nuclear Board names new inspection panel": "Nuclear safety",
+    "Meridian halts new mortgage offers for one week": "Rates and lending", "Meridian statement on funding costs": "Rates and lending", "Analysts split on Meridian pause": "Rates and lending", "Meridian economist Orvane named to rate panel": "Rates and lending",
+    "Orvane expects slower rate cuts next year": "Rates and lending", "Regional lenders brace for Meridian guidance": "Rates and lending", "Orvane on household credit: no quick relief": "Rates and lending",
+    "Draft standard Dunmere Protocol v0.9 published": "Metering standard", "Helix consults on Dunmere metering rules": "Metering standard", "Meter makers weigh Dunmere switch costs": "Metering standard", "A new metering standard, explained": "Metering standard", "Rival metering spec circulated to grid operators": "Metering standard",
+    "Tender 7731 awarded to Brannock Cable Co.": "Cable repair", "Cable repair award draws bids from two rivals": "Cable repair", "Brannock vessel leaves dock for Sable Strait survey": "Cable repair", "Repair window opens for damaged Sable Strait cable": "Cable repair",
+    "Kaldoria sets licence rules for grain and fuel exports": "Export licensing", "Tessen named as sole licensed transit port in draft rule": "Export licensing", "Orsund Fed. confirms review of export licences": "Export licensing",
+    "Shippers ask Orsund ministry about Tessen queue times": "Port congestion", "Customs notice 14/26: Tessen berth allocation": "Port congestion", "Satellite imagery shows tanker backlog at Tessen": "Port congestion", "Kaldoria Customs publishes Tessen queue figures": "Port congestion",
+    "Harlow Institute: port delays could lift import prices": "Import prices", "Harlow Institute briefs ports ministry": "Import prices", "Harlow Institute warns on Meridian lending": "Import prices",
+    "Ashlen Ferry pauses Tessen route": "Shipping routes", "Quillan Freight reroutes grain via Marl Island": "Shipping routes", "Marl Island terminal adds fuel berth": "Shipping routes", "Harbour board approves dredging plan": "Shipping routes",
+    "Corvane substation upgrade begins": "Grid investment", "Ulwen Metering wins pilot meter contract": "Grid investment", "Tarn Capital eyes grid assets": "Grid investment", "Tarn Capital bids for stake in Brannock Cable Co.": "Grid investment", "Helix opens tender for Corvane upgrade": "Grid investment",
+    "Q3 results season opens": "Markets"
+  };
+
+  /* ================= engine ================= */
+  let S, answered, doneInfo, deck, seenIds, undoSnap, lastDone, cache, UI;
+  function init() {
+    S = { ents: {}, arts: [], ver: 0, nextId: 1, queue: INCOMING.slice() };
+    DEFS.forEach((d) => {
+      const o = d[6] || {};
+      S.ents[d[0]] = { name: d[0], type: d[1], cluster: d[2], status: d[3], anchor: d[4], base: d[5], dupOf: o.dupOf || null, flag: o.flag || null };
+    });
+    RAW.forEach((r) => S.arts.push({ id: S.nextId++, t: r[0], s: r[1], c: r[2], pub: NOW0 - r[3] * HR, arr: NOW0 - r[4] * HR, ents: r[5], topic: TOPIC[r[0]] || "Other" }));
+    answered = new Set(); doneInfo = {}; undoSnap = null; lastDone = null; cache = { ver: -1 };
+    UI = { filter: "all", live: true, freezeAt: null, pop: null, sel: "Port of Tessen", q: "", status: "all", sort: { key: "growth", dir: 1 }, open: {}, emap: { topics: [], focus: null, anchors: true, expanded: [], off: {}, from: "", to: "", sel: null } };
+    const r = ranked();
+    deck = r.slice(0, 10).map((x) => x.name);
+    seenIds = new Set(r.map((x) => x.name));
+  }
+  function derive() {
+    if (cache.ver === S.ver) return cache;
+    const byEnt = {}, adj = {}, edges = new Map();
+    const live = (n) => S.ents[n] && S.ents[n].status !== "dismissed";
+    S.arts.forEach((a) => {
+      const es = [...new Set(a.ents)].filter(live);
+      es.forEach((n) => { (byEnt[n] = byEnt[n] || []).push(a); });
+      for (let i = 0; i < es.length; i++) {
+        for (let j = i + 1; j < es.length; j++) {
+          const pair = [es[i], es[j]].sort(), key = pair.join("|");
+          if (!edges.has(key)) edges.set(key, { a: pair[0], b: pair[1], n: 0, arts: [], first: Infinity });
+          const e = edges.get(key); e.n += 1; e.arts.push(a); e.first = Math.min(e.first, a.arr);
+        }
+      }
+    });
+    edges.forEach((e) => { (adj[e.a] = adj[e.a] || []).push({ n: e.b, e }); (adj[e.b] = adj[e.b] || []).push({ n: e.a, e }); });
+    Object.keys(byEnt).forEach((n) => byEnt[n].sort((x, y) => y.arr - x.arr));
+    cache = { ver: S.ver, byEnt, adj, edges };
+    return cache;
+  }
+  const artsOf = (n) => derive().byEnt[n] || [];
+  const nbrsOf = (n) => (derive().adj[n] || []).slice().sort((a, b) => b.e.n - a.e.n);
+  const srcsOf = (n) => new Set(artsOf(n).map((a) => a.s)).size;
+  const firstSeen = (n) => { const a = artsOf(n); return a.length ? a[a.length - 1].arr : null; };
+  const isNewEnt = (n) => { const f = firstSeen(n); return f !== null && clock() - f < 24 * HR; };
+  const isNewEdge = (e) => clock() - e.first < 48 * HR;
+  function statusOf(n) {
+    const e = S.ents[n], arts = artsOf(n);
+    const n72 = arts.filter((a) => clock() - a.arr < 72 * HR).length;
+    const ratio = n72 / 3 / Math.max(e.base || 0, 0.3);
+    return { heating: n72 >= 2 && ratio >= 2, ratio, n72 };
+  }
+  function bridgeOf(n) {
+    const e = S.ents[n], cs = new Set();
+    nbrsOf(n).forEach((x) => { const o = S.ents[x.n]; if (o.status === "tracked" && !o.anchor && o.cluster !== e.cluster) cs.add(o.cluster); });
+    return [...cs];
+  }
+  function nominationScore(n) {
+    const tracked = nbrsOf(n).filter((x) => S.ents[x.n].status === "tracked");
+    const anchors = tracked.filter((x) => S.ents[x.n].anchor).length;
+    let s = (tracked.length - anchors) * 3 + anchors + srcsOf(n) * 2 + artsOf(n).length;
+    if (clock() - firstSeen(n) < 72 * HR) s += 2;
+    if (bridgeOf(n).length) s += 3;
+    return s;
+  }
+  function buildItem(n) {
+    const e = S.ents[n];
+    if (!e || e.anchor || e.dupOf || e.flag || e.status === "dismissed") return null;
+    const nb = nbrsOf(n).filter((x) => S.ents[x.n].status === "tracked").sort((a, b) => (S.ents[a.n].anchor - S.ents[b.n].anchor) || b.e.n - a.e.n);
+    const arts = artsOf(n), nextTo = nb.slice(0, 2).map((x) => x.n), nm = "<b>" + esc(n) + "</b>";
+    if (e.status === "candidate") {
+      if (!nb.length) return null;
+      const br = bridgeOf(n);
+      const text = br.length ? nm + " links " + esc(CL[e.cluster]) + " with " + esc(CL[br[0]]) + ". It appears next to " + andList(nextTo.map(esc)) + "."
+        : nm + " showed up in " + plural(arts.length, "article", "articles") + " from " + plural(srcsOf(n), "source", "sources") + ", next to " + andList(nextTo.map(esc)) + ".";
+      return { name: n, e, tracked: false, score: nominationScore(n), html: text.replace(/\.\.$/, "."), nextTo, proof: arts.slice(0, 4), total: arts.length };
+    }
+    const st = statusOf(n);
+    if (!st.heating) return null;
+    const recent = arts.filter((a) => clock() - a.arr < 72 * HR);
+    return { name: n, e, tracked: true, score: 4 + Math.min(st.ratio, 10) * 1.5, html: nm + " is mentioned " + Math.round(st.ratio) + " times its usual rate: " + plural(st.n72, "article", "articles") + " in 3 days.", nextTo, proof: recent.slice(0, 4), total: recent.length };
+  }
+  const ranked = () => Object.keys(S.ents).filter((n) => !answered.has(n)).map(buildItem).filter(Boolean).sort((a, b) => b.score - a.score);
+
+  /* ---------- decisions, with one-step undo ---------- */
+  function snap() { undoSnap = { ents: JSON.parse(JSON.stringify(S.ents)), answered: new Set(answered), done: JSON.parse(JSON.stringify(doneInfo)), last: lastDone }; }
+  function undo() {
+    if (!undoSnap) return;
+    Object.keys(undoSnap.ents).forEach((n) => { S.ents[n] = undoSnap.ents[n]; });
+    answered = undoSnap.answered; doneInfo = undoSnap.done; lastDone = undoSnap.last;
+    undoSnap = null; S.ver++; hideToast(); emit();
+  }
+  function decide(n, act) {
+    const e = S.ents[n];
+    if (!e) return;
+    snap();
+    let msg;
+    if (act === "track") {
+      const near = nbrsOf(n).filter((x) => S.ents[x.n].status === "candidate").length;
+      e.status = "tracked";
+      msg = "Tracked " + n + "." + (near ? " " + plural(near, "nearby entity ranks", "nearby entities rank") + " higher now." : "");
+    } else if (act === "skip") { e.status = "dismissed"; msg = "Not interested in " + n + ". It will not come back."; }
+    else if (act === "stop") { e.status = "candidate"; msg = "Stopped tracking " + n + "."; }
+    else msg = "Seen: " + n + ".";
+    answered.add(n); doneInfo[n] = { act, msg }; lastDone = n;
+    S.ver++; showToast(msg, true); emit();
+  }
+  function nextArticle() {
+    if (!S.queue.length) { showToast("No more mock articles.", false); return; }
+    const raw = S.queue.shift(), t = clock();
+    raw[4].forEach((n) => { if (!S.ents[n]) { const d = PENDING[n]; S.ents[n] = { name: n, type: d[0], cluster: d[1], status: "candidate", anchor: false, base: 0, dupOf: null, flag: null }; } });
+    S.arts.push({ id: S.nextId++, t: raw[0], s: raw[1], c: raw[2], pub: t - raw[3] * HR, arr: t, ents: raw[4], topic: TOPIC[raw[0]] || "Other" });
+    S.ver++; emit();
+  }
+
+  /* ---------- toast ---------- */
+  let toastTimer = null;
+  function showToast(msg, withUndo) {
+    const t = document.getElementById("toast");
+    t.innerHTML = "<span>" + esc(msg) + "</span>" + (withUndo ? '<button type="button" data-act="undo">Undo</button>' : "");
+    t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, withUndo ? 7000 : 2500);
+  }
+  function hideToast() { document.getElementById("toast").hidden = true; }
+
+  /* ================= shared pieces ================= */
+  function statusCell(n) {
+    const e = S.ents[n];
+    if (e.status === "tracked") return '<span class="chk" title="' + (e.anchor ? "Context entity" : "Tracked") + '">✓</span>';
+    if (e.status === "dismissed") return '<span class="muted">–</span>';
+    return '<button type="button" class="ectrack" data-act="decide" data-a="track" data-name="' + esc(n) + '" aria-label="Track ' + esc(n) + '">+ Track</button>';
+  }
+  const nameBtn = (n, cls) => '<button type="button" class="ename ' + (cls || "") + '" data-act="pop" data-name="' + esc(n) + '">' + esc(n) + "</button>";
+  const stateChip = (n) => { const e = S.ents[n]; return e.status === "tracked" ? (e.anchor ? '<span class="chip">Context (anchor)</span>' : '<span class="chip accent">Tracked</span>') : e.status === "candidate" ? '<span class="chip warn">Not tracked</span>' : '<span class="chip">Dismissed</span>'; };
+  function actionBtns(n) {
+    const e = S.ents[n], b = [];
+    if (e.status === "candidate") { b.push('<button type="button" class="btn primary sm" data-act="decide" data-a="track" data-name="' + esc(n) + '">Track</button>'); b.push('<button type="button" class="btn sm danger" data-act="decide" data-a="skip" data-name="' + esc(n) + '">Not interested</button>'); }
+    else if (e.status === "tracked" && !e.anchor) b.push('<button type="button" class="btn sm danger" data-act="decide" data-a="stop" data-name="' + esc(n) + '">Stop tracking</button>');
+    else if (e.status === "dismissed") b.push('<button type="button" class="btn sm" data-act="decide" data-a="stop" data-name="' + esc(n) + '">Restore</button>');
+    return b.join("");
+  }
+  function miniMap(n) {
+    const W = 440, H = 290, cx = 220, cy = 145, rx = 150, ry = 100;
+    const nb = nbrsOf(n).filter((x) => S.ents[x.n].status !== "dismissed").slice(0, 8);
+    let out = '<svg viewBox="-100 0 ' + (W + 200) + " " + H + '" role="img" aria-label="Neighborhood of ' + esc(n) + '">';
+    const pos = nb.map((x, i) => { const a = -Math.PI / 2 + (i * 2 * Math.PI) / nb.length; return { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), a }; });
+    nb.forEach((x, i) => { out += '<line class="ge' + (isNewEdge(x.e) ? " new" : "") + '" style="stroke-width:' + (1.5 + Math.min(x.e.n, 4) * 0.9) + '" x1="' + cx + '" y1="' + cy + '" x2="' + pos[i].x + '" y2="' + pos[i].y + '"/>'; });
+    nb.forEach((x, i) => {
+      const o = S.ents[x.n], p = pos[i], right = Math.cos(p.a) > 0.25, left = Math.cos(p.a) < -0.25;
+      const kind = o.anchor ? "anchor" : o.status === "tracked" ? "tracked" : "cand";
+      out += '<g class="gn ' + kind + '" style="cursor:pointer" data-act="sel" data-name="' + esc(x.n) + '"><circle class="b" cx="' + p.x + '" cy="' + p.y + '" r="' + (o.anchor ? 11 : 9) + '" style="stroke:var(--k-' + o.cluster + ')"/>' +
+        '<text x="' + (right ? p.x + 14 : left ? p.x - 14 : p.x) + '" y="' + (right || left ? p.y + 4 : (Math.sin(p.a) < 0 ? p.y - 14 : p.y + 22)) + '" text-anchor="' + (right ? "start" : left ? "end" : "middle") + '">' + esc(x.n) + "</text></g>";
+    });
+    const e = S.ents[n], k = e.status === "tracked" ? (e.anchor ? "anchor" : "tracked") : "cand";
+    out += '<g class="gn ' + k + ' focus"><circle class="ring" cx="' + cx + '" cy="' + cy + '" r="22"/><circle class="b" cx="' + cx + '" cy="' + cy + '" r="14" style="stroke:var(--k-' + e.cluster + ')"/><text x="' + cx + '" y="' + (cy + 40) + '" text-anchor="middle" style="font-weight:600">' + esc(n) + "</text></g>";
+    return out + "</svg>";
+  }
+
+  /* ================= popup ================= */
+  function connHtml(n) {
+    const e = S.ents[n];
+    if (e.anchor) return "";
+    let body;
+    if (e.status === "tracked") {
+      const t = nbrsOf(n).filter((x) => visible(x.n) && S.ents[x.n].status === "tracked" && !S.ents[x.n].anchor);
+      body = t.length ? t.slice(0, 4).map((x) => '<div class="rel-row"><span>' + esc(x.n) + '</span><span class="evmeta">' + plural(x.e.n, "article", "articles") + "</span></div>").join("") : '<p class="muted small">No other tracked entity appears with it.</p>';
+    } else {
+      const nt = nearestTracked(n) || [];
+      body = nt.length ? nt.map((f) => '<div style="margin:6px 0"><div>' + f.path.map(esc).join(' <span class="muted">→</span> ') + '</div><div class="evmeta">' + (f.hops === 1 ? "directly linked" : f.hops + " hops") + '</div></div>').join("") + '<p style="margin-top:6px"><button type="button" class="linklike" data-act="trace" data-name="' + esc(n) + '" data-to="' + esc(nt[0].target) + '">Trace in the map</button></p>' : '<p class="muted small">Not connected to anything you track.</p>';
+    }
+    return '<p class="eyebrow" style="margin-top:14px">' + (e.status === "tracked" ? "Linked to what you track" : "Connection to what you track") + "</p>" + body;
+  }
+  function drawPop() {
+    const el = document.getElementById("pop");
+    if (!UI.pop || !S.ents[UI.pop.name]) { el.hidden = true; return; }
+    const n = UI.pop.name, e = S.ents[n], arts = artsOf(n), nb = nbrsOf(n).slice(0, 5), fs = firstSeen(n);
+    const why = e.status === "candidate" && buildItem(n) ? '<p class="small muted" style="margin-top:4px">Next to ' + andList(buildItem(n).nextTo.map(esc)) + ".</p>" : "";
+    el.innerHTML = '<button type="button" class="x" data-act="popclose" aria-label="Close">×</button><div class="chips"><span class="chip">' + esc(e.type) + "</span>" + stateChip(n) + '<span class="chip"><i class="dot k-' + e.cluster + '"></i>' + esc(CL[e.cluster]) + "</span>" + (isNewEnt(n) ? '<span class="newtag">NEW</span>' : "") + "</div>" +
+      "<h3>" + esc(n) + "</h3>" + why +
+      '<div class="kv"><dt>Seen in</dt><dd class="num">' + plural(arts.length, "article", "articles") + " · " + plural(srcsOf(n), "source", "sources") + "</dd><dt>First seen</dt><dd>" + (fs ? whenMs(fs) : "never") + "</dd></div>" +
+      '<div class="actions">' + actionBtns(n) + "</div>" +
+      connHtml(n) +
+      '<p class="eyebrow" style="margin-top:12px">Latest evidence</p><ul class="evlist">' + arts.slice(0, 3).map(evHtml).join("") + '</ul><p style="margin-top:12px"><button type="button" class="linklike" data-act="openent" data-name="' + esc(n) + '">Open in Entities</button> · <button type="button" class="linklike" data-act="openmap" data-name="' + esc(n) + '">Entity map</button></p>';
+    el.hidden = false;
+    if (window.innerWidth > 640) { el.style.left = UI.pop.x + "px"; el.style.top = UI.pop.y + "px"; } else { el.style.left = ""; el.style.top = ""; }
+  }
+  function openPop(btn, keep) {
+    const name = btn.dataset.name;
+    if (keep && UI.pop) { UI.pop.name = name; }
+    else {
+      const r = btn.getBoundingClientRect();
+      const x = Math.max(8, Math.min(r.left, window.innerWidth - 376));
+      const y = Math.max(70, Math.min(r.bottom + 6, window.innerHeight - 460));
+      UI.pop = { name, x, y };
+    }
+    drawPop();
+  }
+
+  /* ================= 1 newsfeed ================= */
+  function drawNewsfeed(el) {
+    const mentionsTracked = (a) => a.ents.some((n) => S.ents[n] && S.ents[n].status === "tracked" && !S.ents[n].anchor);
+    const hasUntracked = (a) => a.ents.some((n) => S.ents[n] && S.ents[n].status === "candidate");
+    const hasNew = (a) => a.ents.some((n) => S.ents[n] && isNewEnt(n));
+    const FILTERS = [["all", "All", () => true], ["tracked", "Mentions a tracked entity", mentionsTracked], ["untracked", "Has untracked entities", hasUntracked], ["new", "New to us", hasNew]];
+    const all = S.arts.slice().sort((x, y) => y.arr - x.arr);
+    const held = UI.freezeAt === null ? 0 : all.filter((a) => a.arr > UI.freezeAt).length;
+    const shown = all.filter((a) => UI.freezeAt === null || a.arr <= UI.freezeAt);
+    const f = FILTERS.filter((x) => x[0] === UI.filter)[0];
+    const rows = shown.filter(f[2]).map((a) => {
+      const ents = [...new Set(a.ents)].filter((n) => S.ents[n]).sort((x, y) => rank(x) - rank(y));
+      const inWorld = ents.filter((n) => S.ents[n].status === "tracked" && !S.ents[n].anchor);
+      const fresh = ents.filter((n) => S.ents[n].status === "candidate" && !S.ents[n].dupOf && !S.ents[n].flag);
+      const box = (inWorld.length ? "<span>In your world: <b>" + inWorld.map(esc).join(", ") + "</b></span>" : "<span>Nothing you track is named here.</span>") + (fresh.length ? "<span>Not tracked yet: <b>" + fresh.map(esc).join(", ") + "</b></span>" : "");
+      const isNew = clock() - a.arr < 60000;
+      return '<article class="frow' + (inWorld.length ? " rel" : "") + '"><div><p class="hl">' + (isNew ? '<span class="chip accent">NEW</span> ' : "") + link(a.t) + '</p><div class="box">' + box + "</div></div>" +
+        '<div><p class="srcname">' + esc(a.s) + '</p><p class="url">' + esc(urlOf(a)) + '</p><p class="evmeta" style="margin-top:4px">' + esc(a.c) + " · " + timeSpan(a) + "</p></div>" +
+        '<div><ol class="elist" style="list-style:none">' + ents.map((n, i) => '<li><span class="idx">' + (i + 1) + "</span>" + nameBtn(n, S.ents[n].status === "candidate" ? "cand" : S.ents[n].status === "dismissed" ? "dis" : "") + riseMark(n) + statusCell(n) + "</li>").join("") + "</ol></div></article>";
+    }).join("");
+    const filt = '<div class="seg" role="group" aria-label="Filter">' + FILTERS.map((x) => '<button type="button" data-f="' + x[0] + '" aria-pressed="' + (UI.filter === x[0]) + '">' + x[1] + " " + shown.filter(x[2]).length + "</button>").join("") + "</div>";
+    const ctl = '<div class="chips"><span class="chip"><span class="livedot' + (UI.live ? "" : " off") + '"></span>' + (UI.live ? "Live" : "Paused") + '</span><button type="button" class="btn sm" data-live="1">' + (UI.live ? "Pause" : "Resume") + '</button><button type="button" class="btn sm" data-act="next" title="Prototype aid">Next mock article (' + S.queue.length + ")</button></div>";
+    el.innerHTML = '<div class="read"><h2>Newsfeed</h2><p><b>Your sketch:</b> story headline with a box, source with its URL, entities found with tracked status. Click an entity for a popup. <b>My guess:</b> the box tells you how the story touches your world. If you meant a summary or an image, say so.</p></div>' +
+      '<div class="bar">' + filt + ctl + "</div>" + '<div class="feed"><div class="fh"><span>Story headline</span><span>Source</span><span>Entities found · status tracked</span></div>' +
+      (held ? '<button type="button" class="newpill" data-show="1">' + plural(held, "new article", "new articles") + " · show</button>" : "") + (rows || '<div class="frow"><span class="muted">Nothing matches this filter.</span></div>') + "</div>";
+  }
+  const rank = (n) => { const e = S.ents[n]; return e.status === "tracked" && !e.anchor ? 0 : e.status === "candidate" ? 1 : e.status === "tracked" ? 2 : 3; };
+
+  /* ================= 2 entities ================= */
+  /* ================= entity facts: growth, diversity, topics ================= */
+  function seeded(name) {
+    let h = 2166136261;
+    for (let i = 0; i < name.length; i++) { h ^= name.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return () => { h += 0x6D2B79F5; let t = Math.imul(h ^ (h >>> 15), 1 | h); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function topicCounts(arts) {
+    const c = {};
+    arts.forEach((a) => { c[a.topic] = (c[a.topic] || 0) + 1; });
+    return Object.keys(c).sort((x, y) => c[y] - c[x] || x.localeCompare(y)).map((t) => ({ t, n: c[t] }));
+  }
+  const primaryTopic = (n) => { const tc = topicCounts(artsOf(n)); return tc.length ? tc[0].t : "Other"; };
+  // Growth: articles per day in the last 3 days against the entity's own usual rate. One metric, three states worth showing.
+  function growth(n) {
+    const e = S.ents[n], arts = artsOf(n), fs = firstSeen(n);
+    const n72 = arts.filter((a) => clock() - a.arr < 72 * HR).length, older = arts.length - n72;
+    const base = e.base > 0 ? e.base : Math.max(older / 11, 0.15);
+    const ratio = (n72 / 3) / Math.max(base, 0.3);
+    let state = "Steady";
+    if (!e.anchor && e.status !== "tracked" && fs !== null && clock() - fs < 72 * HR) state = "New";
+    else if (n72 >= 3 && ratio >= 3) state = "Rising";
+    else if (e.base >= 0.5 && ratio < 0.5) state = "Falling";
+    const score = state === "Rising" ? 100 + ratio : state === "New" ? 50 + n72 : state === "Falling" ? -1 : ratio;
+    const r = seeded(n), hist = [];
+    const day = (d) => arts.filter((a) => { const age = clock() - a.arr; return age >= d * 24 * HR && age < (d + 1) * 24 * HR; }).length;
+    for (let d = 13; d >= 0; d--) hist.push(d >= 3 && e.base > 0 ? Math.max(0, Math.round(e.base + (r() - 0.5) * 2 * Math.sqrt(e.base + 0.3))) : day(d));
+    return { state, ratio, n72, score, hist };
+  }
+  const ratioText = (g) => (g.ratio >= 10 ? "10+" : g.ratio.toFixed(1));
+  const gChip = (g) => g.state === "Rising" ? '<span class="chip accent">▲ ×' + ratioText(g) + "</span>" : g.state === "New" ? '<span class="chip good">New</span>' : g.state === "Falling" ? '<span class="chip warn">▼ Falling</span>' : '<span class="chip">Steady</span>';
+  const spark = (g) => { const max = Math.max(1, Math.max.apply(null, g.hist)); return '<span class="spark" role="img" aria-label="Mentions per day, last 14 days">' + g.hist.map((v, i) => '<i class="' + ((g.state === "Rising" || g.state === "New") && i >= 11 ? "hot" : "") + '" style="height:' + Math.max(2, Math.round((v / max) * 22)) + 'px"></i>').join("") + "</span>"; };
+  const riseMark = (n) => (growth(n).state === "Rising" ? ' <span class="rise" title="Rising fast">▲</span>' : "");
+  const facts = (n) => { const arts = artsOf(n); return { count: arts.length, srcCount: new Set(arts.map((a) => a.s)).size }; };
+  const dvChip = (f) => '<span class="chip ' + (f.srcCount >= 3 ? "good" : f.srcCount === 1 ? "warn" : "") + '">' + (f.srcCount >= 3 ? "Multi-source · " + f.srcCount : f.srcCount === 2 ? "2 sources" : "Single source") + "</span>";
+
+  function connCell(r) {
+    if (r.e.anchor) return '<span class="muted">context</span>';
+    if (r.e.status === "tracked") {
+      const k = nbrsOf(r.n).filter((x) => visible(x.n) && S.ents[x.n].status === "tracked" && !S.ents[x.n].anchor).length;
+      return k ? plural(k, "tracked link", "tracked links") : '<span class="muted">—</span>';
+    }
+    const nt = nearestTracked(r.n);
+    if (!nt || !nt.length) return '<span class="muted">not connected to what you track</span>';
+    const f = nt[0];
+    return '<button type="button" class="linklike" data-act="trace" data-name="' + esc(r.n) + '" data-to="' + esc(f.target) + '">' + esc(f.target) + '</button> <span class="more">' + (f.hops === 1 ? "directly" : f.hops + " hops via " + esc(f.path[1])) + (nt.length > 1 ? " +" + (nt.length - 1) : "") + "</span>";
+  }
+  function entRows() {
+    return Object.keys(S.ents).map((n) => {
+      const e = S.ents[n], arts = artsOf(n), sc = {};
+      arts.forEach((a) => { sc[a.s] = (sc[a.s] || 0) + 1; });
+      return { n, e, g: growth(n), f: facts(n), related: nbrsOf(n).map((x) => x.n), srcs: Object.keys(sc).sort((a, b) => sc[b] - sc[a]), topics: topicCounts(arts) };
+    });
+  }
+  const tRank = (r) => (r.e.status === "tracked" ? (r.e.anchor ? 1 : 0) : r.e.status === "candidate" ? 2 : 3);
+  const CMP = {
+    growth: (a, b) => b.g.score - a.g.score || b.f.count - a.f.count,
+    tracked: (a, b) => tRank(a) - tRank(b) || b.f.count - a.f.count,
+    mentions: (a, b) => b.f.count - a.f.count || b.f.srcCount - a.f.srcCount,
+    diversity: (a, b) => b.f.srcCount - a.f.srcCount || b.f.count - a.f.count,
+    name: (a, b) => a.n.localeCompare(b.n)
+  };
+  const SORT_INFO = {
+    growth: ["Growth", "Articles per day in the last 3 days against the entity's own usual rate. ▲ means 3 times or more, with at least 3 articles. New means an untracked entity first seen in the last 3 days."],
+    tracked: ["Status", "Tracked first, then context entities, then the rest."],
+    mentions: ["Mentions", "How many articles name the entity."],
+    diversity: ["Source", "How many different sources name it. A single-source entity is weaker evidence."],
+    name: ["Name", "A to Z."]
+  };
+  function drawEntities(el) {
+    const hadFocus = document.activeElement && document.activeElement.id === "q";
+    const caret = hadFocus ? document.activeElement.selectionStart : 0;
+    let rows = entRows().filter((r) => (UI.status === "dismissed" ? r.e.status === "dismissed" : r.e.status !== "dismissed"));
+    if (UI.status === "tracked") rows = rows.filter((r) => r.e.status === "tracked");
+    if (UI.status === "untracked") rows = rows.filter((r) => r.e.status === "candidate");
+    if (UI.q) rows = rows.filter((r) => r.n.toLowerCase().indexOf(UI.q.toLowerCase()) > -1);
+    const k = UI.sort.key, d = UI.sort.dir;
+    rows.sort((a, b) => CMP[k](a, b) * d || a.n.localeCompare(b.n));
+    if (!UI.sel || !S.ents[UI.sel]) UI.sel = rows[0] ? rows[0].n : null;
+    const more = (arr, n) => arr.slice(0, n).map(esc).join(", ") + (arr.length > n ? ' <span class="more">+' + (arr.length - n) + "</span>" : "");
+    const th = (label, sk) => '<th class="' + (UI.sort.key === sk ? "act" : "") + '" data-sort="' + sk + '" aria-sort="' + (UI.sort.key === sk ? (UI.sort.dir > 0 ? "descending" : "ascending") : "none") + '" title="' + esc(SORT_INFO[sk][1]) + '">' + label + (UI.sort.key === sk ? (UI.sort.dir > 0 ? " ▼" : " ▲") : "") + "</th>";
+    const body = rows.map((r, i) => '<tr data-act="entmap" data-name="' + esc(r.n) + '" aria-selected="' + (UI.sel === r.n) + '"><td class="rn">' + (i + 1) + '</td><td><i class="dot k-' + r.e.cluster + '"></i><b>' + esc(r.n) + "</b>" + riseMark(r.n) + "</td><td>" +
+      (r.e.status === "tracked" ? '<span class="chk">✓</span> ' + (r.e.anchor ? "context" : "tracked") : r.e.status === "candidate" ? statusCell(r.n) : "dismissed") + "</td><td>" + gChip(r.g) + "<br>" + spark(r.g) + '</td><td class="num">' + r.f.count + "</td><td>" + dvChip(r.f) + "<br>" + (r.srcs.length ? more(r.srcs, 2) : "") + "</td><td>" +
+      connCell(r) + "</td><td>" + (r.topics.length ? r.topics.slice(0, 2).map((t) => '<button type="button" class="linklike" data-act="cluster" data-t="' + esc(t.t) + '">' + esc(t.t) + "</button>").join(", ") + (r.topics.length > 2 ? ' <span class="more">+' + (r.topics.length - 2) + "</span>" : "") : '<span class="muted">none</span>') + "</td></tr>").join("");
+    el.innerHTML = '<div class="read"><h2>Entities</h2><p>Select a row to open that entity on the map. Select a topic to open its cluster. Select a column header to sort.</p></div>' +
+      '<div class="bar"><div class="chips"><input id="q" type="search" placeholder="Filter by name" value="' + esc(UI.q) + '" aria-label="Filter by name"><div class="seg" role="group" aria-label="Status">' +
+      [["all", "All"], ["tracked", "Tracked"], ["untracked", "Not tracked"], ["dismissed", "Dismissed"]].map((x) => '<button type="button" data-st="' + x[0] + '" aria-pressed="' + (UI.status === x[0]) + '">' + x[1] + "</button>").join("") + '</div></div><span class="muted small">' + plural(rows.length, "entity", "entities") + " · sorted by <b>" + SORT_INFO[UI.sort.key][0] + "</b>. " + esc(SORT_INFO[UI.sort.key][1]) + "</span></div>" +
+      '<div class="sheet wide"><table><colgroup><col style="width:3%"><col style="width:14%"><col style="width:9%"><col style="width:13%"><col style="width:7%"><col style="width:16%"><col style="width:21%"><col style="width:17%"></colgroup><thead><tr><th class="rn">#</th>' + th("Entity", "name") + th("Status", "tracked") + th("Growth", "growth") + th("Mentions", "mentions") + th("Source", "diversity") + '<th class="ns">Connection to what you track</th><th class="ns">Topics</th></tr></thead><tbody>' + (body || '<tr><td colspan="8" class="muted">No entities match.</td></tr>') + "</tbody></table></div>" +
+      '<p class="muted small" style="margin-top:8px">The last three bars in each sparkline are real arrivals. Older bars are mock history.</p>';
+    if (hadFocus) { const q = document.getElementById("q"); q.focus(); q.setSelectionRange(caret, caret); }
+  }
+
+  /* ================= 3 quick hits ================= */
+  function drawQuick(el) {
+    const primary = (it) => (it.tracked ? ["seen", "Seen"] : ["track", "Track"]);
+    const secondary = (it) => (it.tracked ? ["stop", "Stop tracking"] : ["skip", "Not interested"]);
+    const rows = deck.map((n, i) => {
+      if (doneInfo[n]) return '<li class="row done"><span class="rank">' + (i + 1) + '</span><div class="sent muted">' + esc(doneInfo[n].msg) + (lastDone === n && undoSnap ? ' <button type="button" class="linklike" data-act="undo">Undo</button>' : "") + "</div><span></span></li>";
+      const it = buildItem(n);
+      if (!it) return '<li class="row done"><span class="rank">' + (i + 1) + '</span><div class="sent muted">' + esc(n) + " is now " + esc(S.ents[n] ? (S.ents[n].status === "tracked" ? "tracked" : S.ents[n].status) : "gone") + ", decided in another view.</div><span></span></li>";
+      return '<li class="row"><span class="rank">' + (i + 1) + '</span><div><p class="sent">' + it.html + '</p><div class="nextto">Next to ' + it.nextTo.map((x) => '<i class="dot k-' + S.ents[x].cluster + '"></i>' + esc(x)).join(" · ") + " · first seen " + agoMs(clock() - firstSeen(n)) + '</div><div class="chips" style="margin-top:6px">' + stateChip(n) + '<button type="button" class="linklike small" data-act="proofq" data-name="' + esc(n) + '">' + (UI.open[n] ? "Hide proof" : "Proof · " + plural(it.total, "article", "articles")) + "</button></div></div>" +
+        '<div class="act"><button type="button" class="btn primary" data-act="decide" data-a="' + primary(it)[0] + '" data-name="' + esc(n) + '">' + primary(it)[1] + '</button><button type="button" class="btn" data-act="decide" data-a="' + secondary(it)[0] + '" data-name="' + esc(n) + '">' + secondary(it)[1] + "</button></div>" + (UI.open[n] ? '<div class="proof"><ul class="evlist">' + it.proof.map(evHtml).join("") + "</ul></div>" : "") + "</li>";
+    }).join("");
+    const rest = ranked().filter((x) => deck.indexOf(x.name) < 0).length;
+    const fc = ranked().filter((x) => !seenIds.has(x.name)).length;
+    el.innerHTML = '<div class="read"><h2>Quick hits</h2><p><b>Your sketch:</b> “Quick hits: new view of all”. <b>My reading:</b> the ten things that are new in your world, with a way to see everything. If you meant something else, tell me.</p></div><div class="hits">' +
+      (fc ? '<button type="button" class="newpill" style="border-radius:8px;margin-bottom:10px" data-act="refresh">' + plural(fc, "new item", "new items") + " · show</button>" : "") +
+      '<ol class="list">' + (rows || '<li class="row"><span></span><p class="muted">Nothing is new in your world right now.</p></li>') + "</ol>" +
+      '<p class="cap">' + (rest ? plural(rest, "more item is", "more items are") + " ranked lower and not shown. " : "") + '<a href="#entities">View all entities</a> · <a href="#newsfeed">View all stories</a></p></div>';
+  }
+
+  /* ================= 4 entity map: universe, cluster, entity ================= */
+  const TCOL = ["var(--k-ports)", "var(--k-energy)", "var(--k-grid)", "var(--k-fin)", "var(--accent)", "var(--muted)"];
+  const allTopics = () => [...new Set(S.arts.map((a) => a.topic))].sort();
+  const topicColor = (t) => TCOL[allTopics().indexOf(t) % TCOL.length];
+  const shorten = (s, k) => (s.length > k ? s.slice(0, k - 1) + "…" : s);
+  const visible = (n) => { const e = S.ents[n]; return !!e && e.status !== "dismissed" && !e.dupOf && !e.flag; };
+
+  function labelText(n, max) {
+    const g = growth(n);
+    return shorten(n, max) + (g.state === "Rising" ? " ▲×" + ratioText(g) : g.state === "New" ? " NEW" : "");
+  }
+  // One node renderer for all three levels. Growth shows only as an exception: a halo and a ▲ ×N label.
+  function nodeSvg(n, x, y, o) {
+    const e = S.ents[n], g = growth(n), r = o.r || 8, hot = g.state === "Rising";
+    const kind = e.anchor ? "anchor" : e.status === "tracked" ? "tracked" : "cand";
+    const lab = o.lab || { dx: 0, dy: r + 14, a: "middle" };
+    return '<g class="ent gn ' + kind + (o.cls ? " " + o.cls : "") + '"' + (o.act ? ' data-act="' + o.act + '" data-name="' + esc(n) + '" style="cursor:pointer"' : "") + (o.drag ? ' data-drag="' + esc(o.drag) + '"' : "") + ">" + (o.lines ? '<g class="ln">' + o.lines + "</g>" : "") +
+      "<title>" + esc(n) + " · " + esc(e.type) + (hot ? " · rising fast" : "") + "</title>" + (o.act ? '<circle cx="' + x + '" cy="' + y + '" r="' + (r + 8) + '" style="fill:transparent;stroke:none"/>' : "") + (hot ? '<circle class="halo" cx="' + x + '" cy="' + y + '" r="' + (r + 5) + '"/>' : "") +
+      (o.cls === "focus" ? '<circle class="ring" cx="' + x + '" cy="' + y + '" r="' + (r + 8) + '"/>' : "") +
+      '<circle class="b" cx="' + x + '" cy="' + y + '" r="' + r + '" style="stroke:' + (o.stroke || "var(--k-" + e.cluster + ")") + '"/>' +
+      '<text class="lbl' + (hot ? " hot" : "") + '" x="' + (x + lab.dx) + '" y="' + (y + lab.dy) + '" text-anchor="' + lab.a + '">' + esc(labelText(n, o.max || 24)) + "</text></g>";
+  }
+  function sideLabel(a, r, below) {
+    const cs = Math.cos(a), sn = Math.sin(a);
+    if (below) return { dx: 0, dy: r + 14, a: "middle" };
+    if (cs > 0.3) return { dx: r + 6, dy: 4, a: "start" };
+    if (cs < -0.3) return { dx: -(r + 6), dy: 4, a: "end" };
+    return { dx: 0, dy: sn < 0 ? -(r + 6) : r + 14, a: "middle" };
+  }
+  const hoverLines = (n, pos) => nbrsOf(n).filter((x) => pos[x.n] && visible(x.n)).map((x) => '<line x1="' + pos[n].x + '" y1="' + pos[n].y + '" x2="' + pos[x.n].x + '" y2="' + pos[x.n].y + '" style="stroke-width:' + (1.5 + Math.min(x.e.n, 4) * 0.8) + '"/>').join("");
+
+  /* ----- level 2: a topic cluster ----- */
+  const clusterMembers = (ts) => Object.keys(S.ents).filter((n) => visible(n) && !S.ents[n].anchor && ts.indexOf(primaryTopic(n)) > -1).sort((a, b) => growth(b).score - growth(a).score);
+  function clusterSvg(ts, mem) {
+    const cnt = mem.length, rx = cnt > 1 ? Math.min(340, 110 + 45 * cnt) : 0, ry = cnt > 1 ? Math.min(200, 70 + 30 * cnt) : 0, H = 2 * (ry + 70) + 60, cx = 500, cy = H / 2, pos = {};
+    mem.forEach((n, i) => { const a = -Math.PI / 2 + (2 * Math.PI * i) / mem.length; pos[n] = { x: cx + rx * Math.cos(a), y: cy + ry * Math.sin(a), a }; });
+    const col = topicColor(ts[0]), set = new Set(mem);
+    let out = '<svg viewBox="0 0 1000 ' + H + '" role="group" aria-label="Cluster: ' + esc(ts.join(", ")) + '"><ellipse cx="' + cx + '" cy="' + cy + '" rx="' + Math.max(rx + 120, 220) + '" ry="' + Math.max(ry + 64, 100) + '" style="fill:color-mix(in srgb,' + col + ' 9%,transparent);stroke:' + col + ';stroke-width:1.5"/>';
+    derive().edges.forEach((e) => {
+      if (!set.has(e.a) || !set.has(e.b)) return;
+      out += '<line class="ge' + (isNewEdge(e) ? " new" : "") + '" style="stroke-width:' + (1.5 + Math.min(e.n, 4) * 0.9) + '" x1="' + pos[e.a].x + '" y1="' + pos[e.a].y + '" x2="' + pos[e.b].x + '" y2="' + pos[e.b].y + '"/>';
+    });
+    mem.forEach((n) => { const p = pos[n]; out += nodeSvg(n, p.x, p.y, { act: "entmap", r: 10, lab: mem.length > 1 ? sideLabel(p.a, 10, false) : null, stroke: ts.length > 1 ? topicColor(primaryTopic(n)) : null }); });
+    return out + "</svg>";
+  }
+  function clusterPanel(ts, mem) {
+    const arts = S.arts.filter((a) => ts.indexOf(a.topic) > -1).sort((a, b) => b.arr - a.arr);
+    const rising = mem.filter((n) => growth(n).state === "Rising").length, cnt = {};
+    mem.forEach((n) => nbrsOf(n).forEach((x) => { if (!visible(x.n) || S.ents[x.n].anchor) return; const t = primaryTopic(x.n); if (ts.indexOf(t) < 0) cnt[t] = (cnt[t] || 0) + 1; }));
+    const touch = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]);
+    const chips = ts.map((t) => '<span class="chip" style="background:color-mix(in srgb,' + topicColor(t) + ' 18%,transparent)">' + esc(t) + (ts.length > 1 ? ' <button type="button" class="x2" data-act="clusterrm" data-t="' + esc(t) + '" aria-label="Remove ' + esc(t) + '">×</button>' : "") + "</span>").join(" ");
+    const li = (n) => '<div class="rel-row"><span><button type="button" class="ename" data-act="entmap" data-name="' + esc(n) + '">' + esc(n) + '</button></span><span class="chips">' + gChip(growth(n)) + spark(growth(n)) + statusCell(n) + "</span></div>";
+    return '<div class="panel"><p class="eyebrow">Cluster</p><div class="chips" style="margin:6px 0">' + chips + '</div><p class="muted small">' + plural(mem.length, "entity", "entities") + " · " + plural(arts.length, "article", "articles") + " · " + rising + " rising</p>" +
+      '<p class="eyebrow" style="margin-top:12px">Entities, fastest growing first</p>' + (mem.map(li).join("") || '<p class="muted small">No entities.</p>') +
+      (touch.length ? '<p class="eyebrow" style="margin-top:12px">Also touches · select to add</p><div class="chips" style="margin-top:6px">' + touch.map((t) => '<button type="button" class="chip" style="border:0;cursor:pointer" data-act="cluster" data-add="1" data-t="' + esc(t) + '">+ ' + esc(t) + " " + cnt[t] + "</button>").join("") + "</div>" : "") +
+      '<p class="eyebrow" style="margin-top:12px">Evidence</p><ul class="evlist">' + arts.slice(0, 5).map(evHtml).join("") + "</ul></div>";
+  }
+
+  /* ----- level 3: one entity ----- */
+  function mapModel(n) {
+    const tcs = topicCounts(artsOf(n)), groups = {};
+    tcs.forEach((tc) => { groups[tc.t] = { t: tc.t, n: tc.n, members: [] }; });
+    nbrsOf(n).filter((x) => visible(x.n)).forEach((x) => {
+      const c = {};
+      x.e.arts.forEach((a) => { c[a.topic] = (c[a.topic] || 0) + 1; });
+      const order = Object.keys(c).sort((p, q) => c[q] - c[p] || groups[q].n - groups[p].n || p.localeCompare(q));
+      groups[order[0]].members.push({ n: x.n, e: x.e });
+    });
+    return { tcs, shown: tcs.slice(0, 6).map((tc) => groups[tc.t]), rest: tcs.slice(6) };
+  }
+  function entitySvg(n, model) {
+    const k = model.shown.length, H = k <= 2 ? 400 : 660, cx = 460, cy = H / 2, rx = 300, ry = 215;
+    const placed = model.shown.map((g, i) => {
+      const a = k <= 2 ? i * Math.PI : -Math.PI / 2 + (i * 2 * Math.PI) / k, members = g.members.slice().sort((p, q) => q.e.n - p.e.n).slice(0, 6);
+      return { g, members, a, r: Math.min(96, 46 + 10 * members.length), bx: k === 1 ? cx + rx * 0.6 : cx + rx * Math.cos(a), by: k === 1 ? cy : cy + ry * Math.sin(a) };
+    });
+    let out = '<svg viewBox="-70 0 1060 ' + H + '" role="group" aria-label="Map of ' + esc(n) + ' grouped by topic">';
+    placed.forEach((p) => {
+      const col = topicColor(p.g.t);
+      out += '<g data-act="cluster" data-t="' + esc(p.g.t) + '" style="cursor:pointer"><circle cx="' + p.bx + '" cy="' + p.by + '" r="' + p.r + '" style="fill:color-mix(in srgb,' + col + ' 12%,transparent);stroke:' + col + ';stroke-width:1.5"/><text x="' + p.bx + '" y="' + (p.by - p.r - 7) + '" text-anchor="middle" style="fill:var(--fg);font-weight:600;font-size:12px">' + esc(p.g.t) + " · " + p.g.n + "</text></g>";
+    });
+    placed.forEach((p) => p.members.forEach((m, j) => {
+      const mm = p.members.length, th = p.a + Math.PI + (2 * Math.PI * j) / mm, rr = mm <= 1 ? 0 : p.r * 0.66;
+      m.x = p.bx + rr * Math.cos(th); m.y = p.by + rr * Math.sin(th); m.th = th;
+      out += '<line class="ge' + (isNewEdge(m.e) ? " new" : "") + '" style="stroke-width:' + (1 + Math.min(m.e.n, 4) * 0.8) + '" x1="' + cx + '" y1="' + cy + '" x2="' + m.x + '" y2="' + m.y + '"/>';
+    }));
+    placed.forEach((p) => p.members.forEach((m) => { out += nodeSvg(m.n, m.x, m.y, { act: "entmap", r: S.ents[m.n].anchor ? 10 : 8, lab: sideLabel(m.th, 8, p.members.length <= 2) }); }));
+    out += nodeSvg(n, cx, cy, { r: 19, cls: "focus", lab: { dx: 0, dy: 46, a: "middle" } });
+    return out + "</svg>";
+  }
+  function entityPanel(n, model) {
+    const g = growth(n), f = facts(n), nb = nbrsOf(n).filter((x) => visible(x.n));
+    const li = (x) => '<div class="rel-row"><span><button type="button" class="ename' + (S.ents[x.n].status === "candidate" ? " cand" : "") + '" data-act="entmap" data-name="' + esc(x.n) + '">' + esc(x.n) + "</button>" + riseMark(x.n) + ' <span class="evmeta">' + plural(x.e.n, "article", "articles") + "</span></span><span>" + statusCell(x.n) + "</span></div>";
+    return '<div class="panel"><div class="chips">' + stateChip(n) + '<span class="chip">' + esc(S.ents[n].type) + "</span>" + gChip(g) + '</div><h3 style="font-size:20px;margin:6px 0">' + esc(n) + "</h3>" + spark(g) +
+      '<div class="kv"><dt>Mentions</dt><dd class="num">' + f.count + " · " + g.n72 + " in the last 3 days</dd><dt>Diversity</dt><dd>" + dvChip(f) + "</dd><dt>Topics</dt><dd>" + (model.tcs.length ? model.tcs.map((t) => '<button type="button" class="linklike" data-act="cluster" data-t="' + esc(t.t) + '">' + esc(t.t) + "</button> " + t.n).join(", ") : "none") + '</dd></div><div class="actions">' + actionBtns(n) + "</div>" +
+      '<p class="eyebrow" style="margin-top:12px">Linked entities</p>' + (nb.length ? nb.slice(0, 8).map(li).join("") + (nb.length > 8 ? '<p class="muted small">+' + (nb.length - 8) + " more</p>" : "") : '<p class="muted small">No links yet.</p>') +
+      '<p class="eyebrow" style="margin-top:12px">Latest evidence</p><ul class="evlist">' + artsOf(n).slice(0, 3).map(evHtml).join("") + "</ul></div>";
+  }
+
+  /* ----- level 1: the universe, clusters first ----- */
+  // Entity-level connectivity, used for the island counts.
+  function netModel(anchors) {
+    const names = Object.keys(S.ents).filter((n) => visible(n) && (anchors || !S.ents[n].anchor)), set = new Set(names), edges = [], adj = {};
+    names.forEach((n) => { adj[n] = []; });
+    derive().edges.forEach((e) => { if (set.has(e.a) && set.has(e.b)) { edges.push(e); adj[e.a].push(e.b); adj[e.b].push(e.a); } });
+    const seen = new Set(), comps = [];
+    names.slice().sort().forEach((n) => {
+      if (seen.has(n)) return;
+      const c = [], q = [n]; seen.add(n);
+      while (q.length) { const x = q.shift(); c.push(x); adj[x].forEach((y) => { if (!seen.has(y)) { seen.add(y); q.push(y); } }); }
+      comps.push(c);
+    });
+    return { names, edges, islands: comps.filter((c) => c.length > 1).length, isolated: comps.filter((c) => c.length === 1).length };
+  }
+  function shortestPath(from, to, anchors) {
+    const ok = (n) => visible(n) && (anchors || !S.ents[n].anchor);
+    if (!from || !to || from === to || !ok(from) || !ok(to)) return null;
+    const prev = { [from]: null }, q = [from];
+    while (q.length) {
+      const x = q.shift();
+      if (x === to) break;
+      nbrsOf(x).filter((y) => ok(y.n)).sort((a, b) => b.e.n - a.e.n).forEach((y) => { if (!(y.n in prev)) { prev[y.n] = x; q.push(y.n); } });
+    }
+    if (!(to in prev)) return null;
+    const path = [];
+    for (let x = to; x !== null; x = prev[x]) path.unshift(x);
+    return path;
+  }
+  // The nearest tracked entities, with the path to each. Anchors count as hops but never as targets.
+  function nearestTracked(n) {
+    const e = S.ents[n];
+    if (!e || e.anchor || e.status === "tracked") return null;
+    const dist = { [n]: 0 }, prev = { [n]: null }, q = [n], found = [];
+    let limit = Infinity;
+    while (q.length) {
+      const x = q.shift();
+      if (dist[x] >= limit) break;
+      nbrsOf(x).filter((y) => visible(y.n)).sort((a, b) => b.e.n - a.e.n).forEach((y) => {
+        if (y.n in dist) return;
+        dist[y.n] = dist[x] + 1; prev[y.n] = x;
+        const o = S.ents[y.n];
+        if (o.status === "tracked" && !o.anchor) { found.push(y.n); limit = dist[y.n]; } else q.push(y.n);
+      });
+    }
+    return found.map((t) => { const path = []; for (let x = t; x !== null; x = prev[x]) path.unshift(x); return { target: t, path, hops: path.length - 1 }; });
+  }
+
+  // Units are what the layout moves: a collapsed topic, one entity of an opened topic, or a context entity.
+  const netCacheBox = { key: "", val: null };
+  const unitKeyOf = (n, ex) => (S.ents[n].anchor ? "n:" + n : ex.has(primaryTopic(n)) ? "e:" + n : "t:" + primaryTopic(n));
+  function effExpanded(M) {
+    const s = new Set(M.expanded);
+    (shortestPath(M.from, M.to, M.anchors) || []).forEach((n) => { if (!S.ents[n].anchor) s.add(primaryTopic(n)); });
+    return s;
+  }
+  function netUnits(M, ex) {
+    const names = Object.keys(S.ents).filter((n) => visible(n) && (M.anchors || !S.ents[n].anchor)), byTopic = {}, units = [];
+    names.filter((n) => !S.ents[n].anchor).forEach((n) => { const t = primaryTopic(n); (byTopic[t] = byTopic[t] || []).push(n); });
+    Object.keys(byTopic).sort().forEach((t) => {
+      const mem = byTopic[t].sort((a, b) => growth(b).score - growth(a).score);
+      if (ex.has(t)) mem.forEach((n) => units.push({ key: "e:" + n, kind: "e", name: n, t, r: 8 }));
+      else units.push({ key: "t:" + t, kind: "t", t, mem, r: 30 + 11 * Math.sqrt(mem.length) });
+    });
+    names.filter((n) => S.ents[n].anchor).sort().forEach((n) => units.push({ key: "n:" + n, kind: "n", name: n, r: 10 }));
+    return { names, byTopic, units };
+  }
+  function netEdges(names, ex) {
+    const set = new Set(names), agg = new Map();
+    derive().edges.forEach((e) => {
+      if (!set.has(e.a) || !set.has(e.b)) return;
+      const ka = unitKeyOf(e.a, ex), kb = unitKeyOf(e.b, ex);
+      if (ka === kb) return;
+      const lo = ka < kb ? ka : kb, hi = ka < kb ? kb : ka, key = lo + "||" + hi;
+      if (!agg.has(key)) agg.set(key, { ka: lo, kb: hi, w: 0, links: [], first: Infinity });
+      const g = agg.get(key); g.w += e.n; g.links.push(e); g.first = Math.min(g.first, e.first);
+    });
+    return [...agg.values()];
+  }
+  // Force layout for one connected group of units. Deterministic: the same data gives the same picture.
+  function forceUnits(us, es, w, h, key, groups) {
+    const n = us.length, r = seeded(key), pos = {}, k = Math.sqrt((w * h) / n) * 0.62;
+    us.slice().sort((a, b) => (a.t || "").localeCompare(b.t || "") || a.key.localeCompare(b.key)).forEach((u, i) => { const a = (2 * Math.PI * i) / n; pos[u.key] = { x: w / 2 + Math.cos(a) * w * 0.28 + (r() - 0.5) * 14, y: h / 2 + Math.sin(a) * h * 0.28 + (r() - 0.5) * 14, dx: 0, dy: 0 }; });
+    for (let it = 0; it < 360; it++) {
+      const t = (1 - it / 360) * w * 0.05 + 0.5;
+      us.forEach((u) => { pos[u.key].dx = 0; pos[u.key].dy = 0; });
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+        const a = pos[us[i].key], b = pos[us[j].key]; let dx = a.x - b.x, dy = a.y - b.y; const d = Math.max(0.01, Math.hypot(dx, dy)), f = (k * k) / d;
+        dx /= d; dy /= d; a.dx += dx * f; a.dy += dy * f; b.dx -= dx * f; b.dy -= dy * f;
+      }
+      es.forEach((e) => {
+        const a = pos[e.ka], b = pos[e.kb]; if (!a || !b) return;
+        let dx = a.x - b.x, dy = a.y - b.y; const d = Math.max(0.01, Math.hypot(dx, dy)), f = ((1 + Math.min(e.w, 4) * 0.35) * d * d) / k;
+        dx /= d; dy /= d; a.dx -= dx * f; a.dy -= dy * f; b.dx += dx * f; b.dy += dy * f;
+      });
+      groups.forEach((g) => {
+        let cx = 0, cy = 0; g.forEach((id) => { cx += pos[id].x; cy += pos[id].y; }); cx /= g.length; cy /= g.length;
+        g.forEach((id) => { pos[id].dx += (cx - pos[id].x) * 0.04; pos[id].dy += (cy - pos[id].y) * 0.04; });
+      });
+      us.forEach((u) => {
+        const p = pos[u.key]; p.dx += (w / 2 - p.x) * 0.08; p.dy += (h / 2 - p.y) * 0.08;
+        const d = Math.max(0.01, Math.hypot(p.dx, p.dy)), m = Math.min(d, t); p.x += (p.dx / d) * m; p.y += (p.dy / d) * m;
+      });
+    }
+    const clamp = () => us.forEach((u) => { const p = pos[u.key], room = u.kind === "t" ? 0 : 110; p.x = Math.max(u.r + 14, Math.min(w - u.r - 14 - room, p.x)); p.y = Math.max(u.r + 22, Math.min(h - u.r - 22, p.y)); });
+    for (let pass = 0; pass < 80; pass++) {
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+        const a = pos[us[i].key], b = pos[us[j].key], min = us[i].r + us[j].r + (us[i].kind === "t" || us[j].kind === "t" ? 50 : us[i].t && us[i].t === us[j].t ? 28 : 48);
+        let dx = a.x - b.x, dy = a.y - b.y; const d = Math.max(0.01, Math.hypot(dx, dy));
+        if (d < min) { const push = (min - d) / 2; dx /= d; dy /= d; a.x += dx * push; a.y += dy * push; b.x -= dx * push; b.y -= dy * push; }
+      }
+      clamp();
+    }
+    return pos;
+  }
+  function netLayout(M, ex) {
+    const key = JSON.stringify([M.anchors, [...ex].sort(), S.ver]);
+    if (netCacheBox.key === key) return netCacheBox.val;
+    const { names, byTopic, units } = netUnits(M, ex), edges = netEdges(names, ex), W = 1000, gap = 30, byKey = {};
+    units.forEach((u) => { byKey[u.key] = u; });
+    const adj = {};
+    units.forEach((u) => { adj[u.key] = []; });
+    edges.forEach((e) => { adj[e.ka].push(e.kb); adj[e.kb].push(e.ka); });
+    const seen = new Set(), comps = [];
+    units.forEach((u) => {
+      if (seen.has(u.key)) return;
+      const c = [], q = [u.key]; seen.add(u.key);
+      while (q.length) { const x = q.shift(); c.push(x); adj[x].forEach((y) => { if (!seen.has(y)) { seen.add(y); q.push(y); } }); }
+      comps.push(c);
+    });
+    comps.sort((a, b) => b.length - a.length);
+    const area = (u) => (u.kind === "t" ? Math.pow(2 * u.r + 80, 2) : 16000);
+    const boxes = comps.filter((c) => c.length > 1).map((c) => { const a = c.reduce((sum, k) => sum + area(byKey[k]), 0), w = Math.min(W - 40, Math.max(340, Math.sqrt(a) * 1.9)); return { c, w, h: Math.max(300, Math.round((a * 1.25) / w)) }; });
+    const singles = comps.filter((c) => c.length === 1).map((c) => byKey[c[0]]);
+    const rows = []; let row = [], wsum = 0, y = 12;
+    boxes.forEach((b) => { if (row.length && wsum + b.w + gap > W - 20) { rows.push(row); row = []; wsum = 0; } row.push(b); wsum += b.w + gap; });
+    if (row.length) rows.push(row);
+    rows.forEach((rw) => { const h = Math.max.apply(null, rw.map((b) => b.h)), tw = rw.reduce((sum, b) => sum + b.w + gap, 0) - gap; let x = (W - tw) / 2; rw.forEach((b) => { b.x = x; b.y = y; x += b.w + gap; }); y += h + gap; });
+    const pos = {};
+    boxes.forEach((b) => {
+      const us = b.c.map((k) => byKey[k]), es = edges.filter((e) => b.c.indexOf(e.ka) > -1);
+      const groups = Object.keys(byTopic).map((t) => us.filter((u) => u.kind === "e" && u.t === t).map((u) => u.key)).filter((g) => g.length > 1);
+      const lp = forceUnits(us, es, b.w, b.h, b.c.slice().sort()[0], groups);
+      b.c.forEach((k) => { pos[k] = { x: b.x + lp[k].x, y: b.y + lp[k].y }; });
+    });
+    const singleY = y;
+    let sx = 30, sy = y + 34, rowH = 0;
+    singles.forEach((u) => {
+      const wu = u.kind === "t" ? 2 * u.r + 50 : 190;
+      if (sx + wu > W - 20) { sx = 30; sy += rowH + 36; rowH = 0; }
+      pos[u.key] = { x: sx + (u.kind === "t" ? u.r : 10), y: sy + (u.kind === "t" ? u.r : 10) };
+      sx += wu; rowH = Math.max(rowH, u.kind === "t" ? 2 * u.r + 14 : 24);
+    });
+    const H = singles.length ? sy + rowH + 40 : y;
+    netCacheBox.key = key;
+    netCacheBox.val = { names, units, byKey, byTopic, edges, pos, boxes, singles, singleY, H, groupsCount: boxes.length + singles.length };
+    return netCacheBox.val;
+  }
+  function finalPos(M, lay) {
+    const p = {};
+    lay.units.forEach((u) => {
+      const o = M.off[u.key] || { dx: 0, dy: 0 }, h = u.kind === "e" ? (M.off["h:" + u.t] || { dx: 0, dy: 0 }) : { dx: 0, dy: 0 };
+      p[u.key] = { x: lay.pos[u.key].x + o.dx + h.dx, y: lay.pos[u.key].y + o.dy + h.dy };
+    });
+    return p;
+  }
+  // Try right, left, above, below for each label. Keep the position that overlaps the least. Busy nodes choose first.
+  function placeLabels(items, extra) {
+    const ov = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+    const obstacles = items.map((it) => ({ x: it.x - 9, y: it.y - 9, w: 18, h: 18 })).concat(extra), rects = [], place = {};
+    items.slice().sort((a, b) => nbrsOf(b.name).length - nbrsOf(a.name).length).forEach((it) => {
+      const r = it.r, w = labelText(it.name, 20).length * 6.4 + 4, h = 13;
+      const cands = [
+        { dx: r + 5, dy: 4, a: "start", x: it.x + r + 5, y: it.y - 9 }, { dx: -(r + 5), dy: 4, a: "end", x: it.x - r - 5 - w, y: it.y - 9 },
+        { dx: 0, dy: -(r + 6), a: "middle", x: it.x - w / 2, y: it.y - r - 16 }, { dx: 0, dy: r + 15, a: "middle", x: it.x - w / 2, y: it.y + r + 3 }
+      ];
+      let best = null, score = Infinity;
+      cands.forEach((c) => {
+        const rect = { x: c.x, y: c.y, w, h };
+        let sc = 0;
+        rects.forEach((q) => { sc += ov(rect, q); });
+        obstacles.forEach((q) => { sc += ov(rect, q) * 2; });
+        if (rect.x < 4 || rect.x + w > 996) sc += 400;
+        if (sc < score) { score = sc; best = { c, rect }; }
+      });
+      rects.push(best.rect); place[it.name] = { dx: best.c.dx, dy: best.c.dy, a: best.c.a };
+    });
+    return place;
+  }
+  const unitLabel = (k) => (k.slice(0, 2) === "t:" ? k.slice(2) + " (topic)" : k.slice(2));
+
+  function netInner() {
+    const M = UI.emap, ex = effExpanded(M), lay = netLayout(M, ex), p = finalPos(M, lay);
+    const path = shortestPath(M.from, M.to, M.anchors) || [], pathSet = new Set(path.map((n) => unitKeyOf(n, ex)));
+    const pathPairs = new Set(path.slice(1).map((n, i) => [unitKeyOf(path[i], ex), unitKeyOf(n, ex)].sort().join("||")));
+    const sel = M.sel;
+    let fk = null;
+    if (sel && sel.type === "n") fk = new Set([unitKeyOf(sel.n, ex)]);
+    else if (sel && sel.type === "t") fk = new Set(ex.has(sel.t) ? (lay.byTopic[sel.t] || []).map((n) => "e:" + n) : ["t:" + sel.t]);
+    else if (sel && sel.type === "e") fk = new Set([sel.ka, sel.kb]);
+    const edgeOn = (e) => !fk || (sel.type === "e" ? e.ka === sel.ka && e.kb === sel.kb : fk.has(e.ka) || fk.has(e.kb));
+    const near = new Set(fk || []);
+    if (fk && sel.type !== "e") lay.edges.forEach((e) => { if (edgeOn(e)) { near.add(e.ka); near.add(e.kb); } });
+    const dimUnit = (k) => (fk && !near.has(k)) || (path.length && !pathSet.has(k));
+    let out = "";
+    if (lay.groupsCount > 1) lay.boxes.forEach((b) => { out += '<rect x="' + b.x + '" y="' + b.y + '" width="' + b.w + '" height="' + b.h + '" rx="18" style="fill:none;stroke:var(--line);stroke-dasharray:5 5"/><text x="' + (b.x + 14) + '" y="' + (b.y + 20) + '" class="band">ISLAND · ' + b.c.length + (b.c.length === 1 ? " ITEM" : " ITEMS") + "</text>"; });
+    if (lay.singles.length) out += '<text x="20" y="' + (lay.singleY + 18) + '" class="band">NOT CONNECTED TO ANYTHING · ' + lay.singles.length + "</text>";
+    // Opened topics: a soft blob around their own entities. Drag the blob to move the whole group.
+    const hulls = [];
+    Object.keys(lay.byTopic).forEach((t) => {
+      if (!ex.has(t)) return;
+      const pts = lay.byTopic[t].map((n) => p["e:" + n]).filter(Boolean);
+      if (!pts.length) return;
+      const cx = pts.reduce((sum, q) => sum + q.x, 0) / pts.length, top = Math.min.apply(null, pts.map((q) => q.y)), ly = top - 46;
+      const rising = lay.byTopic[t].filter((n) => growth(n).state === "Rising").length, col = topicColor(t), on = sel && sel.type === "t" && sel.t === t;
+      hulls.push({ t, cx, ly });
+      out += '<g data-drag="h:' + esc(t) + '" style="cursor:grab">' + pts.map((q) => '<circle data-act="nettopic" data-t="' + esc(t) + '" cx="' + q.x + '" cy="' + q.y + '" r="40" style="fill:color-mix(in srgb,' + col + " " + (on ? 26 : 15) + '%,transparent);stroke:none"/>').join("") +
+        '<text data-act="netexp" data-t="' + esc(t) + '" x="' + cx + '" y="' + ly + '" text-anchor="middle" style="fill:var(--fg);font-weight:600;font-size:12px;cursor:pointer;paint-order:stroke;stroke:var(--surface);stroke-width:4px">− ' + esc(t) + " · " + lay.byTopic[t].length + (rising ? " ▲" + rising : "") + "</text></g>";
+    });
+    lay.edges.forEach((e) => {
+      const a = p[e.ka], b = p[e.kb], onPath = pathPairs.has(e.ka + "||" + e.kb), on = edgeOn(e), selE = sel && sel.type === "e" && sel.ka === e.ka && sel.kb === e.kb;
+      out += '<g data-act="netedge" data-ka="' + esc(e.ka) + '" data-kb="' + esc(e.kb) + '" style="cursor:pointer"><line class="gh" x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '"/><line class="ne' + (clock() - e.first < 48 * HR ? " new" : "") + (onPath || selE ? " hl" : "") + '" style="stroke-width:' + (1 + Math.min(e.w, 8) * 0.45) + ";opacity:" + ((path.length && !onPath) || !on ? 0.1 : 1) + '" x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '"/></g>';
+    });
+    const labelItems = [], extra = [];
+    lay.units.forEach((u) => {
+      const q = p[u.key];
+      if (u.kind === "t") extra.push({ x: q.x - u.r, y: q.y - u.r, w: 2 * u.r, h: 2 * u.r + 16 });
+      else labelItems.push({ name: u.name, x: q.x, y: q.y, r: u.r });
+    });
+    hulls.forEach((h) => extra.push({ x: h.cx - 70, y: h.ly - 12, w: 140, h: 14 }));
+    const place = placeLabels(labelItems, extra);
+    const drawn = lay.units.filter((u) => u.kind === "t").concat(lay.units.filter((u) => u.kind !== "t"));
+    drawn.forEach((u) => {
+      const q = p[u.key], dim = dimUnit(u.key);
+      if (u.kind === "t") {
+        const col = topicColor(u.t), rising = u.mem.filter((n) => growth(n).state === "Rising").length, isSel = sel && sel.type === "t" && sel.t === u.t;
+        out += '<g class="tb' + (dim ? " dim" : "") + '" data-act="netexp" data-t="' + esc(u.t) + '" data-drag="' + esc(u.key) + '" style="cursor:pointer"><title>' + esc(u.t) + " · select to open</title>" + (rising ? '<circle class="halo" cx="' + q.x + '" cy="' + q.y + '" r="' + (u.r + 5) + '"/>' : "") +
+          '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + u.r + '" style="fill:color-mix(in srgb,' + col + ' 18%,var(--surface));stroke:' + col + ";stroke-width:" + (isSel ? 3.5 : 2) + '"/><text x="' + q.x + '" y="' + (q.y + 5) + '" text-anchor="middle" style="fill:var(--fg);font-weight:700;font-size:15px">' + u.mem.length + "</text>" +
+          '<text x="' + q.x + '" y="' + (q.y + u.r + 15) + '" text-anchor="middle" style="fill:var(--fg);font-weight:600;font-size:12px">' + esc(u.t) + (rising ? " ▲" + rising : "") + "</text></g>";
+      } else {
+        const selN = sel && sel.type === "n" && sel.n === u.name;
+        out += nodeSvg(u.name, q.x, q.y, { act: "netsel", drag: u.key, r: u.r, max: 20, cls: (dim ? "dim " : "") + (selN || pathSet.has(u.key) ? "pick" : ""), stroke: S.ents[u.name].anchor ? null : topicColor(primaryTopic(u.name)), lab: place[u.name] });
+      }
+    });
+    return out;
+  }
+  function networkSvg() {
+    const M = UI.emap, lay = netLayout(M, effExpanded(M));
+    return '<svg id="netsvg" viewBox="0 0 1000 ' + lay.H + '" role="group" aria-label="Network of all entities, grouped by topic">' + netInner() + "</svg>";
+  }
+  function networkPanel() {
+    const M = UI.emap, ex = effExpanded(M), lay = netLayout(M, ex), nm = netModel(M.anchors), other = netModel(!M.anchors), sel = M.sel;
+    const opts = (cur) => '<option value="">Choose…</option>' + Object.keys(S.ents).filter(visible).sort().map((x) => '<option value="' + esc(x) + '"' + (x === cur ? " selected" : "") + ">" + esc(x) + "</option>").join("");
+    const li = (n) => '<div class="rel-row"><span><button type="button" class="ename' + (S.ents[n].status === "candidate" ? " cand" : "") + '" data-act="entmap" data-name="' + esc(n) + '">' + esc(n) + '</button></span><span class="chips">' + gChip(growth(n)) + spark(growth(n)) + statusCell(n) + "</span></div>";
+    let selHtml = "";
+    if (sel && sel.type === "t") {
+      const mem = lay.byTopic[sel.t] || [], open = ex.has(sel.t), arts = S.arts.filter((a) => a.topic === sel.t);
+      selHtml = '<p class="eyebrow" style="margin-top:14px">Cluster</p><h3 style="font-size:18px;margin:4px 0">' + esc(sel.t) + '</h3><p class="muted small">' + plural(mem.length, "entity", "entities") + " · " + plural(arts.length, "article", "articles") + " · " + mem.filter((n) => growth(n).state === "Rising").length + ' rising</p><div class="actions"><button type="button" class="btn sm" data-act="netexp" data-t="' + esc(sel.t) + '">' + (open ? "Collapse" : "Open in place") + '</button><button type="button" class="btn sm" data-act="cluster" data-t="' + esc(sel.t) + '">Open cluster page</button></div><div style="margin-top:8px">' + mem.map(li).join("") + "</div>";
+    } else if (sel && sel.type === "n" && visible(sel.n)) {
+      const n = sel.n;
+      selHtml = '<p class="eyebrow" style="margin-top:14px">Selected</p><div class="chips" style="margin-top:6px">' + stateChip(n) + gChip(growth(n)) + '</div><h3 style="font-size:18px;margin:6px 0">' + esc(n) + '</h3><p class="muted small">' + plural(nbrsOf(n).filter((x) => visible(x.n)).length, "link", "links") + " · " + plural(facts(n).count, "article", "articles") + '</p><div class="actions">' + actionBtns(n) + '<button type="button" class="btn sm" data-act="entmap" data-name="' + esc(n) + '">Open map</button><button type="button" class="btn sm" data-act="tracefrom" data-name="' + esc(n) + '">Trace from here</button><button type="button" class="btn sm" data-act="traceto" data-name="' + esc(n) + '">Trace to here</button></div>';
+    } else if (sel && sel.type === "e") {
+      const e = lay.edges.filter((x) => x.ka === sel.ka && x.kb === sel.kb)[0];
+      if (e) {
+        const arts = []; e.links.forEach((l) => l.arts.forEach((a) => { if (arts.indexOf(a) < 0) arts.push(a); }));
+        selHtml = '<p class="eyebrow" style="margin-top:14px">Selected link</p><h3 style="font-size:16px;margin:6px 0">' + esc(unitLabel(sel.ka)) + " ↔ " + esc(unitLabel(sel.kb)) + '</h3><p class="muted small">' + plural(e.links.length, "entity link", "entity links") + " · " + plural(arts.length, "article", "articles") + "</p>" +
+          e.links.slice().sort((x, y) => y.n - x.n).slice(0, 5).map((l) => '<div class="rel-row"><span>' + esc(l.a) + " ↔ " + esc(l.b) + '</span><span class="evmeta">' + plural(l.n, "article", "articles") + "</span></div>").join("") + '<ul class="evlist">' + arts.sort((x, y) => y.arr - x.arr).slice(0, 3).map(evHtml).join("") + "</ul>";
+      }
+    }
+    const fast = Object.keys(S.ents).filter(visible).map((n) => ({ n, g: growth(n) })).filter((r) => r.g.state === "Rising" || r.g.state === "New").sort((a, b) => b.g.score - a.g.score).slice(0, 5);
+    const growthHtml = selHtml ? "" : '<p class="eyebrow" style="margin-top:14px">Growing fastest</p>' + (fast.length ? fast.map((r) => li(r.n)).join("") : '<p class="muted small">Nothing is growing fast right now.</p>');
+    const path = shortestPath(M.from, M.to, M.anchors);
+    let trace = "";
+    if (M.from && M.to && M.from !== M.to) {
+      if (path) {
+        trace = '<div class="path">' + path.map((n, i) => (i ? '<span class="muted"> → </span>' : "") + '<button type="button" class="ename" data-act="entmap" data-name="' + esc(n) + '">' + esc(n) + "</button>").join("") + '</div><p class="muted small">' + plural(path.length - 1, "hop", "hops") + "</p>" +
+          path.slice(1).map((n, i) => { const e = derive().edges.get([path[i], n].sort().join("|")), a = e.arts.slice().sort((x, y) => y.arr - x.arr)[0]; return '<div style="margin-top:8px"><b>' + esc(path[i]) + " ↔ " + esc(n) + '</b> <span class="evmeta">' + plural(e.n, "article", "articles") + '</span><ul class="evlist" style="margin-top:4px">' + evHtml(a) + "</ul></div>"; }).join("");
+      } else {
+        const alt = shortestPath(M.from, M.to, true);
+        trace = '<p class="muted small" style="margin-top:6px">' + (!M.anchors && alt ? "Not connected without context entities. Through them: " + alt.map(esc).join(" → ") + "." : "These two never appear together, directly or through other entities.") + "</p>";
+      }
+    }
+    return '<div class="panel"><p class="eyebrow">Universe</p><p style="margin-top:6px"><b class="num">' + nm.names.length + "</b> entities · <b class=\"num\">" + nm.edges.length + "</b> links · <b class=\"num\">" + nm.islands + "</b> " + (nm.islands === 1 ? "island" : "islands") + ", <b class=\"num\">" + nm.isolated + "</b> not connected</p>" +
+      '<p class="muted small" style="margin-top:4px">' + (M.anchors ? "Without context entities: " : "With context entities: ") + other.islands + (other.islands === 1 ? " island, " : " islands, ") + other.isolated + " not connected.</p>" + selHtml + growthHtml +
+      '<p class="eyebrow" style="margin-top:14px">Trace a connection</p><div class="trace"><select id="tfrom" class="btn" aria-label="From">' + opts(M.from) + '</select><span class="muted">to</span><select id="tto" class="btn" aria-label="To">' + opts(M.to) + "</select></div>" + trace + "</div>";
+  }
+
+  /* ----- the map screen ----- */
+  function drawEmap(el) {
+    const M = UI.emap;
+    if (M.focus && !visible(M.focus)) M.focus = null;
+    const level = M.focus ? "entity" : M.topics.length ? "cluster" : "universe";
+    const crumbs = [];
+    crumbs.push(level === "universe" ? "<b>Universe</b>" : '<button type="button" class="linklike" data-act="uni">Universe</button>');
+    if (M.topics.length) crumbs.push(level === "cluster" ? "<b>" + esc(M.topics.join(" + ")) + "</b>" : '<button type="button" class="linklike" data-act="clusterback">' + esc(M.topics.join(" + ")) + "</button>");
+    if (M.focus) crumbs.push("<b>" + esc(M.focus) + "</b>");
+    const opts = '<option value="">Jump to an entity…</option>' + Object.keys(S.ents).filter(visible).sort().map((x) => '<option value="' + esc(x) + '">' + esc(x) + (S.ents[x].status === "candidate" ? " (not tracked)" : "") + "</option>").join("");
+    let body, hint;
+    if (level === "universe") { body = '<div class="mapbox">' + networkSvg() + "</div>" + networkPanel(); hint = "Start with the clusters. Select a cluster to open it. Drag anything to see around it. Select an entity or a link for details."; }
+    else if (level === "cluster") { const mem = clusterMembers(M.topics); body = '<div class="mapbox">' + clusterSvg(M.topics, mem) + "</div>" + clusterPanel(M.topics, mem); hint = "Entities that appear mostly in this topic, and how they link. Select an entity to explore it."; }
+    else { const model = mapModel(M.focus); body = '<div class="mapbox">' + (nbrsOf(M.focus).filter((x) => visible(x.n)).length ? entitySvg(M.focus, model) : '<p class="muted" style="padding:20px">No linked entities yet.</p>') + "</div>" + entityPanel(M.focus, model); hint = "One entity and the topics it appears in. Select a topic for its cluster. Select a linked entity to move to it."; }
+    const tools = level === "universe" ? '<div class="seg" role="group" aria-label="Context entities"><button type="button" data-act="netanch" data-v="1" aria-pressed="' + M.anchors + '">With context</button><button type="button" data-act="netanch" data-v="0" aria-pressed="' + !M.anchors + '">Without context</button></div>' +
+      '<button type="button" class="btn sm" data-act="expandall">Open all</button><button type="button" class="btn sm" data-act="collapseall">Close all</button><button type="button" class="btn sm" data-act="resetlayout">Reset layout</button>' : "";
+    el.innerHTML = '<div class="read"><h2>Entity map</h2><p>' + esc(hint) + '</p></div><div class="bar"><div class="crumbs">' + crumbs.join(" › ") + '</div><div class="chips">' + tools + '<select id="emapjump" class="btn" aria-label="Jump to an entity">' + opts + '</select><a href="#entities" class="linklike">Entities list</a></div></div>' +
+      '<div class="split map">' + body + '</div><div class="legend" style="margin-top:8px">' + (level === "universe" ? "<span>Numbered circle: a cluster. Select to open it</span>" : "") + '<span>Solid ring: tracked</span><span>Dashed: not tracked</span><span>Black: context (anchor)</span><span><b style="color:var(--accent)">Blue halo ▲ ×N</b>: growing at N times its usual rate</span><span>NEW: first seen in the last 3 days</span>' + (level === "universe" ? "<span>Line weight = articles together · <b style=\"color:var(--accent)\">blue line</b> = together in the last 2 days</span>" : "") + "</div>";
+  }
+
+  function setMap(patch) { UI.emap = Object.assign({}, UI.emap, patch, { sel: null }); }
+
+  /* ================= wiring ================= */
+  const DRAW = { newsfeed: drawNewsfeed, entities: drawEntities, emap: drawEmap, quick: drawQuick };
+  let view = "newsfeed";
+  function emit() {
+    DRAW[view](document.getElementById("v-" + view));
+    drawPop();
+    const arr = S.arts.reduce((m, a) => Math.max(m, a.arr), 0);
+    document.getElementById("fresh").innerHTML = "Data as of " + whenMs(arr) + ". Last article arrived <span data-since=\"" + arr + '">' + agoMs(clock() - arr) + "</span>. " + plural(S.arts.length, "article", "articles") + ", " + plural(Object.keys(S.ents).length, "entity", "entities") + ". Next scheduled ingest 06:13 UTC. <a href=\"#\" data-act=\"restart\" style=\"color:var(--accent)\">Restart demo</a>";
+  }
+  function refresh() {
+    const r = ranked();
+    const keep = deck.filter((n) => !answered.has(n));
+    deck = keep.concat(r.map((x) => x.name).filter((n) => keep.indexOf(n) < 0).slice(0, Math.max(0, 10 - keep.length)));
+    seenIds = new Set(r.map((x) => x.name));
+    emit();
+  }
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-mock]")) { showToast("Mock link. In the app this opens the source article.", false); return; }
+    const pop = document.getElementById("pop");
+    const b = e.target.closest("[data-act]");
+    if (!b && !e.target.closest("#pop") && !pop.hidden) { UI.pop = null; drawPop(); }
+    const f = e.target.closest("[data-f]"), st = e.target.closest("[data-st]"), so = e.target.closest("[data-sort]");
+    if (f) { UI.filter = f.dataset.f; emit(); return; }
+    if (st) { UI.status = st.dataset.st; UI.sel = null; emit(); return; }
+    if (so) { const key = so.dataset.sort; UI.sort = { key, dir: UI.sort.key === key ? -UI.sort.dir : 1 }; emit(); return; }
+    if (e.target.closest("[data-live]")) { UI.live = !UI.live; UI.freezeAt = UI.live ? null : clock(); emit(); return; }
+    if (e.target.closest("[data-show]")) { UI.freezeAt = UI.live ? null : clock(); emit(); return; }
+    if (!b) return;
+    const a = b.dataset.act, n = b.dataset.name;
+    if (a === "pop") { e.preventDefault(); openPop(b, !!b.dataset.inpop); }
+    else if (a === "popclose") { UI.pop = null; drawPop(); }
+    else if (a === "decide") decide(n, b.dataset.a);
+    else if (a === "undo") undo();
+    else if (a === "next") nextArticle();
+    else if (a === "sel") { UI.sel = n; if (view !== "entities") { location.hash = "entities"; } else emit(); }
+    else if (a === "openent") { UI.sel = n; UI.q = ""; UI.status = "all"; UI.pop = null; location.hash = "entities"; if (view === "entities") emit(); }
+    else if (a === "proofq") { UI.open[n] = !UI.open[n]; emit(); }
+    else if (a === "refresh") refresh();
+    else if (a === "uni") { setMap({ topics: [], focus: null }); emit(); }
+    else if (a === "cluster") { const t = b.dataset.t, cur = UI.emap.topics; setMap({ topics: b.dataset.add ? (cur.indexOf(t) < 0 ? cur.concat([t]) : cur) : [t], focus: null }); UI.pop = null; if (view !== "emap") location.hash = "emap"; else emit(); }
+    else if (a === "netanch") { UI.emap.anchors = b.dataset.v === "1"; UI.emap.sel = null; emit(); }
+    else if (a === "netexp") { const t = b.dataset.t, cur = UI.emap.expanded, open = cur.indexOf(t) > -1; UI.emap.expanded = open ? cur.filter((x) => x !== t) : cur.concat([t]); UI.emap.sel = open ? null : { type: "t", t }; emit(); }
+    else if (a === "nettopic") { UI.emap.sel = { type: "t", t: b.dataset.t }; emit(); }
+    else if (a === "netsel") { UI.emap.sel = { type: "n", n }; emit(); }
+    else if (a === "netedge") { UI.emap.sel = { type: "e", ka: b.dataset.ka, kb: b.dataset.kb }; emit(); }
+    else if (a === "expandall") { UI.emap.expanded = [...new Set(Object.keys(S.ents).filter((x) => visible(x) && !S.ents[x].anchor).map(primaryTopic))]; UI.emap.sel = null; emit(); }
+    else if (a === "collapseall") { UI.emap.expanded = []; UI.emap.sel = null; emit(); }
+    else if (a === "resetlayout") { UI.emap.off = {}; emit(); }
+    else if (a === "trace") { setMap({ topics: [], focus: null, from: n, to: b.dataset.to, anchors: true }); UI.pop = null; if (view !== "emap") location.hash = "emap"; else emit(); }
+    else if (a === "tracefrom") { UI.emap.from = n; emit(); }
+    else if (a === "traceto") { UI.emap.to = n; emit(); }
+    else if (a === "clusterrm") { UI.emap.topics = UI.emap.topics.filter((t) => t !== b.dataset.t); emit(); }
+    else if (a === "clusterback") { UI.emap.focus = null; emit(); }
+    else if (a === "entmap" || a === "openmap") { setMap({ topics: view === "emap" ? UI.emap.topics : [], focus: n }); UI.pop = null; if (view !== "emap") location.hash = "emap"; else emit(); }
+    else if (a === "restart") { e.preventDefault(); init(); emit(); }
+  });
+  document.addEventListener("change", (e) => {
+    if (e.target.id === "tfrom") { UI.emap.from = e.target.value; emit(); return; }
+    if (e.target.id === "tto") { UI.emap.to = e.target.value; emit(); return; }
+    if (e.target.id === "emapjump" && e.target.value) { setMap({ topics: [], focus: e.target.value }); emit(); }
+  });
+  document.addEventListener("input", (e) => { if (e.target.id === "q") { UI.q = e.target.value; emit(); } });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (UI.pop) { UI.pop = null; drawPop(); return; }
+      if (view === "emap") { if (UI.emap.focus) UI.emap.focus = null; else UI.emap.topics = []; emit(); }
+      return;
+    }
+    if (view !== "entities" || (e.target && e.target.id === "q") || e.metaKey || e.ctrlKey || e.altKey) return;
+    const names = [...document.querySelectorAll("#v-entities tbody tr[data-name]")].map((r) => r.dataset.name);
+    if (!names.length) return;
+    if (e.key === "Enter" && UI.sel) { setMap({ topics: [], focus: UI.sel }); location.hash = "emap"; return; }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    UI.sel = names[Math.max(0, Math.min(names.length - 1, names.indexOf(UI.sel) + (e.key === "ArrowDown" ? 1 : -1)))];
+    emit();
+    const row = document.querySelector('#v-entities tr[aria-selected="true"]');
+    if (row) row.scrollIntoView({ block: "nearest" });
+  });
+  window.addEventListener("scroll", () => { if (UI.pop && window.innerWidth > 640 && window.scrollY !== UI.pop.sy) { UI.pop = null; drawPop(); } }, { passive: true });
+  // Drag any node, topic bubble or opened-topic outline. The svg keeps the pointer, so redrawing its contents does not drop the drag.
+  let drag = null;
+  document.addEventListener("pointerdown", (e) => {
+    const g = view === "emap" ? e.target.closest("[data-drag]") : null;
+    if (!g || !g.ownerSVGElement || g.ownerSVGElement.id !== "netsvg") return;
+    const key = g.dataset.drag, o = UI.emap.off[key] || { dx: 0, dy: 0 };
+    drag = { key, svg: g.ownerSVGElement, id: e.pointerId, sx: e.clientX, sy: e.clientY, o0: { dx: o.dx, dy: o.dy }, moved: false };
+  });
+  document.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    if (!drag.moved) { drag.moved = true; try { drag.svg.setPointerCapture(drag.id); } catch (err) { /* capture is optional */ } }
+    const scale = drag.svg.getScreenCTM().a || 1;
+    UI.emap.off[drag.key] = { dx: drag.o0.dx + dx / scale, dy: drag.o0.dy + dy / scale };
+    const svg = document.getElementById("netsvg");
+    if (svg) svg.innerHTML = netInner();
+  });
+  const endDrag = () => { drag = null; };
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", endDrag);
+  function route() {
+    const id = location.hash.slice(1);
+    view = DRAW[id] ? id : "newsfeed";
+    Object.keys(DRAW).forEach((k) => { document.getElementById("v-" + k).hidden = k !== view; });
+    document.querySelectorAll("#nav a").forEach((a) => { if (a.getAttribute("href") === "#" + view) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); });
+    UI.pop = null; emit();
+  }
+  window.addEventListener("hashchange", route);
+  setInterval(() => {
+    document.querySelectorAll("[data-arr]").forEach((s) => { s.innerHTML = timeHtml(Number(s.dataset.arr), Number(s.dataset.pub)); });
+    document.querySelectorAll("[data-since]").forEach((s) => { s.textContent = agoMs(clock() - Number(s.dataset.since)); });
+  }, 10000);
+  init();
+  route();
+})();
+</script>
