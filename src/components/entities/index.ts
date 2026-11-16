@@ -13,3 +13,4 @@ export { formatActivity7d, formatActivity30d, formatLastSeen, formatSinceDate, i
 export { formatWikiEvidence } from "./fame-format";
 export * from "./types";
 export * from "./SegmentedControl";
+export { default as MergesView } from "./MergesView";

@@ -5,9 +5,10 @@ import type { MapFocus } from "@/hooks/useDashboardTable";
 import { ThemeClasses, getThemeClasses } from "@/lib/theme";
 import { useEntitiesTab } from "@/hooks/useEntitiesTab";
 import { useCandidateQueue } from "@/hooks/useCandidateQueue";
+import { useMergeSuggestions } from "@/hooks/useMergeSuggestions";
 import {
   StatsStrip, ControlsRow, EntitiesTable, SegmentedControl, CandidateTable,
-  BulkActionsBar, ErrorToast, SuccessToast, EntitiesView,
+  BulkActionsBar, ErrorToast, SuccessToast, MergesView, EntitiesView,
 } from "./entities";
 
 interface EntitiesTabProps {
@@ -21,7 +22,7 @@ function EmptyState({ dark, message }: { dark: boolean; message: string }) {
   return <p className={`text-sm ${dark ? "text-slate-400" : "text-gray-500"}`}>{message}</p>;
 }
 
-function TrackedView({ dark, t, tab, onEntitySelect }: { dark: boolean; t: ThemeClasses; tab: ReturnType<typeof useEntitiesTab>; onEntitySelect: (id: number) => void }) {
+function TrackedView({ dark, t, tab, onEntitySelect, onOpenMap }: { dark: boolean; t: ThemeClasses; tab: ReturnType<typeof useEntitiesTab>; onEntitySelect: (id: number) => void; onOpenMap: (focus: MapFocus) => void }) {
   const {
     q, setQ, status, setStatus, fame, setFame, fameChecked, setFameChecked, fameLocked, setFameLocked,
     sort, setSort, stats, entities, total, loading, busyIds, updateEntity,
@@ -47,6 +48,7 @@ function TrackedView({ dark, t, tab, onEntitySelect }: { dark: boolean; t: Theme
       ) : (
         <EntitiesTable
           entities={entities} dark={dark} t={t} busyIds={busyIds} onPatch={updateEntity} onEntitySelect={onEntitySelect}
+          onOpenMap={(id) => onOpenMap({ kind: "entity", id: String(id) })}
           offset={offset} total={total} hasPrev={hasPrev} hasNext={hasNext} goPrev={goPrev} goNext={goNext}
           pageSize={pageSize} onPageSizeChange={setPageSize} sort={sort} onSortChange={setSort}
         />
@@ -79,13 +81,14 @@ function QueueView({ dark, t, queue }: { dark: boolean; t: ThemeClasses; queue: 
   );
 }
 
-export default function EntitiesTab({ dark, onEntitySelect, onCandidatesChanged }: EntitiesTabProps) {
+export default function EntitiesTab({ dark, onEntitySelect, onCandidatesChanged, onOpenMap }: EntitiesTabProps) {
   const [view, setView] = useState<EntitiesView>("tracked");
   const tab = useEntitiesTab();
   const queue = useCandidateQueue(onCandidatesChanged);
+  const merges = useMergeSuggestions(view === "merges");
   const t = getThemeClasses(dark);
 
-  const dbUnconfigured = tab.dbUnconfigured || queue.dbUnconfigured;
+  const dbUnconfigured = tab.dbUnconfigured || queue.dbUnconfigured || merges.dbUnconfigured;
   const errorMessages = view === "tracked"
     ? [tab.error, tab.actionError].filter((m): m is string => !!m)
     : [queue.error, queue.actionError, ...queue.bulkErrors.map((f) => `${f.nameNorm}: ${f.error ?? "failed"}`)].filter((m): m is string => !!m);
@@ -103,9 +106,9 @@ export default function EntitiesTab({ dark, onEntitySelect, onCandidatesChanged 
       {!dbUnconfigured && (
         <>
           <SegmentedControl view={view} onChange={setView} queueCount={queue.total} dark={dark} />
-          {view === "tracked"
-            ? <TrackedView dark={dark} t={t} tab={tab} onEntitySelect={onEntitySelect} />
-            : <QueueView dark={dark} t={t} queue={queue} />}
+          {view === "tracked" && <TrackedView dark={dark} t={t} tab={tab} onEntitySelect={onEntitySelect} onOpenMap={onOpenMap} />}
+          {view === "queue" && <QueueView dark={dark} t={t} queue={queue} />}
+          {view === "merges" && <MergesView state={merges} dark={dark} />}
         </>
       )}
     </div>

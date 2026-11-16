@@ -1,6 +1,6 @@
 "use client";
 
-export type EntitiesView = "tracked" | "queue";
+export type EntitiesView = "tracked" | "queue" | "merges";
 
 interface SegmentedControlProps {
   view: EntitiesView;
@@ -20,6 +20,9 @@ export default function SegmentedControl({ view, onChange, queueCount, dark }: S
       </button>
       <button onClick={() => onChange("queue")} className={`${base} ${view === "queue" ? active : inactive}`}>
         {queueCount > 0 ? `Review queue (${queueCount})` : "Review queue"}
+      </button>
+      <button onClick={() => onChange("merges")} className={`${base} ${view === "merges" ? active : inactive}`}>
+        Suggested merges
       </button>
     </div>
   );
