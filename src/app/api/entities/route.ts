@@ -13,9 +13,12 @@ export const dynamic = "force-dynamic";
 // {id, canonicalName, type, status}, unchanged since before this file
 // existed. Any OTHER request (name entirely absent from the query string)
 // is list/search mode, backed by entity-admin.ts's searchEntities:
-// ?q=&status=&fame=&limit=&offset= -> {entities: [...], total}. The three
-// modes never overlap: ?view=stats always wins, and among the rest a
-// request with ?name= (even blank) always takes the single-lookup path.
+// ?q=&status=&fame=&fameChecked=&fameLocked=&sort=&limit=&offset= ->
+// {entities: [...], total}. Each entity row carries lastSeenAt/mentions7d/
+// sources7d; sort (name|first_seen|last_seen|activity) defaults to
+// last_seen desc. The three modes never overlap: ?view=stats always wins,
+// and among the rest a request with ?name= (even blank) always takes the
+// single-lookup path.
 
 const MAX_NAME_LEN = 200;
 
@@ -60,6 +63,9 @@ async function listEntities(params: URLSearchParams): Promise<NextResponse> {
       q: params.get("q") ?? undefined,
       status: params.get("status") ?? undefined,
       fame: params.get("fame") ?? undefined,
+      fameChecked: params.get("fameChecked") ?? undefined,
+      fameLocked: params.get("fameLocked") ?? undefined,
+      sort: params.get("sort") ?? undefined,
       limit: parseNumberParam(params.get("limit")),
       offset: parseNumberParam(params.get("offset")),
     });

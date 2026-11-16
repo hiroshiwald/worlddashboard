@@ -3,8 +3,12 @@ import {
   searchEntities,
   loadEntityStats,
   findSimilarNames,
+  loadMentionsInWindow,
+  loadSourcesInWindow,
+  classifyEntityRole,
   ValidationError,
   type SimilarNameEntity,
+  type ClassifyEntityRoleInput,
 } from "../entity-admin";
 import type { Sql, SqlRow } from "../db";
 
@@ -13,6 +17,19 @@ function makeMockSql(rows: SqlRow[]) {
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     calls.push({ query: strings.join(" ? "), values });
     return rows;
+  }) as Sql;
+  return { sql, calls };
+}
+
+/** Unlike makeMockSql (same rows for every call), branches on query text —
+ * needed once a test cares about the mentions7d/sources7d aggregate queries
+ * returning a different row shape than the main entities query. */
+function makeHandlerMockSql(handler: (query: string) => SqlRow[]) {
+  const calls: { query: string; values: unknown[] }[] = [];
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const query = strings.join(" ? ");
+    calls.push({ query, values });
+    return handler(query);
   }) as Sql;
   return { sql, calls };
 }
@@ -29,6 +46,7 @@ function entityRow(overrides: Partial<SqlRow> & { id: number; canonical_name: st
     wiki_pageviews_monthly: null,
     fame_checked_at: null,
     first_seen_at: "2026-07-01T00:00:00Z",
+    last_seen_at: null,
     ...overrides,
   };
 }
@@ -81,6 +99,102 @@ describe("findSimilarNames", () => {
     const groups = findSimilarNames([named(1, "Modi"), named(2, "Narendra Modi"), named(3, "narendra modi")]);
     expect(groups).toHaveLength(1);
     expect(groups[0].entities.map((e) => e.id).sort()).toEqual([1, 2, 3]);
+  });
+});
+
+describe("classifyEntityRole", () => {
+  function input(overrides: Partial<ClassifyEntityRoleInput> = {}): ClassifyEntityRoleInput {
+    return {
+      type: "company",
+      anchorThreshold: 10,
+      fameVolumeThreshold: 10,
+      fame: { names: ["Acme"], baselineDaily: 0, sourceBreadth: 0, storedFame: "unknown" },
+      ...overrides,
+    };
+  }
+
+  it("country type -> anchor/country_or_region_type", () => {
+    const result = classifyEntityRole(input({ type: "country" }));
+    expect(result).toEqual({ role: "anchor", roleReasons: ["country_or_region_type"] });
+  });
+
+  it("region type -> anchor/country_or_region_type", () => {
+    const result = classifyEntityRole(input({ type: "region" }));
+    expect(result).toEqual({ role: "anchor", roleReasons: ["country_or_region_type"] });
+  });
+
+  it("high-baseline company -> anchor/high_baseline", () => {
+    const result = classifyEntityRole(
+      input({ fame: { names: ["Acme"], baselineDaily: 15, sourceBreadth: 0, storedFame: "unknown" } }),
+    );
+    expect(result).toEqual({ role: "anchor", roleReasons: ["high_baseline"] });
+  });
+
+  it("both anchor reasons fire together (country type AND a baseline clearing the threshold)", () => {
+    const result = classifyEntityRole(
+      input({ type: "country", fame: { names: ["Russia"], baselineDaily: 15, sourceBreadth: 0, storedFame: "unknown" } }),
+    );
+    expect(result.role).toBe("anchor");
+    expect(result.roleReasons.sort()).toEqual(["country_or_region_type", "high_baseline"]);
+  });
+
+  it("dictionary-famous, low volume -> famous/famous_dictionary", () => {
+    const result = classifyEntityRole(
+      input({ type: "organization", fame: { names: ["Kremlin"], baselineDaily: 0, sourceBreadth: 0, storedFame: "unknown" } }),
+    );
+    expect(result).toEqual({ role: "famous", roleReasons: ["famous_dictionary"] });
+  });
+
+  it("stored-famous -> famous/famous_stored", () => {
+    const result = classifyEntityRole(
+      input({ type: "person", fame: { names: ["Some New Person"], baselineDaily: 0, sourceBreadth: 0, storedFame: "famous" } }),
+    );
+    expect(result).toEqual({ role: "famous", roleReasons: ["famous_stored"] });
+  });
+
+  it("breadth >= threshold -> famous/famous_breadth", () => {
+    const result = classifyEntityRole(
+      input({ type: "person", fame: { names: ["Some New Person"], baselineDaily: 0, sourceBreadth: 12, storedFame: "unknown" } }),
+    );
+    expect(result).toEqual({ role: "famous", roleReasons: ["famous_breadth"] });
+  });
+
+  it("volume prong -> famous/famous_volume", () => {
+    const result = classifyEntityRole(
+      input({
+        type: "person",
+        anchorThreshold: 100,
+        fameVolumeThreshold: 5,
+        fame: { names: ["Some New Person"], baselineDaily: 6, sourceBreadth: 0, storedFame: "unknown" },
+      }),
+    );
+    expect(result).toEqual({ role: "famous", roleReasons: ["famous_volume"] });
+  });
+
+  it("multiple famous prongs firing together yields multiple reasons", () => {
+    const result = classifyEntityRole(
+      input({
+        type: "organization",
+        anchorThreshold: 100,
+        fameVolumeThreshold: 5,
+        fame: { names: ["Kremlin"], baselineDaily: 6, sourceBreadth: 12, storedFame: "famous" },
+      }),
+    );
+    expect(result.role).toBe("famous");
+    expect(result.roleReasons.sort()).toEqual(
+      ["famous_breadth", "famous_dictionary", "famous_stored", "famous_volume"].sort(),
+    );
+  });
+
+  it("plain entity -> satellite/[]", () => {
+    expect(classifyEntityRole(input())).toEqual({ role: "satellite", roleReasons: [] });
+  });
+
+  it("anchor takes precedence over famous when both would fire", () => {
+    const result = classifyEntityRole(
+      input({ type: "country", fame: { names: ["Kremlin"], baselineDaily: 0, sourceBreadth: 0, storedFame: "famous" } }),
+    );
+    expect(result.role).toBe("anchor");
   });
 });
 
@@ -191,6 +305,191 @@ describe("searchEntities", () => {
       expect(row).toHaveProperty("wikiPageviewsMonthly");
       expect(row).toHaveProperty("fameCheckedAt");
     }
+  });
+});
+
+describe("searchEntities — sort", () => {
+  it("defaults to last_seen desc when sort is omitted", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Bravo", last_seen_at: "2026-07-01T00:00:00Z" }),
+      entityRow({ id: 2, canonical_name: "Alpha", last_seen_at: "2026-08-01T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, {});
+    expect(result.entities.map((e) => e.id)).toEqual([2, 1]);
+  });
+
+  it("sort=name orders ascending by canonical name", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Bravo" }),
+      entityRow({ id: 2, canonical_name: "Alpha" }),
+    ]);
+    const result = await searchEntities(sql, { sort: "name" });
+    expect(result.entities.map((e) => e.canonicalName)).toEqual(["Alpha", "Bravo"]);
+  });
+
+  it("sort=first_seen orders descending", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Bravo", first_seen_at: "2026-06-01T00:00:00Z" }),
+      entityRow({ id: 2, canonical_name: "Alpha", first_seen_at: "2026-07-01T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, { sort: "first_seen" });
+    expect(result.entities.map((e) => e.id)).toEqual([2, 1]);
+  });
+
+  it("sort=last_seen orders descending, nulls sorted least-recent", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "NoLastSeen", last_seen_at: null }),
+      entityRow({ id: 2, canonical_name: "HasLastSeen", last_seen_at: "2026-08-01T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, { sort: "last_seen" });
+    expect(result.entities.map((e) => e.id)).toEqual([2, 1]);
+  });
+
+  it("rejects an invalid sort value", async () => {
+    const { sql } = makeMockSql([]);
+    await expect(searchEntities(sql, { sort: "bogus" })).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("searchEntities — activity aggregates", () => {
+  it("sort=activity orders by mentions7d descending", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      if (query.includes("FROM entities")) {
+        return [
+          entityRow({ id: 1, canonical_name: "Low" }),
+          entityRow({ id: 2, canonical_name: "High" }),
+        ];
+      }
+      if (query.includes("FROM entity_mentions_hourly")) {
+        return [
+          { entity_id: "1", mentions_in_window: "2" },
+          { entity_id: "2", mentions_in_window: "40" },
+        ];
+      }
+      return [];
+    });
+    const result = await searchEntities(sql, { sort: "activity" });
+    expect(result.entities.map((e) => e.id)).toEqual([2, 1]);
+    expect(result.entities[0].mentions7d).toBe(40);
+  });
+
+  it("zero-fills mentions7d/sources7d when no aggregate row matches", async () => {
+    const { sql } = makeHandlerMockSql((query) =>
+      query.includes("FROM entities") ? [entityRow({ id: 1, canonical_name: "Solo" })] : [],
+    );
+    const result = await searchEntities(sql, {});
+    expect(result.entities[0].mentions7d).toBe(0);
+    expect(result.entities[0].sources7d).toBe(0);
+  });
+
+  it("counts distinct sources via article_entities/articles, not summed source_count", async () => {
+    const { sql } = makeHandlerMockSql((query) => {
+      if (query.includes("FROM entities")) return [entityRow({ id: 1, canonical_name: "Solo" })];
+      if (query.includes("FROM article_entities")) return [{ entity_id: "1", sources_in_window: "3" }];
+      return [];
+    });
+    const result = await searchEntities(sql, {});
+    expect(result.entities[0].sources7d).toBe(3);
+  });
+});
+
+describe("searchEntities — stat-tile filters", () => {
+  it("fameChecked=never keeps only fame_checked_at IS NULL", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Never", fame_checked_at: null }),
+      entityRow({ id: 2, canonical_name: "Checked", fame_checked_at: "2026-07-20T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, { fameChecked: "never" });
+    expect(result.entities.map((e) => e.id)).toEqual([1]);
+  });
+
+  it("fameChecked=checked keeps only fame_checked_at IS NOT NULL", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Never", fame_checked_at: null }),
+      entityRow({ id: 2, canonical_name: "Checked", fame_checked_at: "2026-07-20T00:00:00Z" }),
+    ]);
+    const result = await searchEntities(sql, { fameChecked: "checked" });
+    expect(result.entities.map((e) => e.id)).toEqual([2]);
+  });
+
+  it("rejects an invalid fameChecked value", async () => {
+    const { sql } = makeMockSql([]);
+    await expect(searchEntities(sql, { fameChecked: "bogus" })).rejects.toThrow(ValidationError);
+  });
+
+  it("fameLocked=true keeps only locked entities", async () => {
+    const { sql } = makeMockSql([
+      entityRow({ id: 1, canonical_name: "Locked", fame_locked: true }),
+      entityRow({ id: 2, canonical_name: "Unlocked", fame_locked: false }),
+    ]);
+    const result = await searchEntities(sql, { fameLocked: "true" });
+    expect(result.entities.map((e) => e.id)).toEqual([1]);
+  });
+
+  it("rejects a fameLocked value other than 'true'", async () => {
+    const { sql } = makeMockSql([]);
+    await expect(searchEntities(sql, { fameLocked: "false" })).rejects.toThrow(ValidationError);
+  });
+});
+
+describe("searchEntities — role classification", () => {
+  it("attaches role/roleReasons to each row (anchor via country type)", async () => {
+    const { sql } = makeMockSql([entityRow({ id: 1, canonical_name: "Russia", type: "country" })]);
+    const result = await searchEntities(sql, {});
+    expect(result.entities[0].role).toBe("anchor");
+    expect(result.entities[0].roleReasons).toEqual(["country_or_region_type"]);
+  });
+
+  it("scopes the breadth query to the returned PAGE's ids only, not the whole matched set", async () => {
+    const rows = [
+      entityRow({ id: 1, canonical_name: "Alpha", type: "company" }),
+      entityRow({ id: 2, canonical_name: "Bravo", type: "company" }),
+      entityRow({ id: 3, canonical_name: "Charlie", type: "company" }),
+    ];
+    const { sql, calls } = makeMockSql(rows);
+    const result = await searchEntities(sql, { limit: 1, sort: "name" });
+    expect(result.total).toBe(3);
+    expect(result.entities.map((e) => e.id)).toEqual([1]);
+
+    const breadthCall = calls.find((c) => c.query.includes("source_breadth"));
+    expect(breadthCall).toBeDefined();
+    expect(breadthCall!.values[0]).toEqual([1]);
+  });
+
+  it("does not query breadth at all when the returned page is empty", async () => {
+    const { sql, calls } = makeMockSql([]);
+    await searchEntities(sql, { q: "nonexistent" });
+    expect(calls.some((c) => c.query.includes("source_breadth"))).toBe(false);
+  });
+});
+
+describe("loadMentionsInWindow", () => {
+  it("returns an empty map without querying when ids is empty", async () => {
+    const { sql, calls } = makeMockSql([]);
+    const result = await loadMentionsInWindow(sql, [], 7);
+    expect(result.size).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("parses SUM(mentions) rows keyed by entity id", async () => {
+    const { sql } = makeMockSql([{ entity_id: "3", mentions_in_window: "17" }]);
+    const result = await loadMentionsInWindow(sql, [3], 7);
+    expect(result.get(3)).toBe(17);
+  });
+});
+
+describe("loadSourcesInWindow", () => {
+  it("returns an empty map without querying when ids is empty", async () => {
+    const { sql, calls } = makeMockSql([]);
+    const result = await loadSourcesInWindow(sql, [], 7);
+    expect(result.size).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("parses COUNT(DISTINCT source_name) rows keyed by entity id", async () => {
+    const { sql } = makeMockSql([{ entity_id: "3", sources_in_window: "5" }]);
+    const result = await loadSourcesInWindow(sql, [3], 7);
+    expect(result.get(3)).toBe(5);
   });
 });
 

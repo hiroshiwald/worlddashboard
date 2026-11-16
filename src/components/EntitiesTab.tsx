@@ -21,19 +21,24 @@ function EmptyState({ dark, message }: { dark: boolean; message: string }) {
 
 function TrackedView({ dark, t, tab, onEntitySelect }: { dark: boolean; t: ThemeClasses; tab: ReturnType<typeof useEntitiesTab>; onEntitySelect: (id: number) => void }) {
   const {
-    q, setQ, status, setStatus, fame, setFame, stats, entities, total, loading, busyIds, updateEntity,
+    q, setQ, status, setStatus, fame, setFame, fameChecked, setFameChecked, fameLocked, setFameLocked,
+    sort, setSort, stats, entities, total, loading, busyIds, updateEntity,
     offset, pageSize, setPageSize, hasPrev, hasNext, goPrev, goNext,
   } = tab;
-  // The Tracked stat tile counts as the "status=tracked, fame=all" default,
-  // not as an active filter narrowing an otherwise-broader view.
-  const isFiltered = q.trim() !== "" || status !== "tracked" || fame !== "all";
+  // The Tracked stat tile counts as the "status=tracked, fame=all,
+  // fameChecked=all, !fameLocked" default, not as an active filter
+  // narrowing an otherwise-broader view.
+  const isFiltered = q.trim() !== "" || status !== "tracked" || fame !== "all" || fameChecked !== "all" || fameLocked;
 
   if (loading && !stats) return <EmptyState dark={dark} message="Loading entities..." />;
   if (!stats) return null;
 
   return (
     <>
-      <StatsStrip stats={stats} dark={dark} status={status} fame={fame} setStatus={setStatus} setFame={setFame} />
+      <StatsStrip
+        stats={stats} dark={dark} status={status} fame={fame} fameChecked={fameChecked} fameLocked={fameLocked}
+        setStatus={setStatus} setFame={setFame} setFameChecked={setFameChecked} setFameLocked={setFameLocked}
+      />
       <ControlsRow q={q} setQ={setQ} status={status} setStatus={setStatus} fame={fame} setFame={setFame} t={t} />
       {entities.length === 0 ? (
         <EmptyState dark={dark} message={isFiltered ? "No entities match" : "No entities tracked yet"} />
@@ -41,7 +46,7 @@ function TrackedView({ dark, t, tab, onEntitySelect }: { dark: boolean; t: Theme
         <EntitiesTable
           entities={entities} dark={dark} t={t} busyIds={busyIds} onPatch={updateEntity} onEntitySelect={onEntitySelect}
           offset={offset} total={total} hasPrev={hasPrev} hasNext={hasNext} goPrev={goPrev} goNext={goNext}
-          pageSize={pageSize} onPageSizeChange={setPageSize}
+          pageSize={pageSize} onPageSizeChange={setPageSize} sort={sort} onSortChange={setSort}
         />
       )}
     </>

@@ -28,7 +28,7 @@ interface FetchSignalsResult {
 
 class DatabaseNotConfiguredError extends Error {}
 
-function parseWarmup(raw: unknown): SignalsWarmup | null {
+export function parseWarmup(raw: unknown): SignalsWarmup | null {
   if (typeof raw !== "object" || raw === null) return null;
   const w = raw as Record<string, unknown>;
   if (typeof w.active !== "boolean" || typeof w.daysRemaining !== "number") return null;

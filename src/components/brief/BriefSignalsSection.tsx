@@ -19,6 +19,13 @@ interface BriefSignalsSectionProps {
   onEntityClick: (name: string) => void;
 }
 
+// Watched ("promoted") signals sort first within their severity group —
+// Array.prototype.sort is stable, so order is otherwise unchanged from
+// what the server sent (severity-first, most-recent-evidence-first).
+function watchedFirst(signals: BriefSignal[]): BriefSignal[] {
+  return [...signals].sort((a, b) => Number(b.state === "promoted") - Number(a.state === "promoted"));
+}
+
 export default function BriefSignalsSection({ signals, busyIds, dark, onAction, onEntityClick }: BriefSignalsSectionProps) {
   if (signals.length === 0) {
     return (
@@ -31,7 +38,7 @@ export default function BriefSignalsSection({ signals, busyIds, dark, onAction, 
   return (
     <div className="mb-6 space-y-4">
       {SEVERITY_GROUPS.map(({ key, label }) => {
-        const group = signals.filter((s) => s.severity === key);
+        const group = watchedFirst(signals.filter((s) => s.severity === key));
         if (group.length === 0) return null;
         return (
           <div key={key}>

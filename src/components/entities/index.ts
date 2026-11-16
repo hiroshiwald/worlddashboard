@@ -8,5 +8,8 @@ export { default as SegmentedControl } from "./SegmentedControl";
 export { default as CandidateTable } from "./CandidateTable";
 export { default as BulkActionsBar } from "./BulkActionsBar";
 export { default as SampleTitleLink } from "./SampleTitleLink";
+export { roleLabel, roleTooltip, roleDescription } from "./role-format";
+export { formatActivity7d, formatActivity30d, formatLastSeen, formatSinceDate, isNewEdge, formatReportedWindow } from "./activity-format";
+export { formatWikiEvidence } from "./fame-format";
 export * from "./types";
 export * from "./SegmentedControl";

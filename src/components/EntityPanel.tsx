@@ -1,14 +1,32 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { timeAgo } from "@/lib/date-utils";
+import {
+  EntityRole, FAME_VERDICT_LABELS, roleDescription, formatActivity30d, formatSinceDate, isNewEdge, formatWikiEvidence,
+} from "@/components/entities";
 
 interface EntityProfile {
   id: number;
   canonicalName: string;
   type: string;
   status: string;
+  aliases: string[];
+  fame: string;
+  fameLocked: boolean;
+  wikiTitle: string | null;
+  wikiSitelinks: number | null;
+  wikiPageviewsMonthly: number | null;
+  fameCheckedAt: string | null;
   firstSeenAt: string;
   lastSeenAt: string | null;
+  role: EntityRole;
+  roleReasons: string[];
+}
+
+interface ActivitySummary {
+  mentions30d: number;
+  sources30d: number;
 }
 
 interface SeriesPoint {
@@ -24,10 +42,19 @@ interface ArticleItem {
   published: string;
 }
 
+// The article behind a stated relation, when it still resolves to a
+// retained cluster head — spine #2 fix: relations previously dropped this
+// entirely (evidence_article_id was never joined or rendered).
+interface RelationEvidence {
+  title: string;
+  link: string;
+}
+
 interface RelatedEntity {
   id: number;
   name: string;
   articleCount: number;
+  firstSeenAt: string;
 }
 
 interface RelationEdge {
@@ -36,10 +63,12 @@ interface RelationEdge {
   name: string;
   articleCount: number;
   lastSeenAt: string;
+  evidence: RelationEvidence | null;
 }
 
 interface EntityDetail {
   entity: EntityProfile;
+  activity: ActivitySummary;
   series: SeriesPoint[];
   articles: ArticleItem[];
   edges: RelatedEntity[];
@@ -77,16 +106,50 @@ function Sparkline({ series, dark }: { series: SeriesPoint[]; dark: boolean }) {
 }
 
 function EntityHeader({ entity, dark }: { entity: EntityProfile; dark: boolean }) {
+  const muted = dark ? "text-slate-400" : "text-gray-500";
   return (
     <div className="mb-4">
       <h2 className={`text-lg font-bold ${dark ? "text-slate-100" : "text-gray-900"}`}>{entity.canonicalName}</h2>
       <p className={`text-xs uppercase tracking-wide mt-1 ${dark ? "text-slate-500" : "text-gray-400"}`}>
         {entity.type} &middot; {entity.status}
       </p>
-      <p className={`text-xs mt-1 ${dark ? "text-slate-400" : "text-gray-500"}`}>
-        First seen {new Date(entity.firstSeenAt).toLocaleDateString()}
-      </p>
+      {entity.aliases.length > 0 && <p className={`text-xs mt-1 ${muted}`}>{entity.aliases.join(", ")}</p>}
+      <p className={`text-xs mt-1 ${muted}`}>{roleDescription(entity.role, entity.roleReasons)}</p>
+      <p className={`text-xs mt-1 ${muted}`}>First seen {new Date(entity.firstSeenAt).toLocaleDateString()}</p>
     </div>
+  );
+}
+
+// The fame verdict, its lock state, and its Wikipedia evidence — the fame
+// block the tab already surfaced in the table now moves fully into the
+// panel (fameCheckedAt included), alongside the wiki fields the dossier
+// previously omitted entirely. Missing values render nothing (never "null").
+function FameBlock({ entity, dark }: { entity: EntityProfile; dark: boolean }) {
+  const muted = dark ? "text-slate-400" : "text-gray-500";
+  const verdict = FAME_VERDICT_LABELS[entity.fame as keyof typeof FAME_VERDICT_LABELS] ?? entity.fame;
+  const wikiEvidence = formatWikiEvidence(entity.wikiSitelinks, entity.wikiPageviewsMonthly);
+  const wikiUrl = entity.wikiTitle
+    ? `https://en.wikipedia.org/wiki/${encodeURIComponent(entity.wikiTitle.replace(/ /g, "_"))}`
+    : null;
+  return (
+    <section className="mt-5">
+      <h3 className={`text-sm font-semibold mb-2 ${dark ? "text-slate-200" : "text-gray-800"}`}>Fame</h3>
+      <p className={`text-sm ${dark ? "text-slate-100" : "text-gray-900"}`}>
+        {verdict}{entity.fameLocked ? " · locked" : ""}
+      </p>
+      {wikiUrl && (
+        <a
+          href={wikiUrl} target="_blank" rel="noopener noreferrer"
+          className={`text-xs hover:underline ${dark ? "text-blue-300" : "text-blue-600"}`}
+        >
+          {entity.wikiTitle} ↗
+        </a>
+      )}
+      {wikiEvidence && <p className={`text-xs mt-0.5 ${muted}`}>{wikiEvidence}</p>}
+      <p className={`text-xs mt-0.5 ${muted}`}>
+        {entity.fameCheckedAt ? `checked ${timeAgo(entity.fameCheckedAt)}` : "never checked"}
+      </p>
+    </section>
   );
 }
 
@@ -115,48 +178,78 @@ function ArticleList({ articles, dark }: { articles: ArticleItem[]; dark: boolea
   );
 }
 
-// Typed, directed relations (spine 2: evidence one click away) — distinct
+// One relation row: the stated claim plus (spine #2 fix) an evidence link
+// when the relation carries a still-resolvable article — a relation with
+// null evidence renders exactly as before, no link, no placeholder.
+function RelationRow({ r, label, dark, onSelect }: { r: RelationEdge; label: string; dark: boolean; onSelect: (id: number) => void }) {
+  const rowCls = `text-xs px-2.5 py-1.5 rounded-lg text-left flex-1 ${dark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-gray-100 hover:bg-gray-200 text-gray-600"}`;
+  const evidenceCls = dark ? "text-slate-500 hover:text-blue-300" : "text-gray-400 hover:text-blue-600";
+  return (
+    <li className="flex items-center gap-1.5">
+      <button onClick={() => onSelect(r.id)} className={rowCls}>{label}</button>
+      {r.evidence && (
+        <a href={r.evidence.link} target="_blank" rel="noopener noreferrer" title={r.evidence.title} aria-label={`Evidence: ${r.evidence.title}`} className={evidenceCls}>
+          ↗
+        </a>
+      )}
+    </li>
+  );
+}
+
+// Typed, directed relations (spine #2: evidence one click away) — distinct
 // from the plain co-occurrence chips below: each line states the specific
 // stated relation, not just "appears together".
 function RelationsList({
   relations, entityName, dark, onSelect,
 }: { relations: { incoming: RelationEdge[]; outgoing: RelationEdge[] }; entityName: string; dark: boolean; onSelect: (id: number) => void }) {
-  const rowCls = `text-xs px-2.5 py-1.5 rounded-lg text-left w-full ${dark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-gray-100 hover:bg-gray-200 text-gray-600"}`;
   if (relations.incoming.length === 0 && relations.outgoing.length === 0) {
     return <p className={`text-xs ${dark ? "text-slate-500" : "text-gray-400"}`}>No stated relations yet</p>;
   }
   return (
     <ul className="space-y-1.5">
       {relations.outgoing.map((r) => (
-        <li key={`out-${r.relation}-${r.id}`}>
-          <button onClick={() => onSelect(r.id)} className={rowCls}>{entityName} {r.relation.replace(/_/g, " ")} {r.name}</button>
-        </li>
+        <RelationRow key={`out-${r.relation}-${r.id}`} r={r} label={`${entityName} ${r.relation.replace(/_/g, " ")} ${r.name}`} dark={dark} onSelect={onSelect} />
       ))}
       {relations.incoming.map((r) => (
-        <li key={`in-${r.relation}-${r.id}`}>
-          <button onClick={() => onSelect(r.id)} className={rowCls}>{r.name} {r.relation.replace(/_/g, " ")} {entityName}</button>
-        </li>
+        <RelationRow key={`in-${r.relation}-${r.id}`} r={r} label={`${r.name} ${r.relation.replace(/_/g, " ")} ${entityName}`} dark={dark} onSelect={onSelect} />
       ))}
     </ul>
   );
 }
 
+// Each chip gains its connection recency ("since <date>") and a "new"
+// marker when the first co-occurrence is within the trailing 7 days.
 function RelatedEntities({ edges, dark, onSelect }: { edges: RelatedEntity[]; dark: boolean; onSelect: (id: number) => void }) {
   if (edges.length === 0) {
     return <p className={`text-xs ${dark ? "text-slate-500" : "text-gray-400"}`}>No related entities yet</p>;
   }
+  const chipCls = dark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-gray-100 hover:bg-gray-200 text-gray-600";
+  const newBadgeCls = dark ? "text-emerald-400" : "text-emerald-600";
   return (
     <div className="flex flex-wrap gap-2">
       {edges.map((edge) => (
-        <button
-          key={edge.id}
-          onClick={() => onSelect(edge.id)}
-          className={`text-xs px-2.5 py-1 rounded-full ${dark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-gray-100 hover:bg-gray-200 text-gray-600"}`}
-        >
-          {edge.name} ({edge.articleCount})
+        <button key={edge.id} onClick={() => onSelect(edge.id)} className={`text-xs px-2.5 py-1 rounded-full ${chipCls}`}>
+          {edge.name} ({edge.articleCount}) &middot; {formatSinceDate(edge.firstSeenAt)}
+          {isNewEdge(edge.firstSeenAt) && <span className={`ml-1 font-semibold ${newBadgeCls}`}>new</span>}
         </button>
       ))}
     </div>
+  );
+}
+
+// The 30-day activity summary sits next to the (7-day) sparkline — labeled
+// separately so the two windows can never be confused (DESIGN.md spine #4).
+function ActivitySection({ series, activity, dark }: { series: SeriesPoint[]; activity: ActivitySummary; dark: boolean }) {
+  const headingCls = dark ? "text-slate-200" : "text-gray-800";
+  const mutedCls = dark ? "text-slate-500" : "text-gray-400";
+  return (
+    <section>
+      <h3 className={`text-sm font-semibold mb-2 flex items-center gap-1.5 ${headingCls}`}>
+        Activity <span className={`text-[10px] font-normal uppercase tracking-wide ${mutedCls}`}>7d</span>
+      </h3>
+      <Sparkline series={series} dark={dark} />
+      <p className={`text-xs mt-1.5 ${mutedCls}`}>{formatActivity30d(activity.mentions30d, activity.sources30d)}</p>
+    </section>
   );
 }
 
@@ -218,7 +311,11 @@ export default function EntityPanel({ entityId, dark, onClose, onSelectRelated }
         {detail && (
           <>
             <EntityHeader entity={detail.entity} dark={dark} />
-            <Sparkline series={detail.series} dark={dark} />
+            <FameBlock entity={detail.entity} dark={dark} />
+
+            <div className="mt-5">
+              <ActivitySection series={detail.series} activity={detail.activity} dark={dark} />
+            </div>
 
             <section className="mt-5">
               <h3 className={`text-sm font-semibold mb-2 ${dark ? "text-slate-200" : "text-gray-800"}`}>Recent articles</h3>

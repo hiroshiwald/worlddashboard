@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useBusyIds } from "./useBusyIds";
 import {
-  EntityRowData, EntityStats, EntityPatch, StatusFilter, FameFilter,
+  EntityRowData, EntityStats, EntityPatch, EntityAdminPatchResponse, StatusFilter, FameFilter,
+  FameCheckedFilter, EntitySort, DEFAULT_ENTITY_SORT,
   ToastState, PageSizeOption, PAGE_SIZE_OPTIONS,
 } from "@/components/entities/types";
 
@@ -21,11 +22,17 @@ async function fetchStats(): Promise<EntityStats> {
   return res.json();
 }
 
-function buildListQuery(q: string, status: StatusFilter, fame: FameFilter, offset: number, pageSize: number): string {
+function buildListQuery(
+  q: string, status: StatusFilter, fame: FameFilter, fameChecked: FameCheckedFilter, fameLocked: boolean,
+  sort: EntitySort, offset: number, pageSize: number,
+): string {
   const params = new URLSearchParams();
   if (q.trim()) params.set("q", q.trim());
   if (status !== "all") params.set("status", status);
   if (fame !== "all") params.set("fame", fame);
+  if (fameChecked !== "all") params.set("fameChecked", fameChecked);
+  if (fameLocked) params.set("fameLocked", "true");
+  if (sort !== DEFAULT_ENTITY_SORT) params.set("sort", sort);
   params.set("limit", String(pageSize));
   params.set("offset", String(offset));
   return params.toString();
@@ -36,8 +43,12 @@ interface FetchListResult {
   total: number;
 }
 
-async function fetchEntitiesList(q: string, status: StatusFilter, fame: FameFilter, offset: number, pageSize: number): Promise<FetchListResult> {
-  const res = await fetch(`/api/entities?${buildListQuery(q, status, fame, offset, pageSize)}`, { cache: "no-store" });
+async function fetchEntitiesList(
+  q: string, status: StatusFilter, fame: FameFilter, fameChecked: FameCheckedFilter, fameLocked: boolean,
+  sort: EntitySort, offset: number, pageSize: number,
+): Promise<FetchListResult> {
+  const query = buildListQuery(q, status, fame, fameChecked, fameLocked, sort, offset, pageSize);
+  const res = await fetch(`/api/entities?${query}`, { cache: "no-store" });
   if (res.status === 503) throw new DatabaseNotConfiguredError();
   if (!res.ok) throw new Error(`Failed to load entities (${res.status})`);
   const data = await res.json();
@@ -47,7 +58,12 @@ async function fetchEntitiesList(q: string, status: StatusFilter, fame: FameFilt
   };
 }
 
-async function patchEntity(id: number, patch: EntityPatch): Promise<EntityRowData> {
+// The PATCH endpoint returns toEntityAdminJson's shape only — it never
+// recomputes the list-only activity/role columns (see entity-admin.ts /
+// EntityAdminPatchResponse). applyServerUpdate below merges this onto the
+// existing row rather than replacing it, so those columns keep their
+// last-known value instead of flashing to undefined.
+async function patchEntity(id: number, patch: EntityPatch): Promise<EntityAdminPatchResponse> {
   const res = await fetch(`/api/entities/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -57,13 +73,10 @@ async function patchEntity(id: number, patch: EntityPatch): Promise<EntityRowDat
     const data = await res.json().catch(() => ({}));
     throw new Error(typeof data.error === "string" ? data.error : `Update failed (${res.status})`);
   }
-  // The PATCH response is the authoritative post-update row (server truth,
-  // not optimistic state) — the live bug this hook exists to fix is that
-  // callers used to discard it and wait for a manual refresh.
   return res.json();
 }
 
-function matchesActiveFilters(row: EntityRowData, status: StatusFilter, fame: FameFilter): boolean {
+function matchesActiveFilters(row: Pick<EntityRowData, "status" | "fame">, status: StatusFilter, fame: FameFilter): boolean {
   if (status !== "all" && row.status !== status) return false;
   if (fame !== "all" && row.fame !== fame) return false;
   return true;
@@ -112,6 +125,9 @@ export function useEntitiesTab() {
   const [debouncedQ, setDebouncedQ] = useState("");
   const [status, setStatusInternal] = useState<StatusFilter>("tracked");
   const [fame, setFameInternal] = useState<FameFilter>("all");
+  const [fameChecked, setFameCheckedInternal] = useState<FameCheckedFilter>("all");
+  const [fameLocked, setFameLockedInternal] = useState(false);
+  const [sort, setSortInternal] = useState<EntitySort>(DEFAULT_ENTITY_SORT);
   const [offset, setOffset] = useState(0);
   const [pageSize, setPageSizeInternal] = useState<PageSizeOption>(DEFAULT_PAGE_SIZE);
 
@@ -145,7 +161,7 @@ export function useEntitiesTab() {
     try {
       const [statsResult, listResult] = await Promise.all([
         fetchStats(),
-        fetchEntitiesList(debouncedQ, status, fame, offset, pageSize),
+        fetchEntitiesList(debouncedQ, status, fame, fameChecked, fameLocked, sort, offset, pageSize),
       ]);
       if (seq !== loadSeq.current) return;
       setStats(statsResult);
@@ -158,7 +174,7 @@ export function useEntitiesTab() {
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
-  }, [debouncedQ, status, fame, offset, pageSize]);
+  }, [debouncedQ, status, fame, fameChecked, fameLocked, sort, offset, pageSize]);
 
   useEffect(() => {
     // Fire-and-forget: load() owns its own try/catch and reports via state.
@@ -168,24 +184,30 @@ export function useEntitiesTab() {
   const setQ = useCallback((next: string) => { setOffset(0); setQInternal(next); }, []);
   const setStatus = useCallback((next: StatusFilter) => { setOffset(0); setStatusInternal(next); }, []);
   const setFame = useCallback((next: FameFilter) => { setOffset(0); setFameInternal(next); }, []);
+  const setFameChecked = useCallback((next: FameCheckedFilter) => { setOffset(0); setFameCheckedInternal(next); }, []);
+  const setFameLocked = useCallback((next: boolean) => { setOffset(0); setFameLockedInternal(next); }, []);
+  const setSort = useCallback((next: EntitySort) => { setOffset(0); setSortInternal(next); }, []);
   const setPageSize = useCallback((next: PageSizeOption) => { setOffset(0); setPageSizeInternal(next); }, []);
 
   // Applies the PATCH response (server truth) to local state immediately,
-  // instead of waiting for the follow-up refetch: replaces the row in
+  // instead of waiting for the follow-up refetch: merges it onto the row in
   // place, or — if it no longer matches the active filters — drops it from
   // the visible list and adjusts the visible total. A row not currently in
   // the list (e.g. an undo bringing a filtered-out row back) is left for
   // the refetch below to reinsert in its correct sorted/paged position.
-  const applyServerUpdate = useCallback((updated: EntityRowData) => {
+  // Merge, not replace: the PATCH response lacks the list-only activity/
+  // role columns (EntityAdminPatchResponse), so those keep their last-known
+  // value here until load() below refetches the full row.
+  const applyServerUpdate = useCallback((patch: EntityAdminPatchResponse) => {
     setEntities((prev) => {
-      const idx = prev.findIndex((e) => e.id === updated.id);
+      const idx = prev.findIndex((e) => e.id === patch.id);
       if (idx === -1) return prev;
-      if (!matchesActiveFilters(updated, status, fame)) {
+      if (!matchesActiveFilters(patch, status, fame)) {
         setTotal((t) => Math.max(0, t - 1));
-        return prev.filter((e) => e.id !== updated.id);
+        return prev.filter((e) => e.id !== patch.id);
       }
       const next = [...prev];
-      next[idx] = updated;
+      next[idx] = { ...prev[idx], ...patch };
       return next;
     });
   }, [status, fame]);
@@ -235,6 +257,7 @@ export function useEntitiesTab() {
 
   return {
     q, setQ, status, setStatus, fame, setFame,
+    fameChecked, setFameChecked, fameLocked, setFameLocked, sort, setSort,
     stats, entities, total, loading, error, actionError, dismissErrors, dbUnconfigured,
     toast, dismissToast,
     busyIds, updateEntity,

@@ -1,10 +1,10 @@
 "use client";
 
 import { ThemeClasses } from "@/lib/theme";
-import { StatusFilter, FameFilter, STATUS_FILTERS, FAME_FILTERS } from "./types";
+import { StatusFilter, FameFilter, STATUS_FILTERS, FAME_FILTERS, FAME_VERDICT_LABELS } from "./types";
 
 const STATUS_LABELS: Record<StatusFilter, string> = { tracked: "Tracked", dismissed: "Dismissed", all: "All statuses" };
-const FAME_LABELS: Record<FameFilter, string> = { all: "All fame", famous: "Established", not_famous: "Emerging", unknown: "Unchecked" };
+const FAME_LABELS: Record<FameFilter, string> = { all: "All fame", ...FAME_VERDICT_LABELS };
 
 interface ControlsRowProps {
   q: string;
