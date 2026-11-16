@@ -66,7 +66,7 @@ function assertUniqueIds(entities: MergeEntity[]): void {
   }
 }
 
-function sharesNameOrAlias(a: MergeEntity, b: MergeEntity): boolean {
+export function sharesNameOrAlias(a: MergeEntity, b: MergeEntity): boolean {
   const aName = normalizeName(a.name);
   const bName = normalizeName(b.name);
   const aAliases = a.aliases.map((alias) => normalizeName(alias));
@@ -74,7 +74,7 @@ function sharesNameOrAlias(a: MergeEntity, b: MergeEntity): boolean {
   return aAliases.includes(bName) || bAliases.includes(aName);
 }
 
-function sharesWikiTitle(a: MergeEntity, b: MergeEntity): boolean {
+export function sharesWikiTitle(a: MergeEntity, b: MergeEntity): boolean {
   if (a.wikiTitle === null || b.wikiTitle === null) {
     return false;
   }
