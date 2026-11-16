@@ -48,7 +48,7 @@ Confidence: high that this is the main cause. Not verified directly: Vercel Hobb
 
 ### Fix
 
-**Status (2026-11-16):** applied and tested on branch `claude/awesome-maxwell-3ow8y0` (type check clean, 806 tests pass, build passes, and the new test fails without the fix). It is not on `main` yet, so production still shows frozen data. Merging to `main` needs the operator's go.
+**Status (2026-11-16):** on `main` as commit `1396acf` (type check clean, 806 tests pass, build passes, and the new test fails without the fix). Verify on production that `lastIngestAt` is recent.
 
 One line in `src/lib/server/db.ts`:
 
@@ -365,7 +365,7 @@ Run these on production-like data, not the prototype.
 
 1. ~~Redesign branch~~ Decided: path A (section 3).
 2. ~~Topic method~~ Decided: option B. Still needs approval for the migration that stores article topics (6.5).
-2b. Duplicate and context handling: the plan in 6.7. Approve the soft-merge approach and the review list.
+2b. ~~Duplicate and context handling~~ Approved: the plan in 6.7.
 3. The Newsfeed box under each headline: a "how it touches your world" note, or a summary, or an image?
 4. An outside ingest scheduler (15 minutes) and a new GitHub secret?
 5. Delete the old Network, Map, and Feeds tabs once the new ones pass? Delete only after a yes.
