@@ -14,8 +14,8 @@ function makeSql(rows: SqlRow[][]) {
   return { sql, calls };
 }
 
-// One active hour per day for 14 days: full collection.
-const ACTIVE = Array.from({ length: 14 }, (_, day) => ({ bucket: new Date(NOW.getTime() - (day * 24 + 1) * HOUR) }));
+// The same collection volume on each of the 14 days: full coverage.
+const ACTIVE = Array.from({ length: 14 }, (_, day) => ({ bucket: new Date(NOW.getTime() - (day * 24 + 1) * HOUR), collected_mentions: 50 }));
 const entity = { id: 1, status: "tracked", first_seen_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-03-15T10:00:00Z" };
 
 describe("assembleEntityFacts", () => {
@@ -82,12 +82,12 @@ describe("loadEntityFacts", () => {
     await expect(loadEntityFacts(sql, Array.from({ length: 2001 }, (_, i) => String(i)), NOW)).rejects.toThrow();
   });
 
-  it("uses three ANY queries plus one active-hours query, no INTERVAL literal", async () => {
+  it("uses three ANY queries plus one volume query, no INTERVAL literal", async () => {
     const { sql, calls } = makeSql([[entity], [], [], ACTIVE]);
     const result = await loadEntityFacts(sql, ["1"], NOW);
     expect(result.get("1")?.baselineDays).toBe(11);
     expect(calls).toHaveLength(4);
-    expect(calls[3].query).toContain("DISTINCT bucket");
+    expect(calls[3].query).toContain("collected_mentions");
     for (const call of calls.slice(0, 3)) {
       expect(call.query).toContain("= ANY(");
       expect(call.query).not.toContain("INTERVAL");

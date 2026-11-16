@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeGrowth, ratioText, diversity } from "../entity-growth";
+import { buildCoverage, computeGrowth, ratioText, diversity } from "../entity-growth";
 import type { GrowthInput, HourlyCount } from "../entity-growth";
 
 const HOUR = 60 * 60 * 1000;
@@ -9,11 +9,11 @@ function hoursAgo(hours: number): Date {
   return new Date(NOW.getTime() - hours * HOUR);
 }
 
-// One active hour in each of the 14 days: full collection, no gaps.
-const ALL_DAYS_ACTIVE = Array.from({ length: 14 }, (_, day) => hoursAgo(day * 24 + 1));
+// Full collection on all 14 days.
+const FULL = new Array(14).fill(1);
 
 function input(overrides: Partial<GrowthInput>): GrowthInput {
-  return { hourly: [], activeHours: ALL_DAYS_ACTIVE, firstSeenAt: hoursAgo(24 * 30), tracked: true, now: NOW, ...overrides };
+  return { hourly: [], coverage: FULL, firstSeenAt: hoursAgo(24 * 30), tracked: true, now: NOW, ...overrides };
 }
 
 // A count placed `hours` before NOW, for the common case of a single hourly bucket.
@@ -272,39 +272,53 @@ describe("diversity", () => {
 });
 
 describe("computeGrowth collection gaps", () => {
-  // Active on the 3 recent days and 4 of the 11 usual days (days 10 to 13 ago).
-  const gapped = [1, 25, 49, 241, 265, 289, 313].map(hoursAgo);
+  // Usual window: 4 full days, 7 empty. Recent window: full.
+  const gapped = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1];
 
-  it("divides the usual rate by active usual days only", () => {
-    const result = computeGrowth(input({ activeHours: gapped, hourly: [at(250, 8), at(10, 6)] }));
+  it("divides the usual rate by covered usual days only", () => {
+    const result = computeGrowth(input({ coverage: gapped, hourly: [at(250, 8), at(10, 6)] }));
     expect(result.baselineDays).toBe(4);
     expect(result.usualPerDay).toBe(2);
     expect(result.ratio).toBe(1);
     expect(result.state).toBe("Steady");
   });
 
-  it("divides the recent rate by active recent days only", () => {
-    const recentGap = [1, 100, 150, 200].map(hoursAgo);
-    const result = computeGrowth(input({ activeHours: recentGap, hourly: [at(150, 3), at(10, 3)] }));
-    expect(result.baselineDays).toBe(3);
-    expect(result.ratio).toBe(3);
+  it("counts a partly collected day as a fraction of a day", () => {
+    const partial = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5];
+    const result = computeGrowth(input({ coverage: partial, hourly: [at(150, 11), at(10, 4)] }));
+    expect(result.baselineDays).toBe(5.5);
+    expect(result.usualPerDay).toBe(2);
+    expect(result.ratio).toBe(1);
   });
 
-  it("is WarmingUp with fewer than 3 active usual days", () => {
-    const thin = [1, 25, 49, 100, 150].map(hoursAgo);
-    const result = computeGrowth(input({ activeHours: thin, hourly: [at(10, 30)] }));
+  it("is WarmingUp with under 3 covered usual days", () => {
+    const thin = [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1];
+    const result = computeGrowth(input({ coverage: thin, hourly: [at(10, 30)] }));
     expect(result.baselineDays).toBe(2);
     expect(result.state).toBe("WarmingUp");
   });
 
   it("keeps New ahead of a thin baseline", () => {
-    const result = computeGrowth(input({ activeHours: [hoursAgo(1)], tracked: false, firstSeenAt: hoursAgo(10) }));
+    const result = computeGrowth(input({ coverage: new Array(14).fill(0), tracked: false, firstSeenAt: hoursAgo(10) }));
     expect(result.state).toBe("New");
   });
 
-  it("ignores active hours outside the window and rejects bad ones", () => {
-    const result = computeGrowth(input({ activeHours: [hoursAgo(400), hoursAgo(-1)] }));
-    expect(result.baselineDays).toBe(0);
-    expect(() => computeGrowth(input({ activeHours: [new Date("x")] }))).toThrow();
+  it("rejects coverage of the wrong length or range", () => {
+    expect(() => computeGrowth(input({ coverage: [1] }))).toThrow();
+    expect(() => computeGrowth(input({ coverage: new Array(14).fill(2) }))).toThrow();
+  });
+});
+
+describe("buildCoverage", () => {
+  it("divides each day total by the fullest day", () => {
+    const coverage = buildCoverage([at(1, 40), at(30, 10), at(100, 20)], NOW);
+    expect(coverage[13]).toBe(1);
+    expect(coverage[12]).toBe(0.25);
+    expect(coverage[9]).toBe(0.5);
+    expect(coverage[0]).toBe(0);
+  });
+
+  it("returns all zeros when nothing was collected", () => {
+    expect(buildCoverage([], NOW)).toEqual(new Array(14).fill(0));
   });
 });
