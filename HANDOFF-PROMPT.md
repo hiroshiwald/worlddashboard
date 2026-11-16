@@ -117,3 +117,17 @@ You lead. Cheaper agents execute.
 ## Report back
 
 When a phase ends, say in plain English: what changed, what you checked, what you could not check, and what you need from the operator.
+
+## Progress log (build session, 2026-11-16)
+
+Work branch: `claude/laughing-wozniak-gkhavi`. It holds `main` + the redesign branch + these docs. `main` is unchanged.
+
+- Step 1 done: production runs `1396acf`; `lastIngestAt` is current; `/api/tick` returned `fresh` twice.
+- Found: `.github/workflows/ingest.yml` (every 30 min, secret `INGEST_SECRET` already set) is `disabled_inactivity` since 2026-10-31. Re-enabling it answers open decision 1.
+- Found: LLM extraction est. ~$14/month vs the $5 cap (`llm_monthly_budget_usd`), so tagging likely stops mid-month. Estimate only; check `llm_usage` in production.
+- Step 2: merged on the work branch, checks pass. Waiting for the operator's go to push to `main`.
+- Phase 2 done: `src/lib/{entity-growth,entity-paths,soft-merge,topic-membership,map-layout}.ts`.
+- Phase 3a: done `entity-facts.ts`, `GET /api/feed`, `GET /api/entities/merges`. In flight: `GET /api/graph`, new fields and sorts on `GET /api/entities`.
+- Phase 3b: not started. Proposed migration 009: `ALTER TABLE articles ADD COLUMN topic TEXT;` plus index `(topic, first_seen_at) WHERE topic IS NOT NULL`. Est. +$0.06/day. Needs operator approval.
+- Operator questions 1 to 7 were sent in chat, with no answer yet: push to main, re-enable ingest job, Newsfeed box, proof count, persons, topic migration, budget cap.
+- Helper worktrees start from `main`. Each brief must start with `git fetch origin claude/laughing-wozniak-gkhavi && git reset --hard FETCH_HEAD` and a node_modules symlink.
