@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { assembleEntityFacts, loadEntityFacts } from "../entity-facts";
+import { assembleEntityFacts, groupMembersById, loadEntityFacts } from "../entity-facts";
 import type { Sql, SqlRow } from "../db";
 
 const NOW = new Date("2026-03-15T12:00:00Z");
@@ -73,14 +73,60 @@ describe("loadEntityFacts", () => {
     await expect(loadEntityFacts(sql, Array.from({ length: 2001 }, (_, i) => String(i)), NOW)).rejects.toThrow();
   });
 
-  it("uses exactly three queries with ANY and no INTERVAL literal", async () => {
-    const { sql, calls } = makeSql([[entity], [], []]);
+  it("loads merge groups, then three ANY queries, with no INTERVAL literal", async () => {
+    const { sql, calls } = makeSql([[], [entity], [], []]);
     const result = await loadEntityFacts(sql, ["1"], NOW);
     expect(result.get("1")?.id).toBe("1");
-    expect(calls).toHaveLength(3);
-    for (const call of calls) {
+    expect(calls).toHaveLength(4);
+    expect(calls[0].query).toContain("status <> 'dismissed'");
+    for (const call of calls.slice(1)) {
       expect(call.query).toContain("= ANY(");
       expect(call.query).not.toContain("INTERVAL");
     }
+  });
+});
+
+describe("merged growth", () => {
+  const usRow = { id: 1, status: "tracked", first_seen_at: "2026-03-01T00:00:00Z", last_seen_at: "2026-03-15T10:00:00Z" };
+  const unitedRow = { id: 2, status: "tracked", first_seen_at: "2026-01-01T00:00:00Z", last_seen_at: "2026-03-14T00:00:00Z" };
+  const members = new Map([["1", ["1", "2"]], ["2", ["1", "2"]]]);
+  const hourly = [
+    { entity_id: 1, bucket: new Date(NOW.getTime() - HOUR), mentions: 3 },
+    { entity_id: 2, bucket: new Date(NOW.getTime() - HOUR), mentions: 30 },
+    { entity_id: 2, bucket: new Date(NOW.getTime() - 100 * HOUR), mentions: 110 },
+  ];
+  const sources = [
+    { entity_id: 1, source_name: "Alpha News", article_count: 1 },
+    { entity_id: 2, source_name: "Alpha News", article_count: 4 },
+    { entity_id: 2, source_name: "Beta Post", article_count: 2 },
+  ];
+
+  it("computes a duplicate's growth on its whole group", () => {
+    const facts = assembleEntityFacts([usRow, unitedRow], hourly, sources, NOW, members, ["1"]);
+    const us = facts.get("1")!;
+    expect(facts.has("2")).toBe(false);
+    expect(us.recent72h).toBe(33);
+    expect(us.usualPerDay).toBe(10);
+    expect(us.ratio).toBeCloseTo(1.1);
+    expect(us.state).toBe("Steady");
+    expect(us.sources).toEqual({ count: 2, label: "2 sources", top: ["Alpha News", "Beta Post"] });
+    expect(us.firstSeenAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(us.lastSeenAt).toBe("2026-03-15T10:00:00.000Z");
+  });
+
+  it("leaves an ungrouped entity on its own counts", () => {
+    const facts = assembleEntityFacts([usRow, unitedRow], hourly, sources, NOW, new Map(), ["1"]);
+    expect(facts.get("1")!.recent72h).toBe(3);
+  });
+
+  it("groups names that share an alias and type", () => {
+    const base = { type: "country", wikiTitle: null, mentions: 0 };
+    const map = groupMembersById([
+      { ...base, id: "1", name: "US", aliases: ["United States"] },
+      { ...base, id: "2", name: "United States", aliases: [] },
+      { ...base, id: "3", name: "France", aliases: [] },
+    ]);
+    expect(map.get("1")?.sort()).toEqual(["1", "2"]);
+    expect(map.has("3")).toBe(false);
   });
 });
