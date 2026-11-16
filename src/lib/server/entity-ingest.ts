@@ -15,6 +15,7 @@ import {
   BatchResults,
 } from "./llm-extract";
 import { getSettings } from "./settings";
+import { OTHER_TOPIC } from "../topic-membership";
 
 const LOOKBACK_HOURS = 6;
 const MAX_CANDIDATE_SOURCES = 10;
@@ -407,6 +408,29 @@ async function insertPendingBatch(sql: Sql, batchId: string, articleIds: number[
   await sql`INSERT INTO llm_batches (batch_id, submitted_at, article_ids) VALUES (${batchId}, ${submittedAt.toISOString()}, ${articleIds}::bigint[])`;
 }
 
+const TOPIC_LABEL_LIMIT = 60;
+const TOPIC_LABEL_WINDOW_DAYS = 14;
+
+// One query per batch submit: the labels most used lately, for the model to reuse.
+async function loadTopicLabels(sql: Sql): Promise<string[]> {
+  const rows = await sql`
+    SELECT topic FROM articles
+    WHERE topic IS NOT NULL AND topic <> ${OTHER_TOPIC}
+      AND first_seen_at > now() - make_interval(days => ${TOPIC_LABEL_WINDOW_DAYS})
+    GROUP BY topic ORDER BY count(*) DESC, topic LIMIT ${TOPIC_LABEL_LIMIT}`;
+  return rows.map((r) => String(r.topic));
+}
+
+async function writeArticleTopics(sql: Sql, topicByArticle: Map<number, string>): Promise<void> {
+  if (topicByArticle.size === 0) return;
+  const ids = Array.from(topicByArticle.keys());
+  const topics = ids.map((id) => topicByArticle.get(id) as string);
+  await sql`
+    UPDATE articles SET topic = t.topic
+    FROM unnest(${ids}::bigint[], ${topics}::text[]) AS t(id, topic)
+    WHERE articles.id = t.id`;
+}
+
 async function deletePendingBatch(sql: Sql, batchId: string): Promise<void> {
   await sql`DELETE FROM llm_batches WHERE batch_id = ${batchId}`;
 }
@@ -450,6 +474,7 @@ function applyBatchResults(
   results: BatchResults,
   candidatesByArticle: Map<number, Candidate[] | null>,
   relationsByArticle: Map<number, ExtractedRelation[]>,
+  topicByArticle: Map<number, string>,
   tally: (reason: string) => void,
 ): number {
   let llmUsed = 0;
@@ -473,6 +498,8 @@ function applyBatchResults(
       try {
         candidatesByArticle.set(id, mergeLlmWithDictionary(llmCandidates, head.title, head.summary));
         llmUsed += 1;
+        const topic = chunkResult?.topics.get(j);
+        if (topic) topicByArticle.set(id, topic);
         const relations = chunkResult?.relations.get(j);
         if (relations && relations.length > 0) relationsByArticle.set(id, relations);
       } catch (err) {
@@ -514,7 +541,9 @@ async function resolveEndedBatch(sql: Sql, pending: PendingBatch, resultsUrl: st
   const candidatesByArticle = new Map<number, Candidate[] | null>();
   const relationsByArticle = new Map<number, ExtractedRelation[]>();
   const idsPerChunk = chunkArticles(pending.articleIds, MAX_BATCH_SIZE);
-  const llmUsed = applyBatchResults(idsPerChunk, headById, results, candidatesByArticle, relationsByArticle, tally);
+  const topicByArticle = new Map<number, string>();
+  const llmUsed = applyBatchResults(idsPerChunk, headById, results, candidatesByArticle, relationsByArticle, topicByArticle, tally);
+  await writeArticleTopics(sql, topicByArticle);
 
   await recordBatchUsage(sql, currentUtcMonth(new Date()), results.inputTokens, results.outputTokens);
   await deletePendingBatch(sql, pending.batchId);
@@ -577,7 +606,7 @@ async function submitNewBatchStage(
 
   const settings = await getSettings(sql);
   const chunks = chunkArticles(newHeads, MAX_BATCH_SIZE).map((chunk) => chunk.map((a, j) => ({ index: j, title: a.title, summary: a.summary })));
-  const submitResult = await submitBatch(sql, settings.llm_monthly_budget_usd, chunks);
+  const submitResult = await submitBatch(sql, settings.llm_monthly_budget_usd, chunks, await loadTopicLabels(sql));
   if (!submitResult.ok) {
     tally(submitResult.reason, submitResult.sample);
     return { headById, candidatesByArticle: extractAllHeuristic(newHeads), submittedArticles: 0 };

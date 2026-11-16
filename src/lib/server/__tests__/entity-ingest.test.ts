@@ -773,6 +773,7 @@ describe("pending batch: ended", () => {
       byChunk: new Map([[0, {
         candidates: new Map([[0, [{ display: "Firstname Lastname", norm: "firstname lastname", typeHint: "person" as const, layer: "llm" as const, roleContext: "former IRGC commander", prominence: "known" as const }]]]),
         relations: new Map(),
+        topics: new Map([[0, "Iran conflict"]]),
       }]]),
       chunkFailures: new Map(),
       inputTokens: 1000,
@@ -796,6 +797,10 @@ describe("pending batch: ended", () => {
     const { recordBatchUsage } = await import("../llm-extract");
     expect(recordBatchUsage).toHaveBeenCalledWith(sql, "2026-07", 1000, 500);
     expect(findCall(calls, "DELETE FROM llm_batches")).toBeDefined();
+
+    const topicCall = findCall(calls, "UPDATE articles SET topic");
+    expect(topicCall!.values[0]).toEqual([1]);
+    expect(topicCall!.values[1]).toEqual(["Iran conflict"]);
 
     const candidatesUpsertCall = findCall(calls, "INSERT INTO entity_candidates");
     const payload = JSON.parse(candidatesUpsertCall!.values[0] as string) as { name_norm: string; contexts: string[]; co_entities: string[] }[];
@@ -851,7 +856,7 @@ describe("pending batch: ended", () => {
   it("exactly-once guard: an article already processed (absent from the re-query) is silently skipped, not double-written", async () => {
     vi.mocked(pollBatch).mockResolvedValue({ status: "ended", resultsUrl: "https://x/results" });
     vi.mocked(fetchBatchResults).mockResolvedValue({
-      byChunk: new Map([[0, { candidates: new Map([[0, [{ display: "Russia", norm: "russia", typeHint: "country" as const, layer: "llm" as const, prominence: "famous" as const }]]]), relations: new Map() }]]),
+      byChunk: new Map([[0, { candidates: new Map([[0, [{ display: "Russia", norm: "russia", typeHint: "country" as const, layer: "llm" as const, prominence: "famous" as const }]]]), relations: new Map(), topics: new Map() }]]),
       chunkFailures: new Map(),
       inputTokens: 100,
       outputTokens: 50,

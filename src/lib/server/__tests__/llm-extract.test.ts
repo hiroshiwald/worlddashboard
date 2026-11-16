@@ -155,6 +155,20 @@ describe("estimateCostUsd / getLlmMonthStats", () => {
 });
 
 describe("submitBatch: request shape", () => {
+  it("asks for a topic, and lists existing labels only when given", async () => {
+    const fetchMock = mockFetchOnce(jsonResponse(200, { id: "batch_1", processing_status: "in_progress" }));
+    const { sql } = emptyUsageSql();
+    await submitBatch(sql, 5, [[article(0)]], ["Gaza conflict"]);
+    const withLabels = JSON.parse(fetchMock.mock.calls[0][1].body).requests[0].params.system as string;
+    expect(withLabels).toContain('"topic"');
+    expect(withLabels).toContain('["Gaza conflict"]');
+
+    const fetchMock2 = mockFetchOnce(jsonResponse(200, { id: "batch_2", processing_status: "in_progress" }));
+    await submitBatch(sql, 5, [[article(0)]]);
+    const without = JSON.parse(fetchMock2.mock.calls[0][1].body).requests[0].params.system as string;
+    expect(without).not.toContain("Existing topic labels");
+  });
+
   it("posts one request per chunk to the batches endpoint with the pinned model and required headers", async () => {
     const fetchMock = mockFetchOnce(jsonResponse(200, { id: "batch_1", processing_status: "in_progress" }));
     const { sql } = emptyUsageSql();
@@ -418,6 +432,22 @@ describe("fetchBatchResults: entity/relation/prominence parsing (via a succeeded
     mockFetchOnce(textResponse(200, line));
     const results = await fetchBatchResults("https://x/results") as { byChunk: Map<number, { candidates: Map<number, unknown[]> }> };
     expect(results.byChunk.get(0)!.candidates.get(0)).toEqual([expect.objectContaining({ display: "Unknown Thing", typeHint: "other" })]);
+  });
+
+  it("parses a trimmed topic; missing, non-string, empty or over-60-char topics become Other", async () => {
+    const entities: unknown[] = [];
+    const line = resultLine("0", succeededResult(JSON.stringify([
+      { index: 0, entities, topic: "  Gaza conflict " },
+      { index: 1, entities },
+      { index: 2, entities, topic: 7 },
+      { index: 3, entities, topic: "   " },
+      { index: 4, entities, topic: "x".repeat(61) },
+      { index: 5, entities, topic: "x".repeat(60) },
+    ])));
+    mockFetchOnce(textResponse(200, line));
+    const results = await fetchBatchResults("https://x/results") as { byChunk: Map<number, { topics: Map<number, string> }> };
+    const topics = results.byChunk.get(0)!.topics;
+    expect([0, 1, 2, 3, 4, 5].map((i) => topics.get(i))).toEqual(["Gaza conflict", "Other", "Other", "Other", "Other", "x".repeat(60)]);
   });
 
   it("defaults prominence to 'known' when missing or invalid", async () => {
