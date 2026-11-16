@@ -48,6 +48,8 @@ Confidence: high that this is the main cause. Not verified directly: Vercel Hobb
 
 ### Fix
 
+**Status (2026-11-16):** applied and tested on branch `claude/awesome-maxwell-3ow8y0` (type check clean, 806 tests pass, build passes, and the new test fails without the fix). It is not on `main` yet, so production still shows frozen data. Merging to `main` needs the operator's go.
+
 One line in `src/lib/server/db.ts`:
 
 ```ts
@@ -87,7 +89,7 @@ Then:
 | Phase 3b | Entities tab becomes roster and dossier | Overlaps the Entities tab here |
 | Phase 4 | Deletes dead client-side modules (-514 lines) | Safe cleanup |
 
-The operator must choose one of two paths. Ask before starting Phase 2.
+**Decision made 2026-11-16: Path A, merge the whole branch.** It fast-forwards from `main` (main has not moved since 2026-08-21) and passes on a clean copy: type check, 918 tests, build. Merge it after the Phase 0 fix is live. Path B is rejected. Both options are kept below for the record.
 
 - **Path A (recommended):** open a pull request for the redesign branch, review it, merge it, and build this guide on top.
 - **Path B:** leave it unmerged and cherry-pick only Phase 3a and its follow-up into the new work.
@@ -255,7 +257,15 @@ The prototype hand-tags one topic per article. Real data needs a method. Options
 | B. LLM topic per article | Uses the existing monthly budget | Add a `topic` field to the extraction prompt in `llm-extract.ts`. Better names. Needs a controlled vocabulary or a merge step so "Port delays" and "Port congestion" collapse |
 | C. Source category | None | Too coarse. Do not use |
 
-Start with A. Store the result in a small table (`entity_clusters`) refreshed at the end of each ingest run. This needs a migration, so it needs the operator's approval. Each entity gets one main cluster, the one holding most of its co-mentions.
+**Decision made 2026-11-16: option B, a model-written topic for each article.** Live test on 500 headlines: 39 labels, readable names ("Ukraine-Russia war", "Gaza conflict"), 18% labelled "Other". Option A produced entity-list names ("Iran · U.S. · U.S"). Option C put 70% of entities in one group called "News".
+
+How to build it:
+
+- Add a `topic` to each article. Extend the existing model extraction step in `llm-extract.ts`. Pass the list of existing topic labels back into the prompt so the model reuses a name instead of inventing a near copy. Store it (new column or a small `article_topics` table). This is a migration, so it still needs the operator's approval.
+- An entity belongs to every topic where it appears in at least 2 articles in the last 14 days. If none qualifies, it belongs to its single most common topic. One entity can sit in several topics (23 of 167 did in the live test). The earlier rule "one main cluster per entity" is dropped.
+- Draw lines between topics from shared entities. Weight links with the cosine rule in section 6.7.
+- Articles the model cannot place get "Other". Show them as one grey bubble so the gap is visible.
+- Spend: the model step must stay under the existing monthly budget cap. I did not measure dollars. Measure the cost of one day of articles before turning it on.
 
 ### 6.6 Scale
 
@@ -264,6 +274,29 @@ The prototype has 24 entities. Production has hundreds of tracked entities and o
 - The Universe draws only tracked and non-dismissed entities, plus candidates that link to a tracked entity and rank in the top 150 by link count and source diversity. Cap the node total near 300.
 - Never run the force layout on the server for every request. Compute positions in the browser, deterministically, per connected group. Cache by data version.
 - The Universe opens collapsed, so the first paint is a few dozen clusters.
+
+### 6.7 Famous entities and duplicate names
+
+Live data on 2026-11-16 (500 headlines, 167 entities named twice or more):
+
+- 99.4% of those entities carry the famous label. Only 1 is a tracked, not-famous entity.
+- The top of every list is always the same: Trump, Russia, Ukraine, China, Nvidia. Russia appears under 4 names (Russia, Russland, Russian Federation, and a mis-linked "Fed"). The United States appears as U.S., U.S, US, USA, EE.UU. and VS.
+- Famous is a proxy for "always in the news". The product needs the real measure: change against the entity's own normal. Use that measure and the famous-or-not split stops mattering.
+
+Rules:
+
+1. **Rank by change, not volume.** The default sort in the Entities tab, the map side panel, and "Growing fastest" is Growth (section 6.1). Volume and diversity stay as sort options, never the default. An always-present entity such as the United States has a ratio near 1 and drops down the list. A famous entity that spikes still rises.
+2. **Famous becomes a label, not a gate.** In the three new tabs, show the famous flag as a small "Context" tag. Do not hide anything because of it. The existing rule "a famous entity never headlines a Development card" stays in the Developments engine. Do not change it.
+3. **Map view.** Show entities that are New or Rising, plus their direct neighbours. Draw context entities small and grey. Name clusters by topic (6.5), never by entity names. Weight each link by shared articles divided by the square root of the two entities' article counts (cosine). Two always-present entities then no longer dominate. Live test: the largest cluster fell from 29 entities to 18, and the clusters were more even. It did not remove every odd member ("Harvard University" still joined the Russia cluster).
+4. **Duplicates: soft merge first, real merge by a person.**
+   - Compute a display-only merge map on the server: two entities merge for display when they have the same type and one name is in the other's alias list, or they share a Wikipedia page. Union their article sets. Show "Russia (+3 names)". Nothing in the database changes, so it is reversible.
+   - Never merge in the database automatically. Today a merge cannot be undone (see the 2026-08-21 DEVLOG entry), and the data is wrong in places. In a live check of 106 shared-Wikipedia-page groups, 90 candidate merges passed the alias test, but 2 of 24 sampled were wrong (King Charles II and III are different people). The Wikipedia link itself is wrong for short names: "Fed" points at Russia, "EU" at the United States, "UN" at Great Britain, "Australia" at Dow. Do not merge pairs whose names differ only by a number or roman numeral.
+   - Put the suggested merges in a review list in the Entities tab. The operator approves them in batches through the existing candidate review actions. Check `candidate-actions.ts` and `entity-ingest.ts` first. An entity-to-entity merge may need a new endpoint, which needs approval.
+5. **Foreign-language sources: keep them.** Test: a rough word-based check marked 172 of 500 headlines (34%) as non-English. Removing them cut entities named twice or more from 167 to 131. It removed only 7 of the 53 entities that share a Wikipedia page with another one (53 to 46). Most duplicates come from English variants (U.S., USA). Dropping them also removes the early foreign-language coverage the product exists to find. If noise stays high after rules 1 to 4, add a Newsfeed view filter (All or English). Do not change ingestion. The language check used is crude. It flagged at least one English headline as foreign. Use a proper detector if the filter is built.
+
+Evidence for rule 1: the last 7 days of hourly counts for four of the biggest entities show them at or below their own usual rate. The ratio of the last 3 days to the earlier 4 was 0.65 for Russia, 0.75 for Ukraine, 0.98 for China, and 0.87 for Nvidia. None of them would be Rising. (Ukraine and Nvidia were copied by hand by a helper agent, so treat those two as less certain. A fifth reading, Trump, showed an impossible jump from 0.3 to 16 a day, so the series looks incomplete. It was not used.)
+
+Acceptance checks for 6.7: with the default sort, the top 10 of the Entities tab does not show an entity whose ratio is under 1.5, unless it is a New entity. Duplicates such as Russia and Russland show as one row. No database row is merged without the operator's approval.
 
 ---
 
@@ -330,8 +363,9 @@ Run these on production-like data, not the prototype.
 
 ## 10. Open decisions to put to the operator
 
-1. Pull request for the redesign branch: path A or B (section 3).
-2. Topic method: start with graph communities (6.5)? Approve the `entity_clusters` migration?
+1. ~~Redesign branch~~ Decided: path A (section 3).
+2. ~~Topic method~~ Decided: option B. Still needs approval for the migration that stores article topics (6.5).
+2b. Duplicate and context handling: the plan in 6.7. Approve the soft-merge approach and the review list.
 3. The Newsfeed box under each headline: a "how it touches your world" note, or a summary, or an image?
 4. An outside ingest scheduler (15 minutes) and a new GitHub secret?
 5. Delete the old Network, Map, and Feeds tabs once the new ones pass? Delete only after a yes.

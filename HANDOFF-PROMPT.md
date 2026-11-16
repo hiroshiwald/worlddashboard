@@ -19,23 +19,27 @@ You build the next interface for worlddashboard (Next.js 14, Neon Postgres, Verc
 
 Build three tabs: **Newsfeed**, **Entities**, **Entity map**. Do not build Quick hits.
 
-## Step 0: fix the stale dashboard first
+## Decisions already made by the operator (2026-11-16)
 
-The dashboard shows data from 2026-11-14. The database is fresh. Next.js caches the Neon HTTP queries that have identical text. Details and evidence are in section 2 of the guide.
+1. Apply the staleness fix. It is already written and tested on branch `claude/awesome-maxwell-3ow8y0` (`src/lib/server/db.ts` plus `src/lib/server/__tests__/db.test.ts`). It is not on `main` yet.
+2. Path A: merge the whole redesign branch `claude/redesign-signals-brief-entities-p4lscw`. It fast-forwards from `main` and passes type check, 918 tests, and build.
+3. Topics: option B, a model-written topic for each article (guide section 6.5). Storing topics needs a migration. Ask the operator before you add it.
+4. Proposed, not yet approved: the plan for famous entities and duplicate names in guide section 6.7. Rank by change, show "famous" as a label only, soft-merge duplicates for display, and keep foreign-language sources. Ask the operator to confirm it before you build the map.
 
-1. In `src/lib/server/db.ts`, change `neon(connectionString)` to `neon(connectionString, { fetchOptions: { cache: "no-store" } })`.
-2. Add a unit test for it.
-3. Run `npx tsc --noEmit`, `npm test`, `npm run build`.
-4. After it deploys to production, check that `/api/articles` (no parameters) shows a recent `lastIngestAt`, and that two `/api/tick` calls one minute apart do not both start an ingest run.
-5. Add a DEVLOG entry.
+## Step 0: get the stale-dashboard fix live
 
-Production deploys from `main`. Ask the operator before you merge or push to `main`.
+The dashboard shows data from 2026-11-14. The database is fresh. Next.js reuses saved answers for identical Neon queries. Details and evidence are in section 2 of the guide.
+
+1. Check the fix on the branch: `npx tsc --noEmit`, `npm test`, `npm run build`.
+2. Ask the operator for a go to merge it to `main`. Production deploys from `main`. Do not merge or push to `main` without that go.
+3. After it deploys, check that `/api/articles` (no parameters) shows a recent `lastIngestAt`, and that two `/api/tick` calls one minute apart do not both start an ingest run.
+4. Then merge the redesign branch (Path A) the same way, with the operator's go.
 
 ## Then
 
-1. Ask the operator the two blocking questions in section 3 and section 10 of the guide: what to do with the unmerged branch `claude/redesign-signals-brief-entities-p4lscw` (path A or B), and how to name topics (A graph communities, B model-labelled topics, C source category). The operator has seen live-data mock-ups of both questions at https://claude.ai/artifact/RUsH1wsLi6U7iMCqhiETS2 (private; read it with the Artifact read action). Their answers may already be in the conversation. Do not ask again if they are.
-2. Follow the phases in section 8 of the guide. Finish and verify each phase before the next.
-3. Use real data in every UI check. Use Playwright route interception for states you cannot get live.
+1. Follow the phases in section 8 of the guide. Finish and verify each phase before the next.
+2. Use real data in every UI check. Use Playwright route interception for states you cannot get live.
+3. The operator saw live-data mock-ups of the topic and branch choices at https://claude.ai/artifact/RUsH1wsLi6U7iMCqhiETS2 (private; read it with the Artifact read action). Do not ask those questions again.
 
 ## How to work
 
