@@ -11,7 +11,6 @@ import {
   matchesFilter,
   rowEntities,
   isStale,
-  nextIngestAt,
   formatAgo,
   type FeedArticle,
   type FeedFilter,
@@ -52,7 +51,7 @@ function FreshnessLine({ lastIngestAt, now, dark }: { lastIngestAt: string | nul
   const asOf = lastIngestAt === null ? "no ingest recorded yet" : `${clock(new Date(lastIngestAt))} (${formatAgo(lastIngestAt, now)})`;
   return (
     <p className={`text-xs ${dark ? "text-slate-400" : "text-gray-500"}`}>
-      Data as of {asOf}. Next scheduled ingest about {clock(nextIngestAt(now))}.
+      Data as of {asOf}.
       {stale && <span className="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 font-semibold text-amber-600">Stale</span>}
     </p>
   );

@@ -6,7 +6,6 @@ import {
   matchesFilter,
   timeLabel,
   isStale,
-  nextIngestAt,
   applyEntityStatus,
   applyCandidateTracked,
   mergeNewer,
@@ -97,11 +96,6 @@ describe("freshness", () => {
     expect(isStale("2026-11-16T09:59:00.000Z", NOW)).toBe(true);
     expect(isStale("2026-11-16T10:30:00.000Z", NOW)).toBe(false);
     expect(isStale(null, NOW)).toBe(true);
-  });
-  it("finds the next :07 or :37 slot", () => {
-    expect(nextIngestAt(NOW).toISOString()).toBe("2026-11-16T12:07:00.000Z");
-    expect(nextIngestAt(new Date("2026-11-16T12:07:00.000Z")).toISOString()).toBe("2026-11-16T12:37:00.000Z");
-    expect(nextIngestAt(new Date("2026-11-16T12:40:00.000Z")).toISOString()).toBe("2026-11-16T13:07:00.000Z");
   });
 });
 

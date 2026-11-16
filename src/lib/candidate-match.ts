@@ -25,11 +25,13 @@ function wholeWordPattern(name: string): RegExp {
 }
 
 /** Rejects names that are junk in the candidate table: no capital letter
- * ("administration"), led by punctuation ("- BBC"), or one short word ("The", "DIE"). */
+ * ("administration"), led by punctuation ("- BBC"), one short word ("The",
+ * "DIE"), or HTML codes left in ("OutKick&nbsp;Fox News"). */
 export function isMatchableName(name: string): boolean {
   const trimmed = name.trim();
   if (!/^[\p{L}\p{N}]/u.test(trimmed)) return false;
   if (!/\p{Lu}/u.test(trimmed)) return false;
+  if (/&[a-z#0-9]+;/i.test(trimmed)) return false;
   const singleWord = !/\s/u.test(trimmed);
   const minLength = singleWord ? MIN_SINGLE_WORD_LENGTH : MIN_NAME_LENGTH;
   return foldText(trimmed).length >= minLength;

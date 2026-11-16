@@ -48,6 +48,7 @@ describe("isMatchableName", () => {
     expect(isMatchableName("DIE")).toBe(false);
     expect(isMatchableName("administration")).toBe(false);
     expect(isMatchableName("- BBC")).toBe(false);
+    expect(isMatchableName("OutKick&nbsp;&nbsp;Fox News")).toBe(false);
   });
 
   it("accepts real names", () => {

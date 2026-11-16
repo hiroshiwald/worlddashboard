@@ -7,8 +7,6 @@ const HOUR_MS = 60 * 60 * 1000;
 const NEW_ENTITY_MS = 24 * HOUR_MS;
 const PUBLISH_LAG_MS = 6 * HOUR_MS;
 const STALE_MS = 2 * HOUR_MS;
-// .github/workflows/ingest.yml runs at minute 7 and 37 of every hour (UTC).
-const INGEST_MINUTES = [7, 37];
 
 /** One entity-or-candidate line in an article's third column. */
 export interface RowEntity {
@@ -142,16 +140,6 @@ export function sourceHost(link: string): string {
 export function isStale(lastIngestAt: string | null, now: Date): boolean {
   if (lastIngestAt === null) return true;
   return now.getTime() - new Date(lastIngestAt).getTime() > STALE_MS;
-}
-
-export function nextIngestAt(now: Date): Date {
-  const next = new Date(now.getTime());
-  next.setUTCSeconds(0, 0);
-  for (let step = 0; step <= 60; step++) {
-    if (step > 0) next.setUTCMinutes(next.getUTCMinutes() + 1);
-    if (INGEST_MINUTES.includes(next.getUTCMinutes()) && next.getTime() > now.getTime()) return next;
-  }
-  throw new Error("nextIngestAt: no slot found");
 }
 
 export type StatusChange = { entityId: string; status: "tracked" | "dismissed" };
