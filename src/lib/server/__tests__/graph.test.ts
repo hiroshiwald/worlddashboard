@@ -73,10 +73,26 @@ describe("mergedIntoById", () => {
 });
 
 describe("assignClusters", () => {
-  it("returns no clusters and empty ids per node", () => {
-    const result = assignClusters(["1", "2"]);
+  const nodes = [
+    { id: "1", state: "Rising" as const },
+    { id: "2", state: "Steady" as const },
+    { id: "3", state: "New" as const },
+  ];
+
+  it("returns no clusters when membership is empty", () => {
+    const result = assignClusters(nodes, new Map());
     expect(result.clusters).toEqual([]);
     expect(result.clusterIdsByNode.get("1")).toEqual([]);
+  });
+
+  it("builds clusters with size and rising counts, ignoring unknown entities", () => {
+    const membership = new Map([["1", ["War", "Oil"]], ["2", ["War"]], ["3", ["Oil"]], ["99", ["Ghost"]]]);
+    const result = assignClusters(nodes, membership);
+    expect(result.clusters).toEqual([
+      { id: "Oil", label: "Oil", size: 2, risingCount: 2 },
+      { id: "War", label: "War", size: 2, risingCount: 1 },
+    ]);
+    expect(result.clusterIdsByNode.get("1")).toEqual(["War", "Oil"]);
   });
 });
 
@@ -105,7 +121,7 @@ describe("assembleGraph", () => {
     const rows = [row(1, "tracked", "Alpha"), row(2, "candidate", "Beta")];
     const facts = new Map([["1", fact(1, 4)], ["2", fact(2, 9)]]);
     const roles = new Map([["1", "famous" as const]]);
-    const graph = assembleGraph(rows, facts, roles, [edge(1, 2, 3)], false, NOW);
+    const graph = assembleGraph(rows, facts, roles, [edge(1, 2, 3)], false, NOW, new Map());
     expect(graph.nodes[0]).toMatchObject({ id: "1", role: "famous", clusterIds: [], mergedInto: null, state: "Rising" });
     expect(graph.nodes[1].role).toBe("satellite");
     expect(graph.edges[0].weight).toBeCloseTo(0.5);
@@ -114,7 +130,16 @@ describe("assembleGraph", () => {
     expect(graph.generatedAt).toBe(NOW.toISOString());
   });
 
+  it("sets clusterIds and clusters from membership", () => {
+    const rows = [row(1, "tracked"), row(2, "candidate")];
+    const facts = new Map([["1", fact(1, 4)], ["2", fact(2, 9)]]);
+    const graph = assembleGraph(rows, facts, new Map(), [], false, NOW, new Map([["1", ["War"]]]));
+    expect(graph.nodes[0].clusterIds).toEqual(["War"]);
+    expect(graph.nodes[1].clusterIds).toEqual([]);
+    expect(graph.clusters).toEqual([{ id: "War", label: "War", size: 1, risingCount: 1 }]);
+  });
+
   it("throws when facts are missing", () => {
-    expect(() => assembleGraph([row(1, "tracked")], new Map(), new Map(), [], false, NOW)).toThrow();
+    expect(() => assembleGraph([row(1, "tracked")], new Map(), new Map(), [], false, NOW, new Map())).toThrow();
   });
 });

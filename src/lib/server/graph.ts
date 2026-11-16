@@ -1,7 +1,7 @@
 import { buildAdjacency, connectedGroups, type PathEdge } from "../entity-paths";
 import type { GrowthState } from "../entity-growth";
 import { buildMergeGroups, type MergeEntity } from "../soft-merge";
-import { cosineWeight } from "../topic-membership";
+import { cosineWeight, entityTopics, type ArticleTopic } from "../topic-membership";
 import type { Sql, SqlRow } from "./db";
 import { attachEntityRoles, type EntityRole } from "./entity-admin";
 import { loadEntityFacts, type EntityFacts } from "./entity-facts";
@@ -111,13 +111,26 @@ export function mergedIntoById(entities: MergeEntity[]): Map<string, string> {
   return merged;
 }
 
-/** Topics are not stored yet, so every node gets no clusters. This is the
- * single seam where topic membership plugs in later. */
-export function assignClusters(nodeIds: string[]): {
-  clusters: GraphCluster[];
-  clusterIdsByNode: Map<string, string[]>;
-} {
-  return { clusters: [], clusterIdsByNode: new Map(nodeIds.map((id) => [id, []])) };
+/** Pure. membership: entity id -> topic labels (from entityTopics). Entities
+ * without topics get no clusters; an empty membership yields no clusters. */
+export function assignClusters(
+  nodes: Pick<GraphNode, "id" | "state">[],
+  membership: Map<string, string[]>,
+): { clusters: GraphCluster[]; clusterIdsByNode: Map<string, string[]> } {
+  const byTopic = new Map<string, GraphCluster>();
+  const clusterIdsByNode = new Map<string, string[]>();
+  for (const node of nodes) {
+    const topics = membership.get(node.id) ?? [];
+    clusterIdsByNode.set(node.id, topics);
+    for (const topic of topics) {
+      const cluster = byTopic.get(topic) ?? { id: topic, label: topic, size: 0, risingCount: 0 };
+      cluster.size += 1;
+      if (node.state === "Rising" || node.state === "New") cluster.risingCount += 1;
+      byTopic.set(topic, cluster);
+    }
+  }
+  const clusters = [...byTopic.values()].sort((x, y) => y.size - x.size || x.id.localeCompare(y.id));
+  return { clusters, clusterIdsByNode };
 }
 
 function countGroups(ids: string[], edges: PathEdge[]): { islands: number; isolated: number } {
@@ -173,10 +186,10 @@ export function assembleGraph(
   edgeRows: SqlRow[],
   capped: boolean,
   now: Date,
+  membership: Map<string, string[]>,
 ): GraphResponse {
   const mentionsById = new Map(rows.map((r) => [String(r.id), factsFor(facts, String(r.id)).mentions14d]));
   const merged = mergedIntoById(rows.map((r) => toMergeEntity(r, mentionsById.get(String(r.id)) ?? 0)));
-  const { clusters, clusterIdsByNode } = assignClusters([...mentionsById.keys()]);
   const nodes: GraphNode[] = rows.map((row) => {
     const id = String(row.id);
     const fact = factsFor(facts, id);
@@ -186,13 +199,15 @@ export function assembleGraph(
       type: String(row.type),
       status: String(row.status),
       role: roleById.get(id) ?? "satellite",
-      clusterIds: clusterIdsByNode.get(id) ?? [],
+      clusterIds: [],
       state: fact.state,
       ratio: fact.ratio,
       mentions14d: fact.mentions14d,
       mergedInto: merged.get(id) ?? null,
     };
   });
+  const { clusters, clusterIdsByNode } = assignClusters(nodes, membership);
+  for (const node of nodes) node.clusterIds = clusterIdsByNode.get(node.id) ?? [];
   const edges = toGraphEdges(edgeRows, mentionsById);
   return { nodes, edges, clusters, stats: buildStats(nodes, edges, capped), generatedAt: now.toISOString() };
 }
@@ -233,6 +248,25 @@ async function loadEdges(sql: Sql, ids: string[], since: string): Promise<SqlRow
       AND last_seen_at >= ${since}::timestamptz`;
 }
 
+/** One row per (article, entity) for topic-labelled articles in the window. */
+async function loadTopicMembership(sql: Sql, ids: string[], since: string): Promise<Map<string, string[]>> {
+  if (ids.length === 0) return new Map();
+  const rows = await sql`SELECT ae.article_id AS topic_article_id, a.topic AS article_topic, ae.entity_id AS topic_entity_id
+    FROM article_entities ae
+    JOIN articles a ON a.id = ae.article_id
+    WHERE ae.entity_id = ANY(${ids}::bigint[])
+      AND a.first_seen_at >= ${since}::timestamptz
+      AND a.topic IS NOT NULL`;
+  const byArticle = new Map<string, ArticleTopic>();
+  for (const row of rows) {
+    const articleId = String(row.topic_article_id);
+    const article = byArticle.get(articleId) ?? { articleId, topic: String(row.article_topic), entityIds: [] };
+    article.entityIds.push(String(row.topic_entity_id));
+    byArticle.set(articleId, article);
+  }
+  return entityTopics([...byArticle.values()]);
+}
+
 async function loadRoleMap(sql: Sql, rows: SqlRow[]): Promise<Map<string, EntityRole>> {
   const inputs = rows.map((row) => ({
     id: Number(row.id),
@@ -253,5 +287,6 @@ export async function loadGraph(sql: Sql, now: Date): Promise<GraphResponse> {
   const { kept, capped } = capPopulation(population, mentionsById, MAX_NODES);
   const edgeRows = await loadEdges(sql, kept.map((r) => String(r.id)), since);
   const roleById = await loadRoleMap(sql, kept);
-  return assembleGraph(kept, facts, roleById, edgeRows, capped, now);
+  const membership = await loadTopicMembership(sql, kept.map((r) => String(r.id)), since);
+  return assembleGraph(kept, facts, roleById, edgeRows, capped, now, membership);
 }

@@ -2763,3 +2763,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: Merged the Newsfeed tab (`src/components/newsfeed/`, `src/hooks/useNewsfeed.ts`): rows with the "In your world / Not tracked yet" box, numbered entities and untracked names with Track, filters, 60-second poll with a new-articles pill and Pause, entity popup, freshness line. Removed its "Next scheduled ingest" text: it assumed the GitHub ingest job, which has been disabled since 2026-10-31, so the time was false. Candidate matching now also rejects names that contain HTML codes.
 - What it affected: New Newsfeed files; `candidate-match.ts`. Gate: tsc clean, 1193+ tests pass (57 skipped), build passes. Checked with the live `/api/feed` and `/api/entities` payloads through route interception: rows, box and Track buttons render, no page errors.
 - Gotchas: `GET /api/entities` has no `ids` parameter, so the Newsfeed reads growth from the top 200 by growth; other entities get no ▲. No status takes an entity back to candidate, so "Stop tracking" and "Not interested" both set dismissed. Put "Next scheduled ingest" back only when a scheduler really runs. Helper tokens: Newsfeed 158k (over the 150k cap).
+
+## 2026-11-16
+- Changed: GET /api/graph fills `clusters` from `articles.topic` (entityTopics over last 14 days); assignClusters now takes nodes + membership.
+- Affected: src/lib/server/graph.ts, its test. No topics stored yet means clusters stay empty.
+- Gotcha: reads `a.topic` from migration 009 (other agent); not run against a real DB. Cluster id equals its label.
