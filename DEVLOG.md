@@ -2768,3 +2768,7 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - Changed: GET /api/graph fills `clusters` from `articles.topic` (entityTopics over last 14 days); assignClusters now takes nodes + membership.
 - Affected: src/lib/server/graph.ts, its test. No topics stored yet means clusters stay empty.
 - Gotcha: reads `a.topic` from migration 009 (other agent); not run against a real DB. Cluster id equals its label.
+## 2026-11-16 — Model-written article topic (6.5 option B)
+- What changed: Migration 009 adds nullable `articles.topic` plus a partial index. The extraction prompt now asks for one topic per article and lists up to 60 recent labels to reuse; the parser validates it (trimmed string, max 60 chars, else "Other"); batch apply writes it.
+- What it affected: `migrations/009_article_topic.sql`, `llm-extract.ts` (`submitBatch` takes an optional labels argument; `ChunkExtractionResult` gains `topics`), `entity-ingest.ts` (one label query per submit, one UPDATE per applied batch), their tests. Gate: tsc clean, 1195 tests pass, build passes. Integration tests skipped (no database here), so the migration and the two new SQL statements are unrun.
+- Gotchas: Heuristic-fallback articles keep topic NULL. "Other" is left out of the reuse list. Estimated extra cost about $0.034 per 1,000 articles at batch rates (about 17 input and 10 output tokens per article).

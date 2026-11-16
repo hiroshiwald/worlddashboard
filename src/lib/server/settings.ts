@@ -13,7 +13,7 @@ export const DEFAULTS: Settings = {
   dismiss_cooldown_hours: 72,
   brief_max_blocks: 10,
   warmup_days: 7,
-  llm_monthly_budget_usd: 5,
+  llm_monthly_budget_usd: 10,
 };
 
 function isValidOverride(value: unknown): value is number {
