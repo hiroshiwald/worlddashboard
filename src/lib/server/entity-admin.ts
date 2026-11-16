@@ -12,6 +12,10 @@ import {
   loadLifetimeSourceBreadth,
 } from "./fame";
 import type { FameFacts, StoredFame } from "./fame";
+import { loadEntityFacts } from "./entity-facts";
+import type { EntityFacts } from "./entity-facts";
+import { compareByFacts, isFactSort, loadNearestTracked, toListFacts } from "./entity-list-facts";
+import type { EntityListFacts, FactSort } from "./entity-list-facts";
 
 // ---- shared row shaping ----
 
@@ -145,7 +149,7 @@ function computeDaysSinceEpoch(now: Date, epoch: Date): number {
   return Math.floor((now.getTime() - epoch.getTime()) / (24 * 3600 * 1000));
 }
 
-interface RoleThresholds {
+export interface RoleThresholds {
   anchorThreshold: number;
   fameVolumeThreshold: number;
   baselineDailyById: Map<number, number>;
@@ -155,7 +159,7 @@ interface RoleThresholds {
  * JS from that single population — mirrors getDevelopmentsDetailed exactly.
  * Skips the panel query when the system has no operating history yet (no
  * articles at all): every baselineDaily is 0 regardless in that case. */
-async function loadRoleThresholds(sql: Sql): Promise<RoleThresholds> {
+export async function loadRoleThresholds(sql: Sql): Promise<RoleThresholds> {
   const epoch = await getSystemEpoch(sql);
   if (!epoch) {
     return {
@@ -185,10 +189,10 @@ async function loadRoleThresholds(sql: Sql): Promise<RoleThresholds> {
  * (<=200 for a list page, 1 for detail). */
 export async function attachEntityRoles<
   T extends Pick<EntityAdminJson, "id" | "canonicalName" | "type" | "aliases" | "fame">,
->(sql: Sql, rows: T[]): Promise<(T & EntityRoleResult)[]> {
+>(sql: Sql, rows: T[], knownThresholds?: RoleThresholds): Promise<(T & EntityRoleResult)[]> {
   if (rows.length === 0) return [];
   const [thresholds, breadthById] = await Promise.all([
-    loadRoleThresholds(sql),
+    knownThresholds ?? loadRoleThresholds(sql),
     loadLifetimeSourceBreadth(sql, rows.map((row) => row.id)),
   ]);
   return rows.map((row) => {
@@ -208,8 +212,10 @@ export async function attachEntityRoles<
   });
 }
 
-export type EntitySort = "name" | "first_seen" | "last_seen" | "activity";
-const VALID_SORTS = new Set<EntitySort>(["name", "first_seen", "last_seen", "activity"]);
+export type EntitySort = "name" | "first_seen" | "last_seen" | "activity" | FactSort;
+const VALID_SORTS = new Set<EntitySort>(["name", "first_seen", "last_seen", "activity", "growth", "diversity", "mentions"]);
+// Facts sorts load facts for the whole matched set; loadEntityFacts caps ids at this.
+const MAX_FACT_POPULATION = 2000;
 const DEFAULT_SORT: EntitySort = "last_seen";
 const VALID_FAME_CHECKED = new Set(["never", "checked"]);
 // SUM/COUNT window for the list mode's activity columns (mentions7d,
@@ -228,7 +234,7 @@ export interface SearchEntitiesParams {
   offset?: number;
 }
 
-export interface EntityListItemJson extends EntityAdminJson {
+interface EntityListItemBase extends EntityAdminJson {
   lastSeenAt: string | null;
   mentions7d: number;
   sources7d: number;
@@ -236,10 +242,12 @@ export interface EntityListItemJson extends EntityAdminJson {
   roleReasons: string[];
 }
 
+export interface EntityListItemJson extends EntityListItemBase, EntityListFacts {}
+
 // Pre-role-attachment shape: what toEntityListItemJson/compareEntities work
 // with, before the returned page (never the whole matched set) is run
 // through attachEntityRoles.
-type EntityListItemDraft = Omit<EntityListItemJson, "role" | "roleReasons">;
+type EntityListItemDraft = Omit<EntityListItemBase, "role" | "roleReasons">;
 
 export interface SearchEntitiesResult {
   entities: EntityListItemJson[];
@@ -485,17 +493,63 @@ export async function searchEntities(sql: Sql, params: SearchEntitiesParams): Pr
     loadSourcesInWindow(sql, ids, ACTIVITY_WINDOW_DAYS),
   ]);
   const enriched = matched.map((row) => toEntityListItemJson(row, mentions7dById, sources7dById));
-  enriched.sort((a, b) => compareEntities(a, b, sort));
 
-  // role/roleReasons is display metadata computed for the RETURNED PAGE only
-  // (post-slice), never the whole matched set — see attachEntityRoles.
-  const page = enriched.slice(offset, offset + limit);
-  const withRoles = await attachEntityRoles(sql, page);
+  const now = new Date();
+  const { page, facts } = await sortAndPage(sql, enriched, sort, offset, limit, now);
+  const entities = await attachListExtras(sql, page, facts, now);
+  return { entities, total: enriched.length };
+}
 
-  return {
-    entities: withRoles,
-    total: enriched.length,
-  };
+function factsFor(facts: Map<string, EntityFacts>, id: number): EntityFacts {
+  const found = facts.get(String(id));
+  if (found === undefined) throw new Error(`searchEntities: no facts loaded for entity ${id}`);
+  return found;
+}
+
+/** Facts sorts need facts for the whole matched set (capped), so they load
+ * first and sort after; every other sort pages first and loads facts for the
+ * page only. */
+async function sortAndPage(
+  sql: Sql,
+  enriched: EntityListItemDraft[],
+  sort: EntitySort,
+  offset: number,
+  limit: number,
+  now: Date,
+): Promise<{ page: EntityListItemDraft[]; facts: Map<string, EntityFacts> }> {
+  if (!isFactSort(sort)) {
+    enriched.sort((a, b) => compareEntities(a, b, sort));
+    const page = enriched.slice(offset, offset + limit);
+    return { page, facts: await loadEntityFacts(sql, page.map((row) => String(row.id)), now) };
+  }
+  if (enriched.length > MAX_FACT_POPULATION) {
+    throw new ValidationError(
+      `sort=${sort} supports at most ${MAX_FACT_POPULATION} matching entities, got ${enriched.length}; add filters`,
+    );
+  }
+  const facts = await loadEntityFacts(sql, enriched.map((row) => String(row.id)), now);
+  enriched.sort((a, b) => compareByFacts(factsFor(facts, a.id), factsFor(facts, b.id), sort));
+  return { page: enriched.slice(offset, offset + limit), facts };
+}
+
+/** role/roleReasons and nearestTracked are display metadata for the RETURNED
+ * PAGE only (see attachEntityRoles). Role thresholds load once and feed both. */
+async function attachListExtras(
+  sql: Sql,
+  page: EntityListItemDraft[],
+  facts: Map<string, EntityFacts>,
+  now: Date,
+): Promise<EntityListItemJson[]> {
+  if (page.length === 0) return [];
+  const thresholds = await loadRoleThresholds(sql);
+  const [withRoles, nearest] = await Promise.all([
+    attachEntityRoles(sql, page, thresholds),
+    loadNearestTracked(sql, page.map((row) => String(row.id)), thresholds, now),
+  ]);
+  return withRoles.map((row) => ({
+    ...row,
+    ...toListFacts(factsFor(facts, row.id), nearest.get(String(row.id)) ?? []),
+  }));
 }
 
 // ---- loadEntityStats ----

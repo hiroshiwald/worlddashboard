@@ -15,8 +15,8 @@ export const dynamic = "force-dynamic";
 // is list/search mode, backed by entity-admin.ts's searchEntities:
 // ?q=&status=&fame=&fameChecked=&fameLocked=&sort=&limit=&offset= ->
 // {entities: [...], total}. Each entity row carries lastSeenAt/mentions7d/
-// sources7d; sort (name|first_seen|last_seen|activity) defaults to
-// last_seen desc. The three modes never overlap: ?view=stats always wins,
+// sources7d; sort (name|first_seen|last_seen|activity|growth|diversity|mentions)
+// defaults to last_seen desc; rows also carry growth/sources/nearestTracked. The three modes never overlap: ?view=stats always wins,
 // and among the rest a request with ?name= (even blank) always takes the
 // single-lookup path.
 

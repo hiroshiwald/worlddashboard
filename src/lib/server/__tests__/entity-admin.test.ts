@@ -12,11 +12,18 @@ import {
 } from "../entity-admin";
 import type { Sql, SqlRow } from "../db";
 
+/** Row-shape-specific queries added for growth/sources/nearestTracked; the
+ * single-rowset mock must not answer them with entity rows. */
+function isFactsQuery(query: string): boolean {
+  return query.includes("bucket, mentions") || query.includes("entity_edges") || query.includes("AS article_count");
+}
+
 function makeMockSql(rows: SqlRow[]) {
   const calls: { query: string; values: unknown[] }[] = [];
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
-    calls.push({ query: strings.join(" ? "), values });
-    return rows;
+    const query = strings.join(" ? ");
+    calls.push({ query, values });
+    return isFactsQuery(query) ? [] : rows;
   }) as Sql;
   return { sql, calls };
 }
@@ -360,7 +367,7 @@ describe("searchEntities — activity aggregates", () => {
           entityRow({ id: 2, canonical_name: "High" }),
         ];
       }
-      if (query.includes("FROM entity_mentions_hourly")) {
+      if (query.includes("SUM(mentions)")) {
         return [
           { entity_id: "1", mentions_in_window: "2" },
           { entity_id: "2", mentions_in_window: "40" },
