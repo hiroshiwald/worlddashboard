@@ -22,6 +22,10 @@ export interface EntityRowData {
   sources7d: number;
   role: EntityRole;
   roleReasons: string[];
+  // Added by GET /api/entities list mode; absent on PATCH-merged rows.
+  growth?: { state: "New" | "Rising" | "Falling" | "Steady" | "WarmingUp"; ratio: number; ratioText: string; daily: number[] };
+  sources?: { count: number; label: string; top: string[] };
+  nearestTracked?: { id: string; name: string; hops: number }[];
 }
 
 // The PATCH endpoint (src/app/api/entities/[id]/route.ts) returns
