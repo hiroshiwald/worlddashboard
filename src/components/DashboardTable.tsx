@@ -11,7 +11,8 @@ import { TabKey } from "@/hooks/useDashboardTable";
 // items to render at all, so only they should show the live-feed
 // loading/empty states.
 function isItemsDependentTab(activeTab: TabKey): boolean {
-  return activeTab !== "brief" && activeTab !== "developments" && activeTab !== "entities";
+  const dbBacked: TabKey[] = ["brief", "developments", "entities", "newsfeed", "entitymap"];
+  return !dbBacked.includes(activeTab);
 }
 
 export default function DashboardTable() {
@@ -23,7 +24,7 @@ export default function DashboardTable() {
     categories, filteredItems, sortedItems, t,
     toggleTheme, handleSort, getSortArrow, handleEntityClick, clearFilters,
     candidateCount, handleCandidatesChanged,
-    panelEntityId, setPanelEntityId,
+    panelEntityId, setPanelEntityId, mapFocus, openOnMap,
   } = useDashboardTable();
   const itemsDependentTab = isItemsDependentTab(activeTab);
 
@@ -68,6 +69,7 @@ export default function DashboardTable() {
         <TabContent
           activeTab={activeTab} items={items} filteredItems={filteredItems} dark={dark}
           onEntityClick={handleEntityClick} onEntitySelect={setPanelEntityId} onCandidatesChanged={handleCandidatesChanged}
+          mapFocus={mapFocus} onOpenMap={openOnMap}
         />
 
         {activeTab === "feeds" && items.length > 0 && (

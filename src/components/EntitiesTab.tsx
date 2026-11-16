@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { MapFocus } from "@/hooks/useDashboardTable";
 import { ThemeClasses, getThemeClasses } from "@/lib/theme";
 import { useEntitiesTab } from "@/hooks/useEntitiesTab";
 import { useCandidateQueue } from "@/hooks/useCandidateQueue";
@@ -13,6 +14,7 @@ interface EntitiesTabProps {
   dark: boolean;
   onEntitySelect: (id: number) => void;
   onCandidatesChanged: (count: number) => void;
+  onOpenMap: (focus: MapFocus) => void;
 }
 
 function EmptyState({ dark, message }: { dark: boolean; message: string }) {

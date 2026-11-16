@@ -3,7 +3,7 @@
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
 
-type TabKey = "brief" | "feeds" | "network" | "map" | "developments" | "entities";
+type TabKey = "brief" | "newsfeed" | "feeds" | "network" | "map" | "developments" | "entities" | "entitymap";
 
 interface HeaderBarProps {
   dark: boolean;
@@ -113,11 +113,13 @@ function IngestBadge({
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: "brief", label: "Brief" },
+  { key: "newsfeed", label: "Newsfeed" },
   { key: "feeds", label: "Feeds" },
   { key: "network", label: "Network" },
   { key: "map", label: "Map" },
   { key: "developments", label: "Developments" },
   { key: "entities", label: "Entities" },
+  { key: "entitymap", label: "Entity map" },
 ];
 
 function SearchInput({

@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { FeedItem, SortConfig } from "@/lib/types";
 import { useFeed } from "@/hooks/useSources";
 import { getThemeClasses, ThemeClasses } from "@/lib/theme";
 
-export type TabKey = "brief" | "feeds" | "network" | "map" | "developments" | "entities";
+export type TabKey = "brief" | "newsfeed" | "feeds" | "network" | "map" | "developments" | "entities" | "entitymap";
+
+/** What the Entity map opens on when another tab sends the reader there. */
+export type MapFocus = { kind: "entity"; id: string } | { kind: "topic"; id: string } | null;
 export type ColumnKey = keyof FeedItem;
 
 interface UseDashboardTableReturn {
@@ -43,6 +46,8 @@ interface UseDashboardTableReturn {
   handleCandidatesChanged: (count: number) => void;
   panelEntityId: number | null;
   setPanelEntityId: (id: number | null) => void;
+  mapFocus: MapFocus;
+  openOnMap: (focus: MapFocus) => void;
 }
 
 // Never throws: a non-ok response, a malformed body, or a network error all
@@ -145,6 +150,11 @@ export function useDashboardTable(): UseDashboardTableReturn {
   const [activeTab, setActiveTab] = useState<TabKey>("brief");
   const [candidateCount, setCandidateCount] = useState(0);
   const [panelEntityId, setPanelEntityId] = useState<number | null>(null);
+  const [mapFocus, setMapFocus] = useState<MapFocus>(null);
+  const openOnMap = useCallback((focus: MapFocus) => {
+    setMapFocus(focus);
+    setActiveTab("entitymap");
+  }, []);
   const entityClickSeq = useRef(0);
 
   useEffect(() => {
@@ -226,5 +236,6 @@ export function useDashboardTable(): UseDashboardTableReturn {
     toggleTheme, handleSort, getSortArrow, handleEntityClick, clearFilters,
     candidateCount, handleCandidatesChanged: setCandidateCount,
     panelEntityId, setPanelEntityId,
+    mapFocus, openOnMap,
   };
 }
