@@ -114,5 +114,5 @@ export interface ToastState {
   onUndo?: () => void;
 }
 
-export const PAGE_SIZE_OPTIONS = [50, 100, 250] as const;
+export const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
 export type PageSizeOption = (typeof PAGE_SIZE_OPTIONS)[number];
