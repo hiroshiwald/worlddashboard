@@ -68,11 +68,11 @@ export const FAME_VERDICT_LABELS: Record<"famous" | "not_famous" | "unknown", st
   unknown: "Unchecked",
 };
 
-// Sort headers on the tracked table — mirrors entity-admin.ts's EntitySort
-// exactly (name asc; the rest desc, no direction toggle).
-export const ENTITY_SORTS = ["name", "first_seen", "last_seen", "activity"] as const;
+// Sort headers on the tracked table — a subset of entity-admin.ts's EntitySort
+// (name asc; the rest desc, no direction toggle).
+export const ENTITY_SORTS = ["name", "growth", "mentions", "diversity"] as const;
 export type EntitySort = (typeof ENTITY_SORTS)[number];
-export const DEFAULT_ENTITY_SORT: EntitySort = "last_seen";
+export const DEFAULT_ENTITY_SORT: EntitySort = "growth";
 
 // Same 15-type ontology ReviewTab.tsx uses (entities_type_check).
 export const ENTITY_TYPES = [
@@ -120,3 +120,21 @@ export interface ToastState {
 
 export const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
 export type PageSizeOption = (typeof PAGE_SIZE_OPTIONS)[number];
+
+// GET /api/entities/merges — mirrors merge-suggestions.ts. Read-only.
+export interface MergeEntityData {
+  id: string;
+  name: string;
+  type: string;
+  mentions14d: number;
+}
+
+export interface MergeMemberData extends MergeEntityData {
+  status: string;
+}
+
+export interface MergeGroupData {
+  canonical: MergeEntityData;
+  members: MergeMemberData[];
+  reason: "alias" | "wiki" | "alias+wiki";
+}

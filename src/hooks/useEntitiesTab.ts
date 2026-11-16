@@ -22,7 +22,7 @@ async function fetchStats(): Promise<EntityStats> {
   return res.json();
 }
 
-function buildListQuery(
+export function buildListQuery(
   q: string, status: StatusFilter, fame: FameFilter, fameChecked: FameCheckedFilter, fameLocked: boolean,
   sort: EntitySort, offset: number, pageSize: number,
 ): string {
@@ -32,7 +32,8 @@ function buildListQuery(
   if (fame !== "all") params.set("fame", fame);
   if (fameChecked !== "all") params.set("fameChecked", fameChecked);
   if (fameLocked) params.set("fameLocked", "true");
-  if (sort !== DEFAULT_ENTITY_SORT) params.set("sort", sort);
+  // Always sent: the API's own default (last_seen) differs from ours (growth).
+  params.set("sort", sort);
   params.set("limit", String(pageSize));
   params.set("offset", String(offset));
   return params.toString();
