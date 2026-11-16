@@ -9,11 +9,16 @@ export type Sql = (strings: TemplateStringsArray, ...values: unknown[]) => Promi
 
 /** Creates a fresh Neon HTTP client from DATABASE_URL. No module-level
  * instance is kept — callers own the client they get back and pass it
- * down as an argument. */
+ * down as an argument.
+ *
+ * Every query is a fetch() POST. Next.js 14's Data Cache replays a stored
+ * response when the SQL text and parameters repeat, even under
+ * `dynamic = "force-dynamic"`, so repeated identical queries froze on old
+ * data. `cache: "no-store"` turns that off for every query. */
 export function getSql(): Sql {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error("getSql: DATABASE_URL environment variable is not set");
   }
-  return neon(connectionString);
+  return neon(connectionString, { fetchOptions: { cache: "no-store" } });
 }
