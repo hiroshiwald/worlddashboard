@@ -15,7 +15,7 @@ import type { Sql, SqlRow } from "../db";
 /** Row-shape-specific queries added for growth/sources/nearestTracked; the
  * single-rowset mock must not answer them with entity rows. */
 function isFactsQuery(query: string): boolean {
-  return query.includes("bucket, mentions") || query.includes("entity_edges") || query.includes("AS article_count");
+  return query.includes("bucket, mentions") || query.includes("DISTINCT bucket") || query.includes("entity_edges") || query.includes("AS article_count");
 }
 
 function makeMockSql(rows: SqlRow[]) {

@@ -9,8 +9,11 @@ function hoursAgo(hours: number): Date {
   return new Date(NOW.getTime() - hours * HOUR);
 }
 
+// One active hour in each of the 14 days: full collection, no gaps.
+const ALL_DAYS_ACTIVE = Array.from({ length: 14 }, (_, day) => hoursAgo(day * 24 + 1));
+
 function input(overrides: Partial<GrowthInput>): GrowthInput {
-  return { hourly: [], firstSeenAt: hoursAgo(24 * 30), tracked: true, now: NOW, ...overrides };
+  return { hourly: [], activeHours: ALL_DAYS_ACTIVE, firstSeenAt: hoursAgo(24 * 30), tracked: true, now: NOW, ...overrides };
 }
 
 // A count placed `hours` before NOW, for the common case of a single hourly bucket.
@@ -265,5 +268,43 @@ describe("diversity", () => {
 
   it("throws on a non-string name", () => {
     expect(() => diversity([42 as unknown as string])).toThrow(/string/);
+  });
+});
+
+describe("computeGrowth collection gaps", () => {
+  // Active on the 3 recent days and 4 of the 11 usual days (days 10 to 13 ago).
+  const gapped = [1, 25, 49, 241, 265, 289, 313].map(hoursAgo);
+
+  it("divides the usual rate by active usual days only", () => {
+    const result = computeGrowth(input({ activeHours: gapped, hourly: [at(250, 8), at(10, 6)] }));
+    expect(result.baselineDays).toBe(4);
+    expect(result.usualPerDay).toBe(2);
+    expect(result.ratio).toBe(1);
+    expect(result.state).toBe("Steady");
+  });
+
+  it("divides the recent rate by active recent days only", () => {
+    const recentGap = [1, 100, 150, 200].map(hoursAgo);
+    const result = computeGrowth(input({ activeHours: recentGap, hourly: [at(150, 3), at(10, 3)] }));
+    expect(result.baselineDays).toBe(3);
+    expect(result.ratio).toBe(3);
+  });
+
+  it("is WarmingUp with fewer than 3 active usual days", () => {
+    const thin = [1, 25, 49, 100, 150].map(hoursAgo);
+    const result = computeGrowth(input({ activeHours: thin, hourly: [at(10, 30)] }));
+    expect(result.baselineDays).toBe(2);
+    expect(result.state).toBe("WarmingUp");
+  });
+
+  it("keeps New ahead of a thin baseline", () => {
+    const result = computeGrowth(input({ activeHours: [hoursAgo(1)], tracked: false, firstSeenAt: hoursAgo(10) }));
+    expect(result.state).toBe("New");
+  });
+
+  it("ignores active hours outside the window and rejects bad ones", () => {
+    const result = computeGrowth(input({ activeHours: [hoursAgo(400), hoursAgo(-1)] }));
+    expect(result.baselineDays).toBe(0);
+    expect(() => computeGrowth(input({ activeHours: [new Date("x")] }))).toThrow();
   });
 });

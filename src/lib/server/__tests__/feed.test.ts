@@ -7,10 +7,13 @@ import {
   toFeedEntity,
   groupEntitiesByArticle,
   paginate,
+  toFeedCandidate,
+  matchArticleCandidates,
   FeedParamError,
   type FeedParams,
 } from "../feed";
 import type { SqlRow } from "../db";
+import { buildCandidateMatcher } from "../../candidate-match";
 
 const ISO = "2026-03-01T12:00:00.000Z";
 
@@ -103,6 +106,7 @@ describe("row shaping", () => {
       entities: [
         { id: "3", name: "Fictional Corp", type: "organization", status: "tracked", role: "famous", firstSeenAt: ISO },
       ],
+      candidates: [],
     });
   });
 
@@ -140,5 +144,31 @@ describe("paginate", () => {
   it("has no cursor for after pages", () => {
     const after = { ...base, after: { firstSeenAt: ISO, id: "0" } };
     expect(paginate(rows, after).nextCursor).toBeNull();
+  });
+});
+
+describe("candidate matching", () => {
+  const candidateRow = { name_norm: "okonjo", display_name: "Okonjo", type_hint: "person", first_seen_at: ISO, mention_count: "4" };
+  const tracked = { id: "3", name: "Fictional Corp", type: "organization", status: "tracked" as const, role: "satellite" as const, firstSeenAt: ISO };
+
+  it("shapes a candidate row", () => {
+    expect(toFeedCandidate(candidateRow)).toMatchObject({ nameNorm: "okonjo", name: "Okonjo", typeHint: "person", firstSeenAt: ISO, mentionCount: 4 });
+  });
+
+  it("matches names in title or summary and skips names already linked", () => {
+    const matcher = buildCandidateMatcher([
+      toFeedCandidate(candidateRow),
+      toFeedCandidate({ ...candidateRow, name_norm: "fictional corp", display_name: "Fictional Corp" }),
+      toFeedCandidate({ ...candidateRow, name_norm: "lagos", display_name: "Lagos" }),
+    ]);
+    const row = { title: "Fictional Corp hires Okonjo", summary: "Plant opens near Lagos." };
+    const found = matchArticleCandidates(row, [tracked], matcher);
+    expect(found.map((c) => c.name)).toEqual(["Okonjo", "Lagos"]);
+    expect(found[0]).not.toHaveProperty("displayName");
+  });
+
+  it("handles a null summary", () => {
+    const matcher = buildCandidateMatcher([toFeedCandidate(candidateRow)]);
+    expect(matchArticleCandidates({ title: "No names here", summary: null }, [], matcher)).toEqual([]);
   });
 });

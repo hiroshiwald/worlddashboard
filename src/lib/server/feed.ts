@@ -1,6 +1,7 @@
 import type { Sql, SqlRow } from "./db";
 import { attachEntityRoles, type EntityRole } from "./entity-admin";
 import { getLastIngestAt } from "./tick";
+import { buildCandidateMatcher, foldText, type CandidateMatcher } from "../candidate-match";
 
 export class FeedParamError extends Error {}
 
@@ -13,6 +14,16 @@ export interface FeedEntity {
   firstSeenAt: string;
 }
 
+/** An untracked name (entity_candidates row) whose name appears in the
+ * article's title or summary. Matched at read time; see candidate-match.ts. */
+export interface FeedCandidate {
+  nameNorm: string;
+  name: string;
+  typeHint: string;
+  firstSeenAt: string;
+  mentionCount: number;
+}
+
 export interface FeedArticle {
   id: string;
   title: string;
@@ -22,6 +33,7 @@ export interface FeedArticle {
   firstSeenAt: string;
   publishedAt: string | null;
   entities: FeedEntity[];
+  candidates: FeedCandidate[];
 }
 
 export interface FeedResponse {
@@ -44,6 +56,9 @@ export interface FeedParams {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 const ENTITY_STATUSES = new Set(["candidate", "tracked", "dismissed"]);
+// Candidates seen up to this long before the page's oldest article can match it.
+const CANDIDATE_PAD_MS = 3 * 24 * 60 * 60 * 1000;
+const MAX_CANDIDATES = 3000;
 
 export function encodeCursor(cursor: Cursor): string {
   return Buffer.from(`${cursor.firstSeenAt}|${cursor.id}`, "utf8").toString("base64url");
@@ -101,7 +116,7 @@ export function toFeedEntity(row: SqlRow, role: EntityRole): FeedEntity {
   };
 }
 
-export function toFeedArticle(row: SqlRow, entities: FeedEntity[]): FeedArticle {
+export function toFeedArticle(row: SqlRow, entities: FeedEntity[], candidates: FeedCandidate[] = []): FeedArticle {
   return {
     id: String(row.id),
     title: String(row.title),
@@ -111,7 +126,32 @@ export function toFeedArticle(row: SqlRow, entities: FeedEntity[]): FeedArticle 
     firstSeenAt: toIso(row.first_seen_at),
     publishedAt: row.published_at == null ? null : toIso(row.published_at),
     entities,
+    candidates,
   };
+}
+
+export function toFeedCandidate(row: SqlRow): FeedCandidate & { displayName: string } {
+  const name = String(row.display_name);
+  return {
+    nameNorm: String(row.name_norm),
+    name,
+    displayName: name,
+    typeHint: String(row.type_hint),
+    firstSeenAt: toIso(row.first_seen_at),
+    mentionCount: Number(row.mention_count),
+  };
+}
+
+/** Pure. Candidates whose name is in the title or summary, minus names
+ * already linked to the article as entities. */
+export function matchArticleCandidates(
+  row: SqlRow,
+  entities: FeedEntity[],
+  matcher: CandidateMatcher<FeedCandidate & { displayName: string }>,
+): FeedCandidate[] {
+  const text = `${String(row.title)}\n${row.summary == null ? "" : String(row.summary)}`;
+  const exclude = new Set(entities.map((e) => foldText(e.name)));
+  return matcher.match(text, exclude).map(({ displayName: _unused, ...candidate }) => candidate);
 }
 
 /** Groups entity rows by article id, preserving row order. */
@@ -135,7 +175,7 @@ async function loadArticlePage(sql: Sql, params: FeedParams): Promise<SqlRow[]> 
   const fetchCount = params.limit + 1;
   if (params.before) {
     const { firstSeenAt, id } = params.before;
-    return sql`SELECT id, title, link, source_name, source_category, first_seen_at, published_at
+    return sql`SELECT id, title, link, source_name, source_category, first_seen_at, published_at, summary
       FROM articles
       WHERE (first_seen_at, id) < (${firstSeenAt}::timestamptz, ${id}::bigint)
       ORDER BY first_seen_at DESC, id DESC LIMIT ${fetchCount}`;
@@ -145,13 +185,13 @@ async function loadArticlePage(sql: Sql, params: FeedParams): Promise<SqlRow[]> 
     // Exactly `limit` rows nearest the cursor (no probe row: trimming would
     // drop the row adjacent to the cursor), flipped to newest first.
     return sql`SELECT * FROM (
-        SELECT id, title, link, source_name, source_category, first_seen_at, published_at
+        SELECT id, title, link, source_name, source_category, first_seen_at, published_at, summary
         FROM articles
         WHERE (first_seen_at, id) > (${firstSeenAt}::timestamptz, ${id}::bigint)
         ORDER BY first_seen_at ASC, id ASC LIMIT ${params.limit}
       ) newer ORDER BY first_seen_at DESC, id DESC`;
   }
-  return sql`SELECT id, title, link, source_name, source_category, first_seen_at, published_at
+  return sql`SELECT id, title, link, source_name, source_category, first_seen_at, published_at, summary
     FROM articles ORDER BY first_seen_at DESC, id DESC LIMIT ${fetchCount}`;
 }
 
@@ -162,6 +202,16 @@ async function loadArticleEntities(sql: Sql, articleIds: string[]): Promise<SqlR
     FROM article_entities ae JOIN entities e ON e.id = ae.entity_id
     WHERE ae.article_id = ANY(${articleIds}::bigint[])
     ORDER BY ae.article_id, e.id`;
+}
+
+async function loadCandidates(sql: Sql, pageRows: SqlRow[]): Promise<SqlRow[]> {
+  if (pageRows.length === 0) return [];
+  let oldest = Infinity;
+  for (const row of pageRows) oldest = Math.min(oldest, new Date(toIso(row.first_seen_at)).getTime());
+  const since = new Date(oldest - CANDIDATE_PAD_MS).toISOString();
+  return sql`SELECT name_norm, display_name, type_hint, first_seen_at, mention_count
+    FROM entity_candidates WHERE last_seen_at >= ${since}::timestamptz
+    ORDER BY mention_count DESC, name_norm LIMIT ${MAX_CANDIDATES}`;
 }
 
 async function loadRoles(sql: Sql, entityRows: SqlRow[]): Promise<Map<string, EntityRole>> {
@@ -194,10 +244,15 @@ export async function loadFeed(sql: Sql, params: FeedParams): Promise<FeedRespon
   const [rows, lastIngest] = await Promise.all([loadArticlePage(sql, params), getLastIngestAt(sql)]);
   const { pageRows, nextCursor } = paginate(rows, params);
   const entityRows = await loadArticleEntities(sql, pageRows.map((r) => String(r.id)));
-  const roleById = await loadRoles(sql, entityRows);
+  const [roleById, candidateRows] = await Promise.all([loadRoles(sql, entityRows), loadCandidates(sql, pageRows)]);
   const byArticle = groupEntitiesByArticle(entityRows, roleById);
+  const matcher = buildCandidateMatcher(candidateRows.map(toFeedCandidate));
+  const items = pageRows.map((row) => {
+    const entities = byArticle.get(String(row.id)) ?? [];
+    return toFeedArticle(row, entities, matchArticleCandidates(row, entities, matcher));
+  });
   return {
-    items: pageRows.map((row) => toFeedArticle(row, byArticle.get(String(row.id)) ?? [])),
+    items,
     nextCursor,
     lastIngestAt: lastIngest ? lastIngest.toISOString() : null,
   };

@@ -5,7 +5,6 @@ const DAY_MS = 24 * HOUR_MS;
 const RECENT_MS = 72 * HOUR_MS;
 const WINDOW_MS = 336 * HOUR_MS;
 const RECENT_DAYS = RECENT_MS / DAY_MS;
-const PRIOR_DAYS = 11;
 const RATIO_FLOOR = 0.3;
 const DAILY_DAYS = 14;
 const RISING_MIN_RECENT = 3;
@@ -13,14 +12,19 @@ const RISING_MIN_RATIO = 3;
 const FALLING_MIN_USUAL = 0.5;
 const FALLING_MAX_RATIO = 0.5;
 const RATIO_CAP = 10;
+const PRIOR_INDEXES = DAILY_DAYS - RECENT_DAYS; // daily indexes 0..10 are the usual window
+const MIN_BASELINE_DAYS = 3;
 
 export type GrowthState = "New" | "Rising" | "Falling" | "Steady" | "WarmingUp";
 export interface HourlyCount { hourStart: Date; count: number }
-export interface GrowthInput { hourly: HourlyCount[]; firstSeenAt: Date | null; tracked: boolean; now: Date }
+// activeHours: every hour in which ingest stored at least one mention of any
+// entity. Days with none are collection gaps and are left out of both rates.
+export interface GrowthInput { hourly: HourlyCount[]; activeHours: Date[]; firstSeenAt: Date | null; tracked: boolean; now: Date }
 export interface Growth {
   recent72h: number;      // sum of counts with now-72h <= hourStart < now
-  usualPerDay: number;    // sum over now-336h <= hourStart < now-72h, divided by 11 (raw, no floor)
-  ratio: number;          // (recent72h / 3) / max(usualPerDay, 0.3)
+  usualPerDay: number;    // sum over now-336h <= hourStart < now-72h, divided by baselineDays (raw, no floor)
+  ratio: number;          // (recent72h / active recent days) / max(usualPerDay, 0.3)
+  baselineDays: number;   // active days in the usual window, 0 to 11
   state: GrowthState;
   daily: number[];        // length 14, index 0 = oldest day (13 to 14 days ago), index 13 = last 24h
 }
@@ -47,6 +51,12 @@ function validateInput(input: GrowthInput): void {
   for (const entry of input.hourly) {
     assertValidDate(entry.hourStart, "hourStart");
     assertValidCount(entry.count);
+  }
+  if (!Array.isArray(input.activeHours)) {
+    throw new Error("activeHours must be an array");
+  }
+  for (const hour of input.activeHours) {
+    assertValidDate(hour, "activeHours entry");
   }
 }
 
@@ -84,6 +94,27 @@ function buildDaily(hourly: HourlyCount[], nowMs: number): number[] {
   return daily;
 }
 
+function activeDayFlags(activeHours: Date[], nowMs: number): boolean[] {
+  const flags = new Array<boolean>(DAILY_DAYS).fill(false);
+  for (const hour of activeHours) {
+    if (inRange(hour, nowMs - WINDOW_MS, nowMs)) {
+      flags[dailyIndex(nowMs - hour.getTime())] = true;
+    }
+  }
+  return flags;
+}
+
+function countTrue(flags: boolean[]): number {
+  return flags.filter((flag) => flag).length;
+}
+
+function perDay(total: number, days: number): number {
+  if (days === 0) {
+    return 0;
+  }
+  return total / days;
+}
+
 function isNewState(input: GrowthInput, nowMs: number): boolean {
   if (input.tracked || input.firstSeenAt === null) {
     return false;
@@ -98,12 +129,15 @@ function isWarmingUpState(input: GrowthInput, nowMs: number): boolean {
   return input.firstSeenAt.getTime() > nowMs - RECENT_MS;
 }
 
-function classifyState(input: GrowthInput, recent72h: number, usualPerDay: number, ratio: number): GrowthState {
+interface Rates { recent72h: number; usualPerDay: number; ratio: number; baselineDays: number }
+
+function classifyState(input: GrowthInput, rates: Rates): GrowthState {
+  const { recent72h, usualPerDay, ratio } = rates;
   const nowMs = input.now.getTime();
   if (isNewState(input, nowMs)) {
     return "New";
   }
-  if (isWarmingUpState(input, nowMs)) {
+  if (isWarmingUpState(input, nowMs) || rates.baselineDays < MIN_BASELINE_DAYS) {
     return "WarmingUp";
   }
   if (recent72h >= RISING_MIN_RECENT && ratio >= RISING_MIN_RATIO) {
@@ -118,17 +152,15 @@ function classifyState(input: GrowthInput, recent72h: number, usualPerDay: numbe
 export function computeGrowth(input: GrowthInput): Growth {
   validateInput(input);
   const nowMs = input.now.getTime();
+  const active = activeDayFlags(input.activeHours, nowMs);
+  const baselineDays = countTrue(active.slice(0, PRIOR_INDEXES));
+  const recentDays = countTrue(active.slice(PRIOR_INDEXES));
   const recent72h = sumCounts(input.hourly, nowMs - RECENT_MS, nowMs);
   const priorTotal = sumCounts(input.hourly, nowMs - WINDOW_MS, nowMs - RECENT_MS);
-  const usualPerDay = priorTotal / PRIOR_DAYS;
-  const ratio = (recent72h / RECENT_DAYS) / Math.max(usualPerDay, RATIO_FLOOR);
-  return {
-    recent72h,
-    usualPerDay,
-    ratio,
-    state: classifyState(input, recent72h, usualPerDay, ratio),
-    daily: buildDaily(input.hourly, nowMs),
-  };
+  const usualPerDay = perDay(priorTotal, baselineDays);
+  const ratio = perDay(recent72h, recentDays) / Math.max(usualPerDay, RATIO_FLOOR);
+  const rates = { recent72h, usualPerDay, ratio, baselineDays };
+  return { ...rates, state: classifyState(input, rates), daily: buildDaily(input.hourly, nowMs) };
 }
 
 export function ratioText(ratio: number): string {
