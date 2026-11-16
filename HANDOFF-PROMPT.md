@@ -134,3 +134,9 @@ Work branch: `claude/laughing-wozniak-gkhavi`. It holds `main` + the redesign br
 - Phase 3b: not started. Proposed migration 009: `ALTER TABLE articles ADD COLUMN topic TEXT;` plus index `(topic, first_seen_at) WHERE topic IS NOT NULL`. Est. +$0.06/day. Needs operator approval.
 - Operator questions 1 to 7 were sent in chat, with no answer yet: push to main, re-enable ingest job, Newsfeed box, proof count, persons, topic migration, budget cap.
 - Helper worktrees start from `main`. Each brief must start with `git fetch origin claude/laughing-wozniak-gkhavi && git reset --hard FETCH_HEAD` and a node_modules symlink.
+- Live check on preview `6a85dfb` (2026-11-16 23:10Z):
+  - `/api/graph` returns 1,622 nodes and 4,981 edges, `capped` false. Tracked entities alone exceed 300 and are never dropped. The UI must filter (guide 6.7 rule 3: New or Rising plus direct neighbors) or the cap rule needs a change.
+  - `/api/entities?sort=growth` works. `status=all` is not a valid value; omit `status` instead.
+  - `/api/entities/merges` is mostly right: US <- U.S, USA, EE.UU.; Russia <- Russland. Some are wrong: Taiwan <- "Chinese", Latin America <- "South America". This is why a person must approve real merges.
+- Growth is distorted by the collection gap. For days 3 to 10 ago, the `daily` arrays are 0 for almost every entity, including the US. The usual rate looks near 0, so 52 entities read Rising at 10+. Fix next: count only days on which ingest actually produced tagged articles in `usualPerDay` (pass a list of active days into `computeGrowth`). Then re-check the 6.7 acceptance test. Without the fix, growth stays wrong for 14 days after collection resumes.
+- Duplicate tracked rows exist (Putin and Vladimir Putin; Zelenskyy and Volodymyr Zelensky). The merges review list covers them.
