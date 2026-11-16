@@ -174,7 +174,7 @@ Behavior:
 - Select a topic name: open that cluster on the map.
 - "Track" inline for untracked rows. It must not open the map.
 - Filters: name search, All / Tracked / Not tracked / Dismissed.
-- Keep the existing pagination (50, 100, 250 rows) and the existing review actions (accept, merge, dismiss). Do not lose the candidate review queue that exists today. Put it in this tab as a segment, as it is now.
+- Keep the existing pagination and the existing review actions (accept, merge, dismiss). Known bug on `main`: the page-size options are 50, 100 and 250 (`src/components/entities/types.ts`), but `GET /api/entities` rejects `limit` above 200 (`MAX_LIMIT` in `entity-admin.ts`). Choosing 250 returns HTTP 400. Fix the option list to 50, 100 and 200. Do not lose the candidate review queue that exists today. Put it in this tab as a segment, as it is now.
 - Do not group by category. The operator struck this out.
 
 Removed from the prototype's earlier versions on purpose: the side panel, the separate sort bar, the "Related to" column. Do not bring them back.
@@ -375,3 +375,29 @@ What the prototype does not prove:
 - The current plan documents forbid new feeds, migrations, and deletions without operator approval. This guide asks for approval where it needs it (section 10).
 - Do not add probability words ("likely", "very likely") to any screen. The system can measure how well a claim is sourced. It cannot judge how likely the claim is.
 - No new dependencies are needed. The prototype uses none.
+
+---
+
+## 13. How to run the work: delegate in parallel
+
+The lead session plans, decides, and verifies. Cheaper agents do the execution. This cuts time and cost.
+
+- Send each independent task to its own agent, all in one message so they run in parallel. Use the cheapest model that can do the task. Use Haiku for mechanical work. Use Sonnet for work that needs judgment.
+- Use an isolated worktree for any agent that edits files, so agents do not overwrite each other.
+- Give each agent a complete brief: the goal, the exact files, the contract it must keep, the checks to run, and what to report. The agent knows nothing else.
+- Do not delegate decisions, operator questions, merges, or pushes to `main`. Do not delegate a task that depends on another task's output until that output exists.
+- Verify every agent result yourself: read the diff, run `npx tsc --noEmit` and `npm test`. A report is a claim, not proof.
+
+Safe to run in parallel after Phase 2 (no shared files):
+
+| Task | Agent | Output |
+|---|---|---|
+| Pure functions with unit tests: growth, diversity, nearest tracked, shortest path | Haiku, worktree | Files in `src/lib/` and tests |
+| `entity-facts.ts` and its tests | Sonnet, worktree | Server module and tests |
+| `GET /api/graph` route and tests | Sonnet, worktree | Route and tests |
+| Newsfeed tab UI | Sonnet, worktree | Components and hook |
+| Entities tab UI changes | Sonnet, worktree | Components and hook |
+| Playwright checks for each tab | Haiku | Scripts and a pass or fail list |
+| Live-data checks against production | Haiku | Short report |
+
+Merge the worktrees one at a time. Run all checks after each merge.

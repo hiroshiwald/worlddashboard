@@ -33,9 +33,13 @@ Production deploys from `main`. Ask the operator before you merge or push to `ma
 
 ## Then
 
-1. Ask the operator the two blocking questions in section 3 and section 10 of the guide: what to do with the unmerged branch `claude/redesign-signals-brief-entities-p4lscw` (path A or B), and whether to start topics with graph communities (needs the `entity_clusters` migration).
+1. Ask the operator the two blocking questions in section 3 and section 10 of the guide: what to do with the unmerged branch `claude/redesign-signals-brief-entities-p4lscw` (path A or B), and how to name topics (A graph communities, B model-labelled topics, C source category). The operator has seen live-data mock-ups of both questions at https://claude.ai/artifact/RUsH1wsLi6U7iMCqhiETS2 (private; read it with the Artifact read action). Their answers may already be in the conversation. Do not ask again if they are.
 2. Follow the phases in section 8 of the guide. Finish and verify each phase before the next.
 3. Use real data in every UI check. Use Playwright route interception for states you cannot get live.
+
+## How to work
+
+You lead. Cheaper agents execute. Plan the work, then send independent tasks to parallel agents in one message. Use Haiku for mechanical tasks and Sonnet for tasks that need judgment. Use an isolated worktree for any agent that edits files. Give each agent a full brief: goal, files, contract, checks, and what to report. Keep decisions, operator questions, merges, and pushes to `main` for yourself. Verify every agent result by reading the diff and running the checks. Section 13 of the guide lists tasks that are safe to run in parallel.
 
 ## Rules you must not break
 
