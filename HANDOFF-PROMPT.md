@@ -127,7 +127,10 @@ Work branch: `claude/laughing-wozniak-gkhavi`. It holds `main` + the redesign br
 - Found: LLM extraction est. ~$14/month vs the $5 cap (`llm_monthly_budget_usd`), so tagging likely stops mid-month. Estimate only; check `llm_usage` in production.
 - Step 2: merged on the work branch, checks pass. Waiting for the operator's go to push to `main`.
 - Phase 2 done: `src/lib/{entity-growth,entity-paths,soft-merge,topic-membership,map-layout}.ts`.
-- Phase 3a: done `entity-facts.ts`, `GET /api/feed`, `GET /api/entities/merges`. In flight: `GET /api/graph`, new fields and sorts on `GET /api/entities`.
+- Phase 3a: done and merged (see DEVLOG 2026-11-16 Phase 3a). SQL runs only on Vercel previews of this branch; the previews read the production DB.
+- Blocker for the Newsfeed: untracked names are in `entity_candidates`, which has no article link. Decide: match candidate names against title and summary at read time (no migration, recommended first), or add an `article_candidates` table (migration, needs approval).
+- Check: why the newest ingest run's articles have no entities (pending batch or budget gate). See `submitBatch` in `llm-extract.ts`.
+- Next: Phase 4 UI, one Sonnet agent per tab (Newsfeed, Entities changes plus a Suggested merges segment, Entity map). Specs: guide 5.1 to 5.3. Contracts: the exported types in `feed.ts`, `graph.ts`, `entity-list-facts.ts`, `merge-suggestions.ts`.
 - Phase 3b: not started. Proposed migration 009: `ALTER TABLE articles ADD COLUMN topic TEXT;` plus index `(topic, first_seen_at) WHERE topic IS NOT NULL`. Est. +$0.06/day. Needs operator approval.
 - Operator questions 1 to 7 were sent in chat, with no answer yet: push to main, re-enable ingest job, Newsfeed box, proof count, persons, topic migration, budget cap.
 - Helper worktrees start from `main`. Each brief must start with `git fetch origin claude/laughing-wozniak-gkhavi && git reset --hard FETCH_HEAD` and a node_modules symlink.
