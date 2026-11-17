@@ -6,11 +6,18 @@ import type { Sql, SqlRow } from "./db";
 import { attachEntityRoles, type EntityRole } from "./entity-admin";
 import { loadEntityFacts, type EntityFacts } from "./entity-facts";
 
+function requireBoolean(value: unknown): boolean {
+  if (typeof value !== "boolean") throw new Error("graph: entities.followed missing; run migration 011");
+  return value;
+}
+
 export interface GraphNode {
   id: string;
   name: string;
   type: string;
   status: string;
+  /** The operator pressed Track. status 'tracked' only means known. */
+  followed: boolean;
   role: EntityRole;
   clusterIds: string[];
   state: GrowthState;
@@ -198,6 +205,7 @@ export function assembleGraph(
       name: String(row.canonical_name),
       type: String(row.type),
       status: String(row.status),
+      followed: requireBoolean(row.followed),
       role: roleById.get(id) ?? "satellite",
       clusterIds: [],
       state: fact.state,
@@ -236,7 +244,7 @@ async function loadPopulation(sql: Sql, since: string): Promise<SqlRow[]> {
       ) DESC, l.id
       LIMIT ${MAX_CANDIDATES}
     )
-    SELECT id, canonical_name, type, status, aliases, fame, wiki_title FROM entities
+    SELECT id, canonical_name, type, status, followed, aliases, fame, wiki_title FROM entities
     WHERE status = 'tracked' OR id IN (SELECT id FROM top_candidates)`;
 }
 

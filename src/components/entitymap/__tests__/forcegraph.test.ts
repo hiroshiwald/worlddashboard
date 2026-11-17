@@ -4,7 +4,7 @@ import type { GraphEdge, GraphNode } from "@/lib/server/graph";
 import { buildUniverse, centringForce, nodeRadius, pickLabelled, showLabel, universeNodes } from "../forcegraph";
 
 function node(id: string, mentions14d = 5): GraphNode {
-  return { id, name: `N${id}`, type: "person", status: "tracked", role: "satellite", clusterIds: [], state: "Steady", ratio: 1, mentions14d, mergedInto: null };
+  return { id, name: `N${id}`, type: "person", status: "tracked", followed: false, role: "satellite", clusterIds: [], state: "Steady", ratio: 1, mentions14d, mergedInto: null };
 }
 const edge = (a: string, b: string): GraphEdge => ({ a, b, articleCount: 1, weight: 1, firstSeenAt: "", lastSeenAt: "" });
 function name(key: string, anchors: string[], kind: EmergingItem["kind"] = "candidate"): EmergingItem {

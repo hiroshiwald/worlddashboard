@@ -104,6 +104,15 @@ function toIso(value: unknown): string {
   return value instanceof Date ? value.toISOString() : new Date(value as string).toISOString();
 }
 
+/** "tracked" in the Newsfeed means the operator followed it. A row the
+ * system knows (status 'tracked') but nobody followed reads as untracked. */
+function feedStatus(status: string, followed: unknown): FeedEntity["status"] {
+  if (typeof followed !== "boolean") throw new Error("feed: entities.followed missing; run migration 011");
+  if (followed) return "tracked";
+  if (status === "dismissed") return "dismissed";
+  return "candidate";
+}
+
 export function toFeedEntity(row: SqlRow, role: EntityRole): FeedEntity {
   const status = String(row.status);
   if (!ENTITY_STATUSES.has(status)) throw new Error(`feed: unexpected entity status "${status}"`);
@@ -111,7 +120,7 @@ export function toFeedEntity(row: SqlRow, role: EntityRole): FeedEntity {
     id: String(row.entity_id),
     name: String(row.canonical_name),
     type: String(row.type),
-    status: status as FeedEntity["status"],
+    status: feedStatus(status, row.followed),
     role,
     firstSeenAt: toIso(row.entity_first_seen_at),
   };
@@ -242,7 +251,7 @@ async function loadArticlePage(sql: Sql, params: FeedParams): Promise<SqlRow[]> 
 
 async function loadArticleEntities(sql: Sql, articleIds: string[]): Promise<SqlRow[]> {
   if (articleIds.length === 0) return [];
-  return sql`SELECT ae.article_id, e.id AS entity_id, e.canonical_name, e.type, e.status,
+  return sql`SELECT ae.article_id, e.id AS entity_id, e.canonical_name, e.type, e.status, e.followed,
       e.aliases, e.fame, e.first_seen_at AS entity_first_seen_at
     FROM article_entities ae JOIN entities e ON e.id = ae.entity_id
     WHERE ae.article_id = ANY(${articleIds}::bigint[])
@@ -250,7 +259,7 @@ async function loadArticleEntities(sql: Sql, articleIds: string[]): Promise<SqlR
 }
 
 async function loadTrackedEntities(sql: Sql): Promise<SqlRow[]> {
-  return sql`SELECT tn.id AS entity_id, tn.canonical_name, tn.type, tn.status, tn.aliases, tn.fame,
+  return sql`SELECT tn.id AS entity_id, tn.canonical_name, tn.type, tn.status, tn.followed, tn.aliases, tn.fame,
       tn.first_seen_at AS entity_first_seen_at
     FROM entities tn WHERE tn.status = 'tracked'`;
 }

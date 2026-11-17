@@ -56,14 +56,14 @@ export default function EntityLevel({ dark, data, id, state }: Props) {
             onKeyDown={(e) => e.key === "Enter" && state.goEntity(m.id)}>
             {halo(n.state === "New" || n.state === "Rising", m.x, m.y, 6)}
             <circle cx={m.x} cy={m.y} r={6} fill={color} stroke={dark ? "#94a3b8" : color} strokeWidth={2}
-              strokeDasharray={n.status === "tracked" ? undefined : "3 2"} />
+              strokeDasharray={n.followed ? undefined : "3 2"} />
           </g>
         );
       })}
       <g data-testid="entity-center">
         {halo(center.state === "New" || center.state === "Rising", lay.center.x, lay.center.y, 16)}
         <circle cx={lay.center.x} cy={lay.center.y} r={16} fill={dark ? "#0f172a" : "#ffffff"} stroke="#0ea5e9" strokeWidth={4}
-          strokeDasharray={center.status === "tracked" ? undefined : "4 3"} />
+          strokeDasharray={center.followed ? undefined : "4 3"} />
       </g>
       <g pointerEvents="none">
         {items.map((it) => {

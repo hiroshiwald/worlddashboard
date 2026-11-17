@@ -6,7 +6,7 @@ import {
 
 function node(id: string, over: Partial<GraphNode> = {}): GraphNode {
   return {
-    id, name: `N${id}`, type: "person", status: "tracked", role: "satellite", clusterIds: [],
+    id, name: `N${id}`, type: "person", status: "tracked", followed: false, role: "satellite", clusterIds: [],
     state: "Steady", ratio: 1, mentions14d: 5, mergedInto: null, ...over,
   };
 }

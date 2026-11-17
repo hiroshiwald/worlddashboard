@@ -107,7 +107,7 @@ function EntityDetail({ data, id, state, muted }: { data: MapData; id: string; s
   return (
     <>
       <h3 className="font-semibold">{n.name}{isContext(n) || n.role === "famous" ? <span className={`ml-2 text-xs font-normal ${muted}`}>Context</span> : null}</h3>
-      <p className={muted}>{n.type}, {n.status === "tracked" ? "tracked" : "not tracked"}, {n.mentions14d} mentions in 14 days</p>
+      <p className={muted}>{n.type}, {n.followed ? "tracked" : "not tracked"}, {n.mentions14d} mentions in 14 days</p>
       {isGrowing(n) && <p className="text-sky-600">{growthText(n)}</p>}
       <div className="my-2 flex flex-wrap gap-1">
         {state.entityId !== id && <button type="button" className="rounded border px-2 py-1" onClick={() => state.goEntity(id)}>Open entity level</button>}

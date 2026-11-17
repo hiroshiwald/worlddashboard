@@ -237,6 +237,7 @@ async function applyEntityPatch(sql: Sql, id: number, patch: EntityPatch): Promi
     UPDATE entities SET
       type = COALESCE(${patch.type ?? null}, type),
       status = COALESCE(${patch.status ?? null}, status),
+      followed = CASE ${patch.status ?? null}::text WHEN 'tracked' THEN true WHEN 'dismissed' THEN false ELSE followed END,
       fame = COALESCE(${patch.fame ?? null}, fame),
       fame_locked = COALESCE(${resolveFameLocked(patch)}, fame_locked)
     WHERE id = ${id}

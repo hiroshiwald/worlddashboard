@@ -71,6 +71,7 @@ function toAcceptedEntity(row: SqlRow): AcceptedEntity {
 async function resolveConflictedCandidate(sql: Sql, candidate: CandidateSnapshot): Promise<AcceptedEntity | null> {
   const existing = await sql`SELECT id, aliases FROM entities WHERE canonical_name = ${candidate.displayName}`;
   if (existing.length === 0) return null;
+  await sql`UPDATE entities SET followed = true WHERE id = ${existing[0].id}`;
   await deleteCandidate(sql, candidate.nameNorm);
   return toAcceptedEntity(existing[0]);
 }
@@ -82,8 +83,8 @@ async function resolveConflictedCandidate(sql: Sql, candidate: CandidateSnapshot
  * already has, so inlineFameCheck's alias merge never clobbers it. */
 export async function acceptCandidate(sql: Sql, candidate: CandidateSnapshot, type: string): Promise<AcceptedEntity | null> {
   const result = await sql`
-    INSERT INTO entities (canonical_name, type, status, first_seen_at, last_seen_at)
-    VALUES (${candidate.displayName}, ${type}, 'tracked', ${candidate.firstSeenAt}, ${candidate.lastSeenAt})
+    INSERT INTO entities (canonical_name, type, status, followed, first_seen_at, last_seen_at)
+    VALUES (${candidate.displayName}, ${type}, 'tracked', true, ${candidate.firstSeenAt}, ${candidate.lastSeenAt})
     ON CONFLICT (canonical_name) DO NOTHING
     RETURNING id
   `;

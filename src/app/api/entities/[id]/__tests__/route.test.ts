@@ -386,6 +386,14 @@ describe("PATCH /api/entities/[id]", () => {
     expect(body.status).toBe("tracked");
   });
 
+  it("Track sets followed and Ignore clears it, keyed off the status value", async () => {
+    const { sql, calls } = makeMockSql(() => [entityRow()]);
+    currentSql = sql;
+    await PATCH(patchRequest({ status: "tracked" }), { params: { id: "1" } });
+    expect(calls[0].query).toContain("followed = CASE  ? ::text WHEN 'tracked' THEN true WHEN 'dismissed' THEN false ELSE followed END");
+    expect(calls[0].values).toContain("tracked");
+  });
+
   it("setting fame also sets fame_locked=true", async () => {
     const { sql, calls } = makeMockSql(() => [entityRow({ fame: "famous", fame_locked: true })]);
     currentSql = sql;

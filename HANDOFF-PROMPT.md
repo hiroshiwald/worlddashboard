@@ -155,3 +155,8 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
 - Waiting on operator: the "tracked" decision above (option 1: `followed` flag, recommended; option 2: stop auto-adding only).
 - Catch-up Nov 10 to 16 running via scheduled ingest; check `GET /api/backfill`. Nov 1 to 9 skipped.
 - DECIDED 2026-11-17: operator chose option 1. Add migration 011 `entities.followed BOOLEAN NOT NULL DEFAULT false` (operator runs it in Neon before the code reaches `main`). Only the operator's Track sets `followed = true`; Ignore/Stop tracking clears it. Every "tracked" / "In your world" / "Mentions a tracked entity" label and filter reads `followed`. `status = 'tracked'` stays as "known to the system". Existing rows start unfollowed; the operator re-marks them.
+
+### State 2026-11-17 (night)
+- `main` = force-graph centring fix (strength 0.2, checked on live data).
+- Branch `claude/modest-mendel-vvxklr` is ahead of `main` with the `followed` flag (migration 011). Push to `main` only after the operator confirms 011 ran in Neon. feed.ts and graph.ts throw without the column.
+- Open: core labels overlap at strength 0.2. Old Entities and Network tabs still read status.

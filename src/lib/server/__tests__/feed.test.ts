@@ -92,6 +92,7 @@ describe("row shaping", () => {
     canonical_name: "Fictional Corp",
     type: "organization",
     status: "tracked",
+    followed: true,
     entity_first_seen_at: new Date(ISO),
   };
 
@@ -120,6 +121,16 @@ describe("row shaping", () => {
   it("converts a published_at value", () => {
     const article = toFeedArticle({ ...articleRow, published_at: "2026-02-28T00:00:00Z" }, []);
     expect(article.publishedAt).toBe("2026-02-28T00:00:00.000Z");
+  });
+
+  it("reads followed: a known but unfollowed entity is untracked", () => {
+    expect(toFeedEntity({ ...entityRow, followed: false }, "famous").status).toBe("candidate");
+    expect(toFeedEntity({ ...entityRow, status: "dismissed", followed: false }, "famous").status).toBe("dismissed");
+  });
+
+  it("throws when followed is missing (migration 011 not run)", () => {
+    const { followed: _omit, ...noFollowed } = entityRow;
+    expect(() => toFeedEntity(noFollowed, "famous")).toThrow(/migration 011/);
   });
 
   it("throws on an unknown entity status", () => {

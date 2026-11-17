@@ -13,7 +13,7 @@ import type { SqlRow } from "../db";
 const NOW = new Date("2026-11-16T12:00:00Z");
 
 function row(id: number, status: string, name = `Entity ${id}`): SqlRow {
-  return { id, canonical_name: name, type: "other", status, aliases: [], fame: "unknown", wiki_title: null };
+  return { id, canonical_name: name, type: "other", status, followed: false, aliases: [], fame: "unknown", wiki_title: null };
 }
 
 function fact(id: number, mentions14d: number): EntityFacts {
