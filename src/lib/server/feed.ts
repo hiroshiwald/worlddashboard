@@ -32,6 +32,7 @@ export interface FeedArticle {
   sourceCategory: string;
   firstSeenAt: string;
   publishedAt: string | null;
+  titleEn: string | null;
   entities: FeedEntity[];
   candidates: FeedCandidate[];
 }
@@ -125,6 +126,7 @@ export function toFeedArticle(row: SqlRow, entities: FeedEntity[], candidates: F
     sourceCategory: String(row.source_category),
     firstSeenAt: toIso(row.first_seen_at),
     publishedAt: row.published_at == null ? null : toIso(row.published_at),
+    titleEn: row.title_en == null ? null : String(row.title_en),
     entities,
     candidates,
   };
@@ -218,7 +220,7 @@ async function loadArticlePage(sql: Sql, params: FeedParams): Promise<SqlRow[]> 
   const fetchCount = params.limit + 1;
   if (params.before) {
     const { firstSeenAt, id } = params.before;
-    return sql`SELECT id, title, link, source_name, source_category, first_seen_at, published_at, summary
+    return sql`SELECT id, title, link, source_name, source_category, first_seen_at, published_at, title_en, summary
       FROM articles
       WHERE (first_seen_at, id) < (${firstSeenAt}::timestamptz, ${id}::bigint)
       ORDER BY first_seen_at DESC, id DESC LIMIT ${fetchCount}`;
@@ -228,13 +230,13 @@ async function loadArticlePage(sql: Sql, params: FeedParams): Promise<SqlRow[]> 
     // Exactly `limit` rows nearest the cursor (no probe row: trimming would
     // drop the row adjacent to the cursor), flipped to newest first.
     return sql`SELECT * FROM (
-        SELECT id, title, link, source_name, source_category, first_seen_at, published_at, summary
+        SELECT id, title, link, source_name, source_category, first_seen_at, published_at, title_en, summary
         FROM articles
         WHERE (first_seen_at, id) > (${firstSeenAt}::timestamptz, ${id}::bigint)
         ORDER BY first_seen_at ASC, id ASC LIMIT ${params.limit}
       ) newer ORDER BY first_seen_at DESC, id DESC`;
   }
-  return sql`SELECT id, title, link, source_name, source_category, first_seen_at, published_at, summary
+  return sql`SELECT id, title, link, source_name, source_category, first_seen_at, published_at, title_en, summary
     FROM articles ORDER BY first_seen_at DESC, id DESC LIMIT ${fetchCount}`;
 }
 

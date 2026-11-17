@@ -463,6 +463,22 @@ describe("fetchBatchResults: entity/relation/prominence parsing (via a succeeded
     expect([0, 1, 2, 3, 4, 5].map((i) => topics.get(i))).toEqual(["Gaza conflict", "Other", "Other", "Other", "Other", "x".repeat(60)]);
   });
 
+  it("parses an optional trimmed title_en; missing, non-string, empty or over-300-char values are dropped", async () => {
+    const entities: unknown[] = [];
+    const line = resultLine("0", succeededResult(JSON.stringify([
+      { index: 0, entities, title_en: "  Iran strikes continue " },
+      { index: 1, entities },
+      { index: 2, entities, title_en: 7 },
+      { index: 3, entities, title_en: "   " },
+      { index: 4, entities, title_en: "x".repeat(301) },
+      { index: 5, entities, title_en: "x".repeat(300) },
+    ])));
+    mockFetchOnce(textResponse(200, line));
+    const results = await fetchBatchResults("https://x/results") as { byChunk: Map<number, { titlesEn: Map<number, string> }> };
+    const titlesEn = results.byChunk.get(0)!.titlesEn;
+    expect([0, 1, 2, 3, 4, 5].map((i) => titlesEn.get(i))).toEqual(["Iran strikes continue", undefined, undefined, undefined, undefined, "x".repeat(300)]);
+  });
+
   it("defaults prominence to 'known' when missing or invalid", async () => {
     const line = resultLine("0", succeededResult(JSON.stringify([{ index: 0, entities: [{ name: "Someone", type: "person", prominence: "legendary" }] }])));
     mockFetchOnce(textResponse(200, line));

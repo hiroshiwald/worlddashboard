@@ -423,13 +423,14 @@ async function loadTopicLabels(sql: Sql): Promise<string[]> {
   return rows.map((r) => String(r.topic));
 }
 
-async function writeArticleTopics(sql: Sql, topicByArticle: Map<number, string>): Promise<void> {
+async function writeArticleTopics(sql: Sql, topicByArticle: Map<number, string>, titleEnByArticle: Map<number, string>): Promise<void> {
   if (topicByArticle.size === 0) return;
   const ids = Array.from(topicByArticle.keys());
   const topics = ids.map((id) => topicByArticle.get(id) as string);
+  const titlesEn = ids.map((id) => titleEnByArticle.get(id) ?? null);
   await sql`
-    UPDATE articles SET topic = t.topic
-    FROM unnest(${ids}::bigint[], ${topics}::text[]) AS t(id, topic)
+    UPDATE articles SET topic = t.topic, title_en = t.title_en
+    FROM unnest(${ids}::bigint[], ${topics}::text[], ${titlesEn}::text[]) AS t(id, topic, title_en)
     WHERE articles.id = t.id`;
 }
 
@@ -477,6 +478,7 @@ function applyBatchResults(
   candidatesByArticle: Map<number, Candidate[] | null>,
   relationsByArticle: Map<number, ExtractedRelation[]>,
   topicByArticle: Map<number, string>,
+  titleEnByArticle: Map<number, string>,
   tally: (reason: string) => void,
 ): number {
   let llmUsed = 0;
@@ -502,6 +504,8 @@ function applyBatchResults(
         llmUsed += 1;
         const topic = chunkResult?.topics.get(j);
         if (topic) topicByArticle.set(id, topic);
+        const titleEn = chunkResult?.titlesEn.get(j);
+        if (titleEn) titleEnByArticle.set(id, titleEn);
         const relations = chunkResult?.relations.get(j);
         if (relations && relations.length > 0) relationsByArticle.set(id, relations);
       } catch (err) {
@@ -544,8 +548,9 @@ async function resolveEndedBatch(sql: Sql, pending: PendingBatch, resultsUrl: st
   const relationsByArticle = new Map<number, ExtractedRelation[]>();
   const idsPerChunk = chunkArticles(pending.articleIds, MAX_BATCH_SIZE);
   const topicByArticle = new Map<number, string>();
-  const llmUsed = applyBatchResults(idsPerChunk, headById, results, candidatesByArticle, relationsByArticle, topicByArticle, tally);
-  await writeArticleTopics(sql, topicByArticle);
+  const titleEnByArticle = new Map<number, string>();
+  const llmUsed = applyBatchResults(idsPerChunk, headById, results, candidatesByArticle, relationsByArticle, topicByArticle, titleEnByArticle, tally);
+  await writeArticleTopics(sql, topicByArticle, titleEnByArticle);
 
   await recordBatchUsage(sql, currentUtcMonth(new Date()), results.inputTokens, results.outputTokens);
   await deletePendingBatch(sql, pending.batchId);
