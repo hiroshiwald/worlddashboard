@@ -376,7 +376,7 @@ function labelCandidates(it: LabelItem): Array<{ p: LabelPlacement; rect: Rect }
 
 /** Try right, left, above, below for each label; keep the least-overlapping side. Busy nodes choose first. Keyed by item key. */
 export function placeLabels(items: LabelItem[], extraObstacles: Rect[], width: number): Record<string, LabelPlacement> {
-  const obstacles = items.map((it) => ({ x: it.x - 9, y: it.y - 9, w: 18, h: 18 })).concat(extraObstacles);
+  const obstacles = items.map((it) => ({ x: it.x - it.r, y: it.y - it.r, w: 2 * it.r, h: 2 * it.r })).concat(extraObstacles);
   const placed: Rect[] = [];
   const result: Record<string, LabelPlacement> = {};
   const order = items.slice().sort((a, b) => b.busy - a.busy || a.key.localeCompare(b.key));

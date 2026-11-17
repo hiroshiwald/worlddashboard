@@ -100,6 +100,12 @@ describe("placeLabels", () => {
     expect(out.a).not.toEqual(out.b);
   });
 
+  it("keeps the label off a large neighbouring bubble", () => {
+    const big: LabelItem = { key: "big", x: 580, y: 100, r: 60, text: "Big", busy: 0 };
+    const out = placeLabels([item("a", 500, 100, 5), big], [], 1000);
+    expect(out.a.anchor).not.toBe("start");
+  });
+
   it("picks the one free side when three are blocked", () => {
     const wall = [
       { x: 505, y: 90, w: 60, h: 20 },

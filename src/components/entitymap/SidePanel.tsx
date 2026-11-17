@@ -2,15 +2,18 @@
 
 import { ratioText } from "@/lib/entity-growth";
 import { useEntityArticles, type EntityMapState } from "@/hooks/useEntityMap";
+import type { EmergingLoad } from "@/hooks/useEmerging";
+import type { EmergingItem } from "@/lib/emerging-types";
 import {
-  alsoTouches, countStats, edgeBetween, growingFastest, isContext, isGrowing, isNewLink, neighboursOf,
-  TOPICS_NOTE, type MapData,
+  countStats, edgeBetween, growingFastest, isContext, isGrowing, isNewLink, neighboursOf, type MapData,
 } from "./model";
+import { groupByAnchor, nearKnown, NO_ANCHOR_LABEL } from "./universe";
 import type { GraphNode } from "@/lib/server/graph";
 
 interface Props {
   dark: boolean;
   data: MapData;
+  emerging: EmergingLoad;
   generatedAt: string;
   total: { nodes: number; edges: number };
   state: EntityMapState;
@@ -22,23 +25,24 @@ function growthText(n: GraphNode): string {
   return n.state;
 }
 
-export default function SidePanel({ dark, data, generatedAt, total, state }: Props) {
+export default function SidePanel({ dark, data, emerging, generatedAt, total, state }: Props) {
   const muted = dark ? "text-slate-400" : "text-gray-500";
   const card = `rounded border p-3 ${dark ? "border-slate-700 bg-slate-800/50" : "border-gray-200 bg-white"}`;
-  const subject = state.entityId ?? (state.sel?.t === "n" ? state.sel.id : null);
+  const subject = state.entityId;
   return (
     <aside className="flex flex-col gap-3 text-sm" aria-label="Map details">
       <Stats data={data} total={total} muted={muted} card={card} />
       <Trace data={data} state={state} muted={muted} card={card} dark={dark} generatedAt={generatedAt} />
       <div className={card} data-testid="detail">
         {subject !== null && <EntityDetail data={data} id={subject} state={state} muted={muted} />}
-        {subject === null && state.sel?.t === "g" && <GroupDetail data={data} id={state.sel.id} state={state} muted={muted} />}
-        {subject === null && state.sel?.t === "e" && (
-          <EdgeDetail data={data} a={state.sel.a} b={state.sel.b} generatedAt={generatedAt} muted={muted} />
+        {subject === null && state.bubble !== null && <BubbleDetail data={data} emerging={emerging} state={state} muted={muted} />}
+        {subject === null && state.bubble === null && (
+          <>
+            <NewNear emerging={emerging} state={state} muted={muted} />
+            <Fastest data={data} state={state} muted={muted} />
+          </>
         )}
-        {subject === null && state.sel === null && <Fastest data={data} state={state} muted={muted} />}
       </div>
-      {state.scope.length > 0 && state.entityId === null && <ScopeDetail data={data} state={state} muted={muted} card={card} />}
     </aside>
   );
 }
@@ -67,8 +71,28 @@ function Stats({ data, total, muted, card }: { data: MapData; total: Props["tota
       <p className={`mt-2 text-xs ${muted}`}>
         Showing new and rising entities and their neighbours: {data.nodes.length} of {total.nodes} entities.
       </p>
-      {!data.usesClusters && <p className={`mt-1 text-xs ${muted}`}>{TOPICS_NOTE}</p>}
     </div>
+  );
+}
+
+function NewNear({ emerging, state, muted }: { emerging: EmergingLoad; state: EntityMapState; muted: string }) {
+  const list = emerging.status === "ready" ? nearKnown(emerging.data.items) : [];
+  return (
+    <>
+      <h3 className="mb-1 font-semibold">New near known</h3>
+      {emerging.status === "loading" && <p className={muted}>Loading new names...</p>}
+      {emerging.status === "error" && <p className={muted}>New names could not be loaded.</p>}
+      {emerging.status === "ready" && list.length === 0 && <p className={muted}>No new names next to known entities.</p>}
+      <ol className="flex flex-col gap-1">
+        {list.map((i) => (
+          <li key={i.key}>
+            <button type="button" className="flex w-full justify-between gap-2 text-left hover:underline" onClick={() => state.setBubble(i.anchors[0].id)}>
+              <span>{i.name}</span><span className={muted}>near {i.anchors[0].name}</span>
+            </button>
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }
 
@@ -76,7 +100,7 @@ function Fastest({ data, state, muted }: { data: MapData; state: EntityMapState;
   const list = growingFastest(data);
   return (
     <>
-      <h3 className="mb-1 font-semibold">Growing fastest</h3>
+      <h3 className="mb-1 mt-3 font-semibold">Growing fastest</h3>
       {list.length === 0 && <p className={muted}>Nothing is new or rising right now.</p>}
       <ol className="flex flex-col gap-1">
         {list.map((n) => (
@@ -88,40 +112,6 @@ function Fastest({ data, state, muted }: { data: MapData; state: EntityMapState;
         ))}
       </ol>
     </>
-  );
-}
-
-function GroupDetail({ data, id, state, muted }: { data: MapData; id: string; state: EntityMapState; muted: string }) {
-  const g = data.groups.find((x) => x.id === id);
-  if (!g) return null;
-  const members = g.ids.map((m) => data.byId.get(m)!).sort((a, b) => b.ratio - a.ratio).slice(0, 12);
-  return (
-    <>
-      <h3 className="font-semibold">{g.label}</h3>
-      <p className={muted}>{g.ids.length} entities{g.rising > 0 ? `, ${g.rising} growing` : ""}</p>
-      <button type="button" className="my-2 rounded border px-2 py-1" onClick={() => state.goScope([g.id])}>Focus this group</button>
-      <ul>{members.map((n) => <li key={n.id}><button type="button" className="hover:underline" onClick={() => state.goEntity(n.id)}>{n.name}</button></li>)}</ul>
-    </>
-  );
-}
-
-function ScopeDetail({ data, state, muted, card }: { data: MapData; state: EntityMapState; muted: string; card: string }) {
-  const touches = alsoTouches(data, state.scope).slice(0, 8);
-  const ids = state.scope.flatMap((g) => data.groups.find((x) => x.id === g)?.ids ?? []);
-  const fastest = ids.map((i) => data.byId.get(i)!).sort((a, b) => b.ratio - a.ratio).slice(0, 10);
-  return (
-    <div className={card} data-testid="scope-detail">
-      <h3 className="mb-1 font-semibold">Fastest growing here</h3>
-      <ol>{fastest.map((n) => (
-        <li key={n.id}><button type="button" className="hover:underline" onClick={() => state.goEntity(n.id)}>{n.name}</button> <span className={muted}>{growthText(n)}</span></li>
-      ))}</ol>
-      {touches.length > 0 && <p className={`mt-2 ${muted}`}>Also touches</p>}
-      <div className="flex flex-wrap gap-1">
-        {touches.map((g) => (
-          <button key={g.id} type="button" className="rounded-full border px-2 py-0.5 text-xs" onClick={() => state.goScope([...state.scope, g.id])}>+ {g.label}</button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -165,19 +155,6 @@ function Articles({ evidence, muted }: { evidence: ReturnType<typeof useEntityAr
   );
 }
 
-function EdgeDetail({ data, a, b, generatedAt, muted }: { data: MapData; a: string; b: string; generatedAt: string; muted: string }) {
-  const edge = edgeBetween(data, a, b);
-  if (!edge) return null;
-  return (
-    <>
-      <h3 className="font-semibold">{data.byId.get(a)?.name} and {data.byId.get(b)?.name}</h3>
-      <p className={muted}>{edge.articleCount} articles mention both. First together {edge.firstSeenAt.slice(0, 10)}.</p>
-      {isNewLink(edge, generatedAt) && <p className="text-sky-600">New in the last 2 days</p>}
-      <p className={muted}>Article evidence for a link is not available yet.</p>
-    </>
-  );
-}
-
 function Trace({ data, state, muted, card, dark, generatedAt }: { data: MapData; state: EntityMapState; muted: string; card: string; dark: boolean; generatedAt: string }) {
   const options = data.nodes.slice().sort((x, y) => x.name.localeCompare(y.name));
   const field = `w-full rounded border px-1 py-1 ${dark ? "border-slate-600 bg-slate-900" : "border-gray-300 bg-white"}`;
@@ -211,5 +188,38 @@ function Trace({ data, state, muted, card, dark, generatedAt }: { data: MapData;
         <button type="button" className="mt-2 rounded border px-2 py-1" onClick={() => { state.setFrom(""); state.setTo(""); }}>Clear trace</button>
       )}
     </div>
+  );
+}
+
+const MAX_LISTED = 30;
+
+function BubbleDetail({ data, emerging, state, muted }: { data: MapData; emerging: EmergingLoad; state: EntityMapState; muted: string }) {
+  const bubble = emerging.status === "ready" ? groupByAnchor(emerging.data.items).find((b) => b.id === state.bubble) : undefined;
+  if (bubble === undefined) return <p className={muted}>These new names are no longer listed.</p>;
+  const shown = bubble.items.slice(0, MAX_LISTED);
+  return (
+    <div data-testid="bubble-detail">
+      <h3 className="font-semibold">{bubble.label}</h3>
+      <p className={muted}>{bubble.items.length} new {bubble.items.length === 1 ? "name" : "names"}</p>
+      <ul className="mt-2 flex flex-col gap-3">
+        {shown.map((i) => <NewName key={i.key} item={i} data={data} state={state} muted={muted} />)}
+      </ul>
+      {bubble.items.length > shown.length && <p className={`mt-2 ${muted}`}>and {bubble.items.length - shown.length} more</p>}
+    </div>
+  );
+}
+
+function NewName({ item, data, state, muted }: { item: EmergingItem; data: MapData; state: EntityMapState; muted: string }) {
+  const others = item.anchors.slice(1);
+  const inGraph = item.kind === "entity" && data.byId.has(item.key);
+  return (
+    <li>
+      <p className="font-medium">{item.name} <span className={`font-normal ${muted}`}>{item.type}</span></p>
+      <p className={muted}>First seen {item.firstSeenAt.slice(0, 10)}, {item.mentions} {item.mentions === 1 ? "mention" : "mentions"}</p>
+      {others.length > 0 && <p className={muted}>Also near {others.map((a) => a.name).join(", ")}</p>}
+      {item.anchors.length === 0 && <p className={muted}>{NO_ANCHOR_LABEL}</p>}
+      <ul className="list-disc pl-4">{item.sampleTitles.map((t) => <li key={t}>{t}</li>)}</ul>
+      {inGraph && <button type="button" className="mt-1 rounded border px-2 py-0.5 text-xs" onClick={() => state.goEntity(item.key)}>Open entity level</button>}
+    </li>
   );
 }
