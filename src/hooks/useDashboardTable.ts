@@ -147,7 +147,7 @@ export function useDashboardTable(): UseDashboardTableReturn {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [dark, setDark] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>("brief");
+  const [activeTab, setActiveTab] = useState<TabKey>("newsfeed");
   const [candidateCount, setCandidateCount] = useState(0);
   const [panelEntityId, setPanelEntityId] = useState<number | null>(null);
   const [mapFocus, setMapFocus] = useState<MapFocus>(null);

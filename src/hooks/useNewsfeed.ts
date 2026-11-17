@@ -6,7 +6,7 @@ import {
   cursorOf,
   mergeNewer,
   applyEntityStatus,
-  applyCandidateTracked,
+  applyCandidateStatus,
   type FeedArticle,
   type FeedCandidate,
   type FeedEntity,
@@ -230,12 +230,21 @@ function useActions(pages: Pages, reloadGrowth: () => Promise<void>) {
     (candidate: FeedCandidate) =>
       run(`c${candidate.nameNorm}`, async () => {
         await sendJson("POST", "/api/candidates", { nameNorm: candidate.nameNorm, action: "accept", type: candidate.typeHint });
-        setItems((prev) => applyCandidateTracked(prev, candidate));
+        setItems((prev) => applyCandidateStatus(prev, candidate, "tracked"));
       }),
     [run, setItems],
   );
 
-  return { busy, actionError, setEntityStatus, trackCandidate };
+  const dismissCandidate = useCallback(
+    (candidate: FeedCandidate) =>
+      run(`c${candidate.nameNorm}`, async () => {
+        await sendJson("POST", "/api/candidates", { nameNorm: candidate.nameNorm, action: "dismiss" });
+        setItems((prev) => applyCandidateStatus(prev, candidate, "dismissed"));
+      }),
+    [run, setItems],
+  );
+
+  return { busy, actionError, setEntityStatus, trackCandidate, dismissCandidate };
 }
 
 export function useNewsfeed() {

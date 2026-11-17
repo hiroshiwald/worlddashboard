@@ -183,7 +183,7 @@ export function useCandidateQueue(onCountChange: (count: number) => void) {
   const dismissOne = useCallback((nameNorm: string) =>
     runRowAction(nameNorm, "dismiss", undefined, (before) => {
       setToast({
-        message: `${before.displayName} dismissed — it will not be suggested again. Reversible from Status: Dismissed in the Tracked view.`,
+        message: `${before.displayName} ignored. It will not be suggested again. Reverse it from the Ignored filter in the Entities tab.`,
         onUndo: () => {
           retrackEntityByName(before.displayName).catch((e) => {
             setActionError(e instanceof Error ? e.message : "Undo failed");

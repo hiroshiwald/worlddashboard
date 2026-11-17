@@ -91,13 +91,13 @@ function FameControl({ row, busy, onPatch, dark }: { row: EntityRowData; busy: b
 
 function StatusCell({ row, busy, onPatch }: { row: EntityRowData; busy: boolean; onPatch: EntityRowProps["onPatch"] }) {
   const next = row.status === "tracked" ? "dismissed" : "tracked";
-  const label = row.status === "tracked" ? "Dismiss" : "Track";
+  const label = row.status === "tracked" ? "Ignore" : "Track";
   const title = row.status === "tracked"
-    ? `Dismisses ${row.canonicalName} — stops collecting new mentions. Reversible.`
+    ? `Ignores ${row.canonicalName} — stops collecting new mentions. Reversible.`
     : `Tracks ${row.canonicalName} again. Reversible.`;
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs">{row.status}</span>
+      <span className="text-xs">{row.status === "dismissed" ? "ignored" : row.status}</span>
       <button
         onClick={(e) => { stopRow(e); onPatch(row.id, { status: next }); }}
         disabled={busy}

@@ -7,7 +7,7 @@ import {
   timeLabel,
   isStale,
   applyEntityStatus,
-  applyCandidateTracked,
+  applyCandidateStatus,
   mergeNewer,
   rowEntities,
   type FeedArticle,
@@ -106,9 +106,15 @@ describe("state changes", () => {
   });
   it("moves an accepted candidate into entities as tracked", () => {
     const a = article();
-    const out = applyCandidateTracked([a], a.candidates[0]);
+    const out = applyCandidateStatus([a], a.candidates[0], "tracked");
     expect(out[0].candidates).toHaveLength(0);
     expect(out[0].entities.at(-1)).toMatchObject({ name: "Cyan", status: "tracked", type: "company" });
+  });
+  it("moves an ignored candidate into entities as dismissed", () => {
+    const a = article();
+    const out = applyCandidateStatus([a], a.candidates[0], "dismissed");
+    expect(out[0].candidates).toHaveLength(0);
+    expect(out[0].entities.at(-1)).toMatchObject({ name: "Cyan", status: "dismissed" });
   });
   it("merges newer articles once, on top", () => {
     const merged = mergeNewer([article({ id: "1" })], [article({ id: "2" }), article({ id: "1" })]);
