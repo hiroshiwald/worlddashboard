@@ -118,31 +118,13 @@ You lead. Cheaper agents execute.
 
 When a phase ends, say in plain English: what changed, what you checked, what you could not check, and what you need from the operator.
 
-## Progress log (build session, 2026-11-16)
+## Progress log
 
-Work branch: `claude/laughing-wozniak-gkhavi`. It holds `main` + the redesign branch + these docs. `main` is unchanged.
+Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026-11-17:
 
-- Step 1 done: production runs `1396acf`; `lastIngestAt` is current; `/api/tick` returned `fresh` twice.
-- Found: `.github/workflows/ingest.yml` (every 30 min, secret `INGEST_SECRET` already set) is `disabled_inactivity` since 2026-10-31. Re-enabling it answers open decision 1.
-- Found: LLM extraction est. ~$14/month vs the $5 cap (`llm_monthly_budget_usd`), so tagging likely stops mid-month. Estimate only; check `llm_usage` in production.
-- Step 2: merged on the work branch, checks pass. Waiting for the operator's go to push to `main`.
-- Phase 2 done: `src/lib/{entity-growth,entity-paths,soft-merge,topic-membership,map-layout}.ts`.
-- Phase 3a: done and merged (see DEVLOG 2026-11-16 Phase 3a). SQL runs only on Vercel previews of this branch; the previews read the production DB.
-- Blocker for the Newsfeed: untracked names are in `entity_candidates`, which has no article link. Decide: match candidate names against title and summary at read time (no migration, recommended first), or add an `article_candidates` table (migration, needs approval).
-- Check: why the newest ingest run's articles have no entities (pending batch or budget gate). See `submitBatch` in `llm-extract.ts`.
-- Next: Phase 4 UI, one Sonnet agent per tab (Newsfeed, Entities changes plus a Suggested merges segment, Entity map). Specs: guide 5.1 to 5.3. Contracts: the exported types in `feed.ts`, `graph.ts`, `entity-list-facts.ts`, `merge-suggestions.ts`.
-- Phase 3b: not started. Proposed migration 009: `ALTER TABLE articles ADD COLUMN topic TEXT;` plus index `(topic, first_seen_at) WHERE topic IS NOT NULL`. Est. +$0.06/day. Needs operator approval.
-- Operator questions 1 to 7 were sent in chat, with no answer yet: push to main, re-enable ingest job, Newsfeed box, proof count, persons, topic migration, budget cap.
-- Helper worktrees start from `main`. Each brief must start with `git fetch origin claude/laughing-wozniak-gkhavi && git reset --hard FETCH_HEAD` and a node_modules symlink.
-- Live check on preview `6a85dfb` (2026-11-16 23:10Z):
-  - `/api/graph` returns 1,622 nodes and 4,981 edges, `capped` false. Tracked entities alone exceed 300 and are never dropped. The UI must filter (guide 6.7 rule 3: New or Rising plus direct neighbors) or the cap rule needs a change.
-  - `/api/entities?sort=growth` works. `status=all` is not a valid value; omit `status` instead.
-  - `/api/entities/merges` is mostly right: US <- U.S, USA, EE.UU.; Russia <- Russland. Some are wrong: Taiwan <- "Chinese", Latin America <- "South America". This is why a person must approve real merges.
-- Growth: cause found with live counts (DEVLOG 2026-11-17). Collection was steady; duplicate rows split counts. Growth now runs on display-merge groups. Verify the 6.7 acceptance test on a preview.
-- Untracked names in the Newsfeed: decided and built. Read-time whole-word match in title and summary (`src/lib/candidate-match.ts`), no migration. `GET /api/feed` items carry `candidates`.
-- Phase 4 done on the work branch (DEVLOG 2026-11-16, last three entries): Newsfeed, Entities changes with Suggested merges (read-only), Entity map. Each checked with live payloads through route interception. Open: map groups are "Group N" until topics exist (Phase 3b); map trace has no per-hop evidence (no endpoint); Newsfeed growth marker covers only the top 200 by growth (`/api/entities` has no `ids` filter); no way back to candidate status.
-- `main` = `130686d` (Phase 4). The work branch is ahead with topics, merged growth, budget $10.
-- BLOCKER for the next push to `main`: migration 009 must run on the production database first (ingest and `/api/graph` read `articles.topic`). Operator chose topics; the operator runs SQL in the Neon console (006 and 007 were applied by hand).
-- Operator action pending: re-enable the "Hourly ingest" GitHub workflow (Actions tab, Enable workflow). No tool here can enable it.
-- Next after 009: push to `main`, check one ingest writes topics, check `/api/graph` clusters, then Phase 5 checks (guide section 9).
-- Duplicate tracked rows exist (Putin and Vladimir Putin; Zelenskyy and Volodymyr Zelensky). The merges review list covers them.
+- `main` = `20ba496` (Phase 4 tabs, topics code, merged growth). Migration 009 is applied (operator ran it in Neon). Ingest GitHub workflow re-enabled by the operator.
+- Work branch `claude/laughing-wozniak-gkhavi` is ahead of `main` with: growth scaled to collection volume, Newsfeed matching fixes, the activity off switch (`/api/activity`, header button, `activity_paused` setting, ingest job treats paused as success), hidden tabs (Brief, Feeds, Developments; code kept), Newsfeed Ignore, Entities "Ignored" wording.
+- Next: check the branch preview (growth top list, Newsfeed), then push to `main` (operator approved these features). Then confirm an ingest run writes `articles.topic` and `/api/graph` returns clusters.
+- Open: duplicate rows still list separately in Entities (spec 6.7 wants one row per merge group). Map trace has no per-hop evidence. November LLM usage is 6 calls vs 129 in October; cause not checked. Off switch does not gate `/api/sources` or user-triggered Wikidata calls.
+- Operator decisions made 2026-11-17: hide old tabs except Network and Map; build share-of-mentions growth; budget cap $10; off switch; Ignore with a listable, reversible Ignored filter.
+- Rules learned: get data before choosing a fix (two growth guesses were wasted). Test mocks route SQL by substring; give new queries a unique alias. Helpers over 150k tokens: split the work smaller.
