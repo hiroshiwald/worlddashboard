@@ -2841,3 +2841,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: `BACKFILL_FROM` = 2026-11-10 (operator decision). Nov 1 to 9 skipped for budget; noted in HANDOFF-PROMPT.md.
 - What it affected: `backfill.ts` and tests. Full window had 11,355 articles, estimate $7.38.
 - Gotchas: Pushed to `main`; the catch-up starts on the next scheduled ingest.
+
+## 2026-11-17
+- Entity map Universe is now a force-directed graph (UniverseGraph.tsx, pure forcegraph.ts): whole graph plus new names in one viewport, sticky side panel.
+- Affected: useEntityMap (bubble/item replaced by `selected`; data is now all live nodes, filterGraph replaced by liveGraph), SidePanel, NameCard; deleted MapSvg, pack, groupByAnchor, bubbleRadius and tests.
+- Gotcha: react-force-graph mutates nodes/links, so it gets copies; link ends become objects after init (endId). Not visually driven in a browser.

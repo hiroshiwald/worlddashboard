@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GraphEdge, GraphNode } from "@/lib/server/graph";
 import {
-  buildMapData, filterGraph, growingFastest, layoutEntity, parseGraph, traceConnection,
+  buildMapData, growingFastest, layoutEntity, liveGraph, parseGraph, traceConnection,
 } from "../model";
 
 function node(id: string, over: Partial<GraphNode> = {}): GraphNode {
@@ -15,23 +15,12 @@ function edge(a: string, b: string, weight = 1, over: Partial<GraphEdge> = {}): 
   return { a, b, articleCount: weight, weight, firstSeenAt: "2026-01-01T00:00:00Z", lastSeenAt: "2026-01-02T00:00:00Z", ...over };
 }
 
-describe("filterGraph", () => {
-  it("keeps growing nodes and direct neighbours only", () => {
-    const nodes = [node("1", { state: "Rising", ratio: 3 }), node("2"), node("3")];
-    const out = filterGraph(nodes, [edge("1", "2"), edge("2", "3")]);
-    expect(out.nodes.map((n) => n.id).sort()).toEqual(["1", "2"]);
-  });
-
-  it("takes strongest edges first when the cap bites", () => {
-    const nodes = [node("1", { state: "Rising" }), node("2"), node("3"), node("4")];
-    const out = filterGraph(nodes, [edge("1", "2", 1), edge("1", "3", 9), edge("1", "4", 5)], [], 3);
-    expect(out.nodes.map((n) => n.id).sort()).toEqual(["1", "3", "4"]);
-  });
-
-  it("drops merged nodes and honours forced ids", () => {
+describe("liveGraph", () => {
+  it("drops merged nodes, self-links and edges to dropped nodes", () => {
     const nodes = [node("1", { mergedInto: "2" }), node("2"), node("3")];
-    const out = filterGraph(nodes, [edge("1", "2"), edge("2", "3")], ["2"]);
-    expect(out.nodes.map((n) => n.id).sort()).toEqual(["2", "3"]);
+    const out = liveGraph(nodes, [edge("1", "2"), edge("2", "3"), edge("3", "3")]);
+    expect(out.nodes.map((n) => n.id)).toEqual(["2", "3"]);
+    expect(out.edges).toHaveLength(1);
   });
 });
 

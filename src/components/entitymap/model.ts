@@ -4,8 +4,6 @@ import { ratioText } from "@/lib/entity-growth";
 import { buildAdjacency, shortestPath, type Adjacency } from "@/lib/entity-paths";
 import type { Point } from "@/lib/map-layout";
 
-export const MAP_CAP = 300;
-const MAX_EDGES = 1200;
 const ENTITY_RING = 190;
 const MAX_IN_BUBBLE = 12;
 export const LINKED_ID = "linked";
@@ -39,34 +37,11 @@ export function parseGraph(raw: unknown): GraphResponse {
   return g as GraphResponse;
 }
 
-function pickSeeds(nodes: GraphNode[], forced: Set<string>, cap: number): GraphNode[] {
-  const seeds = nodes.filter((n) => forced.has(n.id) || isGrowing(n));
-  const rank = (n: GraphNode) => (forced.has(n.id) ? Infinity : n.ratio);
-  return seeds.sort((a, b) => rank(b) - rank(a) || a.id.localeCompare(b.id)).slice(0, cap);
-}
-
-/** New or Rising entities plus direct neighbours, strongest links first, at most `cap` nodes (6.7 rule 3). */
-export function filterGraph(
-  all: GraphNode[],
-  allEdges: GraphEdge[],
-  forceIds: string[] = [],
-  cap: number = MAP_CAP,
-): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const live = new Map(all.filter((n) => n.mergedInto === null).map((n) => [n.id, n]));
-  const edges = allEdges
-    .filter((e) => e.a !== e.b && live.has(e.a) && live.has(e.b))
-    .sort((x, y) => y.weight - x.weight || x.a.localeCompare(y.a) || x.b.localeCompare(y.b));
-  const forced = new Set(forceIds.filter((id) => live.has(id)));
-  const seeds = new Set(pickSeeds([...live.values()], forced, cap).map((n) => n.id));
-  const kept = new Set(seeds);
-  for (const e of edges) {
-    if (kept.size >= cap) break;
-    if (seeds.has(e.a) && !kept.has(e.b)) kept.add(e.b);
-    else if (seeds.has(e.b) && !kept.has(e.a)) kept.add(e.a);
-  }
-  const nodes = [...kept].map((id) => live.get(id)!);
-  const keptEdges = edges.filter((e) => kept.has(e.a) && kept.has(e.b)).slice(0, MAX_EDGES);
-  return { nodes, edges: keptEdges };
+/** Every live (not merged) entity and the edges between them: the whole universe the endpoint returned. */
+export function liveGraph(all: GraphNode[], allEdges: GraphEdge[]): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const nodes = all.filter((n) => n.mergedInto === null);
+  const live = new Set(nodes.map((n) => n.id));
+  return { nodes, edges: allEdges.filter((e) => e.a !== e.b && live.has(e.a) && live.has(e.b)) };
 }
 
 /** The shown graph as lookup tables. */
