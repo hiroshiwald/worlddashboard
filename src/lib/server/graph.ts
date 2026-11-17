@@ -60,7 +60,8 @@ export interface GraphResponse {
   generatedAt: string;
 }
 
-const WINDOW_DAYS = 14;
+// 30 days so the Entity map can window links to 7, 14 or 30 days in the browser.
+const WINDOW_DAYS = 30;
 const MAX_CANDIDATES = 150;
 const MAX_NODES = 300;
 

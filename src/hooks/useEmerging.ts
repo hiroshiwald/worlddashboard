@@ -12,14 +12,15 @@ export type EmergingLoad =
 
 export type Resolution = "tracked" | "ignored";
 
-async function fetchEmerging(): Promise<EmergingResponse> {
-  const res = await fetch("/api/emerging", { cache: "no-store" });
+async function fetchEmerging(days: number): Promise<EmergingResponse> {
+  const res = await fetch(`/api/emerging?days=${days}`, { cache: "no-store" });
   if (res.status === 503) throw new Error("The database is not configured yet.");
   if (!res.ok) throw new Error(`Failed to load new names (${res.status})`);
   return parseEmerging(await res.json());
 }
 
-export function useEmerging() {
+/** days: the look-back window, 1..30 (the API rejects anything else). */
+export function useEmerging(days = 7) {
   const [load, setLoad] = useState<EmergingLoad>({ status: "loading" });
   const [resolved, setResolved] = useState<Record<string, Resolution>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -28,11 +29,11 @@ export function useEmerging() {
   const reload = useCallback(() => {
     setLoad({ status: "loading" });
     setResolved({});
-    fetchEmerging().then(
+    fetchEmerging(days).then(
       (data) => setLoad({ status: "ready", data }),
       (e: Error) => setLoad({ status: "error", message: e.message }),
     );
-  }, []);
+  }, [days]);
   useEffect(reload, [reload]);
 
   const resolve = useCallback(async (item: EmergingItem, action: NameAction) => {
