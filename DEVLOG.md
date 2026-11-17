@@ -2812,3 +2812,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: `EmergingAnchor` gains `type`. `anchorRank`: person/company 0, other 1, country/region/city 2, no anchor 3. Applied to anchors per item, item order in `/api/emerging`, bubble order and the "New near known" list. Newsfeed headline text drops the " - Publisher" suffix (`stripPublisherSuffix`).
 - What it affected: `emerging-types.ts`, `emerging.ts`, `entitymap/universe.ts`, `newsfeed/FeedRow.tsx`, tests. Gate: tsc, 1226 tests, build pass.
 - Gotchas: Operator approved the push to `main`.
+
+## 2026-11-17
+- Newsfeed shows English headlines for non-English articles (title_en, migration 010) with a "Translated" tag; original on hover.
+- Touched llm-extract (parseTitleEn), entity-ingest (one UPDATE writes topic + title_en), feed.ts, FeedRow, feed-logic headline().
+- Gotcha: vitest has no JSX transform, so FeedRow logic lives in pure headline() for testing.

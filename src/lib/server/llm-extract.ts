@@ -45,8 +45,9 @@ const RELATION_TYPES = [
 
 const SYSTEM_PROMPT = [
   "You are an entity and relationship extractor for news headlines.",
-  'Return ONLY a JSON array, one object per article: {"index": n, "entities": [{"name": "...", "type": "...", "role": "short role/context phrase if stated, else omit", "prominence": "famous"|"known"|"obscure"}], "relations": [{"source": "...", "target": "...", "relation": "..."}], "topic": "..."}.',
+  'Return ONLY a JSON array, one object per article: {"index": n, "entities": [{"name": "...", "type": "...", "role": "short role/context phrase if stated, else omit", "prominence": "famous"|"known"|"obscure"}], "relations": [{"source": "...", "target": "...", "relation": "..."}], "topic": "...", "title_en": "..."}.',
   `"topic" is a broad, reusable theme of 1 to 3 words, never an event-specific label. Good: "AI", "US politics", "Crypto", "Ukraine war", "Aviation". Bad: "Hungarian corruption investigation", "FAA funding request". Use "${OTHER_TOPIC}" when you cannot place it.`,
+  '"title_en" is an English translation of the article title, without any " - Publisher" suffix. Include it only when the title is not in English; omit it otherwise.',
   `"type" is one of: ${ENTITY_TYPES.join("|")}.`,
   '"prominence" is how widely known the entity is to a general news reader: "famous" (a household name), "known" (a regular news reader would recognize it), or "obscure" (needs explanation).',
   `"relation" is one of: ${RELATION_TYPES.join("|")}; a relation's "source" and "target" must exactly match names in that same article's own "entities" list.`,
@@ -375,9 +376,21 @@ function parseTopic(raw: unknown): string {
   return topic;
 }
 
+const MAX_TITLE_EN_CHARS = 300;
+
+// Optional: only non-English titles get a translation. Anything but a
+// non-empty trimmed string within bounds is treated as absent.
+function parseTitleEn(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const title = raw.trim();
+  if (title.length === 0 || title.length > MAX_TITLE_EN_CHARS) return null;
+  return title;
+}
+
 interface RawArticleResult {
   index: number;
   topic: string;
+  titleEn: string | null;
   entities: RawEntity[];
   relations: ExtractedRelation[];
 }
@@ -392,7 +405,7 @@ function parseRawArticleResult(raw: unknown): { result: RawArticleResult; unknow
   const entityNames = new Set(entities.map((e) => e.name));
   const { relations, unknownTypeDrops } = parseRawRelations(r.relations, entityNames);
 
-  return { result: { index: r.index, topic: parseTopic(r.topic), entities, relations }, unknownRelationTypeDrops: unknownTypeDrops };
+  return { result: { index: r.index, topic: parseTopic(r.topic), titleEn: parseTitleEn(r.title_en), entities, relations }, unknownRelationTypeDrops: unknownTypeDrops };
 }
 
 // Strips markdown/prose wrapping (e.g. a ```json fence) down to the JSON
@@ -469,6 +482,7 @@ export interface ChunkExtractionResult {
   candidates: Map<number, Candidate[]>;
   relations: Map<number, ExtractedRelation[]>;
   topics: Map<number, string>;
+  titlesEn: Map<number, string>; // only articles the model translated
 }
 
 function parseChunkMessage(message: AnthropicMessageResponse): ChunkExtractionResult | null {
@@ -477,12 +491,14 @@ function parseChunkMessage(message: AnthropicMessageResponse): ChunkExtractionRe
   const candidates = new Map<number, Candidate[]>();
   const relations = new Map<number, ExtractedRelation[]>();
   const topics = new Map<number, string>();
-  for (const { index, topic, entities, relations: articleRelations } of parsed) {
+  const titlesEn = new Map<number, string>();
+  for (const { index, topic, titleEn, entities, relations: articleRelations } of parsed) {
     topics.set(index, topic);
+    if (titleEn) titlesEn.set(index, titleEn);
     candidates.set(index, buildCandidates(entities));
     relations.set(index, articleRelations);
   }
-  return { candidates, relations, topics };
+  return { candidates, relations, topics, titlesEn };
 }
 
 // ---- submit ----

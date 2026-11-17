@@ -1,3 +1,4 @@
+import { stripPublisherSuffix } from "@/lib/candidate-match";
 import type { FeedArticle, FeedCandidate, FeedEntity, FeedResponse } from "@/lib/server/feed";
 
 export type { FeedArticle, FeedCandidate, FeedEntity, FeedResponse };
@@ -7,6 +8,12 @@ const HOUR_MS = 60 * 60 * 1000;
 const NEW_ENTITY_MS = 24 * HOUR_MS;
 const PUBLISH_LAG_MS = 6 * HOUR_MS;
 const STALE_MS = 2 * HOUR_MS;
+
+/** Headline text, plus the original title when it was translated (shown on hover with a "Translated" tag). */
+export function headline(article: FeedArticle): { text: string; original: string | null } {
+  if (article.titleEn) return { text: article.titleEn, original: article.title };
+  return { text: stripPublisherSuffix(article.title), original: null };
+}
 
 /** One entity-or-candidate line in an article's third column. */
 export interface RowEntity {

@@ -1,7 +1,6 @@
 "use client";
-import { stripPublisherSuffix } from "@/lib/candidate-match";
-
 import {
+  headline,
   rowEntities,
   worldNote,
   timeLabel,
@@ -100,15 +99,17 @@ function EntityLine({ row, index, h }: { row: RowEntity; index: number; h: RowHa
 
 export default function FeedRow({ article, h }: { article: FeedArticle; h: RowHandlers }) {
   const rows = rowEntities(article);
+  const title = headline(article);
   const tracked = worldNote(article).inWorld.length > 0;
   const accent = tracked ? "border-l-blue-500" : "border-l-transparent";
   const divider = h.dark ? "border-slate-700" : "border-gray-200";
   return (
     <article className={`grid gap-x-5 gap-y-1.5 border-t border-l-[3px] px-4 py-3 md:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1.3fr)] ${divider} ${accent}`}>
       <div>
-        <a href={article.link} target="_blank" rel="noopener noreferrer" className="text-[15px] font-semibold leading-snug hover:underline">
-          {stripPublisherSuffix(article.title)}
+        <a href={article.link} target="_blank" rel="noopener noreferrer" title={title.original ?? undefined} className="text-[15px] font-semibold leading-snug hover:underline">
+          {title.text}
         </a>
+        {title.original && <span className={`ml-2 text-[11px] ${muted(h.dark)}`}>Translated</span>}
         <WorldBox article={article} dark={h.dark} />
       </div>
       <div className="text-sm">

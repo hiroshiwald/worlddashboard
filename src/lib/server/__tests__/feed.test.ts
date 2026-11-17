@@ -105,11 +105,16 @@ describe("row shaping", () => {
       sourceCategory: "business",
       firstSeenAt: ISO,
       publishedAt: null,
+      titleEn: null,
       entities: [
         { id: "3", name: "Fictional Corp", type: "organization", status: "tracked", role: "famous", firstSeenAt: ISO },
       ],
       candidates: [],
     });
+  });
+
+  it("maps title_en to titleEn", () => {
+    expect(toFeedArticle({ ...articleRow, title_en: "Plant opens" }, []).titleEn).toBe("Plant opens");
   });
 
   it("converts a published_at value", () => {

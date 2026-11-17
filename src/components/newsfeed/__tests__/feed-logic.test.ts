@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  headline,
   parseFeedResponse,
   cursorOf,
   worldNote,
@@ -25,6 +26,7 @@ function article(over: Partial<FeedArticle> = {}): FeedArticle {
     sourceCategory: "news",
     firstSeenAt: "2026-11-16T11:00:00.000Z",
     publishedAt: null,
+    titleEn: null,
     entities: [
       { id: "1", name: "Acme", type: "company", status: "tracked", role: "satellite", firstSeenAt: "2026-01-01T00:00:00.000Z" },
       { id: "2", name: "Bolt", type: "company", status: "candidate", role: "satellite", firstSeenAt: "2026-01-01T00:00:00.000Z" },
@@ -119,5 +121,15 @@ describe("state changes", () => {
   it("merges newer articles once, on top", () => {
     const merged = mergeNewer([article({ id: "1" })], [article({ id: "2" }), article({ id: "1" })]);
     expect(merged.map((a) => a.id)).toEqual(["2", "1"]);
+  });
+});
+
+describe("headline", () => {
+  it("uses the translation and keeps the original for hover", () => {
+    expect(headline(article({ title: "Irán ataca - Diario", titleEn: "Iran attacks" }))).toEqual({ text: "Iran attacks", original: "Irán ataca - Diario" });
+  });
+
+  it("strips the publisher suffix when there is no translation", () => {
+    expect(headline(article({ title: "Iran attacks - Wire", titleEn: null }))).toEqual({ text: "Iran attacks", original: null });
   });
 });
