@@ -163,6 +163,7 @@ Older entries (2026-08-20 to 2026-11-16): DEVLOG-ARCHIVE.md. Do not read it at s
 - What changed: `SYSTEM_PROMPT` in `llm-extract.ts` now says title_en MUST be included for every non-English title (was "include only when not English", left to model discretion). Test asserts the wording.
 - What it affected: LLM batch prompt only; no schema or UI change.
 - Gotchas: Live /api/feed (50 items): all newest tick (04:25 UTC: NOS, Bild) lack titleEn because their batch is still pending (titleEn is written only when the Batches result is applied; ingest then marks them processed). One older row (Die Zeit, 03:51) lacks it in a resolved batch: model omission, or heuristic fallback (no key, 6h timeout, budget gate), which never retries. Not confirmed without DB access. Heuristic-fallback rows and the pending-batch delay are NOT fixed. Backfill SQL for old rows: none run; /api/backfill only covers topic IS NULL rows in Nov 10-16.
+
 ## 2026-11-17 — Newsfeed: drop the "In your world" box
 - What changed: removed WorldBox and `worldNote`; tracked names now carry a "Tracking" pill (replacing the ✓, already listed first) and rows with a tracked entity get a left emerald accent. New `hasTracked` drives the accent and the "Mentions a tracked entity" filter.
 - What it affected: FeedRow.tsx, feed-logic.ts and its test. "Not tracked yet" duplicated the entity column, so nothing replaces it.
