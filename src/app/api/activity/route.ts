@@ -8,7 +8,6 @@ function activityJson(paused: boolean, since: number) {
   return { paused, since: paused ? new Date(since).toISOString() : null };
 }
 
-// Unauthenticated, like entities PATCH: the operator tool is the header button.
 export async function GET() {
   if (!process.env.DATABASE_URL) {
     return NextResponse.json({ error: "DATABASE_URL is not configured" }, { status: 503 });

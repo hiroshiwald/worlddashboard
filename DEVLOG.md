@@ -147,3 +147,8 @@ Older entries (2026-08-20 to 2026-11-16): DEVLOG-ARCHIVE.md. Do not read it at s
 - What changed: `useSession` hook, `AdminContext` (one provider in `DashboardTable`), `AdminAuthControl` in the header, `PauseActivityButton` restored (admin only). Track/Ignore, candidate queue actions, entity status/fame edits and signal actions hidden for general.
 - What it affected: HeaderBar, DashboardTable, FeedRow, EntityPopup, NameCard, EntityRow, CandidateRow, BulkActionsBar, ManagedSignalCard. A 401 shows the server's "Admin login required" through the existing `sendJson` error message.
 - Gotchas: vitest 4 had no JSX transform; added `oxc.jsx.runtime: "automatic"` to vitest.config.ts so component tests can import .tsx. Context chosen over a prop because controls span six tabs. `git stash` is unsafe while the server helper edits the same tree.
+
+## 2026-11-17 — Login server side
+- What changed: `session.ts` (HMAC-SHA256 token, Web Crypto), `middleware.ts` guard (401 / 503 when env missing), `/api/login`, `/api/logout`, `/api/session`. Removed the "Unauthenticated" comment in `activity/route.ts`.
+- What it affected: POST activity/candidates/candidates/bulk/signals and PATCH entities/<id> now need the `wd_session` cookie. Needs `ADMIN_PASSWORD` and `SESSION_SECRET`.
+- Gotchas: `entities/[id]/route.ts` had no "Unauthenticated" comment, so nothing to remove there. Cookie is `Secure`, so login over plain http (non-localhost) will not stick. `npm ci` was needed (node_modules absent).
