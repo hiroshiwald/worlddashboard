@@ -412,10 +412,12 @@ const TOPIC_LABEL_LIMIT = 60;
 const TOPIC_LABEL_WINDOW_DAYS = 14;
 
 // One query per batch submit: the labels most used lately, for the model to reuse.
+// Labels over 3 words are old event-specific labels; do not offer them for reuse.
 async function loadTopicLabels(sql: Sql): Promise<string[]> {
   const rows = await sql`
     SELECT topic FROM articles
     WHERE topic IS NOT NULL AND topic <> ${OTHER_TOPIC}
+      AND array_length(regexp_split_to_array(trim(topic), '\s+'), 1) <= 3
       AND first_seen_at > now() - make_interval(days => ${TOPIC_LABEL_WINDOW_DAYS})
     GROUP BY topic ORDER BY count(*) DESC, topic LIMIT ${TOPIC_LABEL_LIMIT}`;
   return rows.map((r) => String(r.topic));
