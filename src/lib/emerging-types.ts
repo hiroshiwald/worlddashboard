@@ -32,6 +32,8 @@ export interface EmergingItem {
   mentions: number;
   anchors: EmergingAnchor[]; // top 3 by anchorRank, then articleCount descending; may be empty
   sampleTitles: string[]; // up to 3
+  links: string[]; // article links, parallel to sampleTitles; "" when the article is no longer stored
+  context: string | null; // what it is: the first model-written context sentence of a candidate; null for entities
 }
 
 export interface EmergingResponse {

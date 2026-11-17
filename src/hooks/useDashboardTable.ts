@@ -8,7 +8,7 @@ import { getThemeClasses, ThemeClasses } from "@/lib/theme";
 export type TabKey = "brief" | "newsfeed" | "feeds" | "network" | "map" | "developments" | "entities" | "entitymap";
 
 /** What the Entity map opens on when another tab sends the reader there. */
-export type MapFocus = { kind: "entity"; id: string } | { kind: "topic"; id: string } | null;
+export type MapFocus = { kind: "entity"; id: string } | null;
 export type ColumnKey = keyof FeedItem;
 
 interface UseDashboardTableReturn {

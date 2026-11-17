@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { EmergingItem } from "@/lib/emerging-types";
-import { bubbleRadius, groupByAnchor, nearKnown, NO_ANCHOR_ID, NO_ANCHOR_LABEL, parseEmerging } from "../universe";
+import { bubbleRadius, groupByAnchor, nameRequest, nearKnown, NO_ANCHOR_ID, NO_ANCHOR_LABEL, parseEmerging } from "../universe";
 
 function item(name: string, anchors: string[], mentions = 1, anchorType = "organization"): EmergingItem {
   return {
     key: `cand:${name}`, kind: "candidate", name, type: "person", firstSeenAt: "2026-11-10T00:00:00Z", mentions,
-    anchors: anchors.map((a) => ({ id: a, name: a.toUpperCase(), type: anchorType, articleCount: 1 })), sampleTitles: [],
+    anchors: anchors.map((a) => ({ id: a, name: a.toUpperCase(), type: anchorType, articleCount: 1 })), sampleTitles: [], links: [], context: null,
   };
 }
 
@@ -43,8 +43,27 @@ describe("parseEmerging and bubbleRadius", () => {
     expect(parseEmerging({ items: [], days: 7, generatedAt: "2026-11-17T00:00:00Z" }).items).toEqual([]);
   });
 
+  it("rejects items without links", () => {
+    const old = { ...item("a", []), links: undefined };
+    expect(() => parseEmerging({ items: [old], days: 7, generatedAt: "2026-11-17T00:00:00Z" })).toThrow();
+  });
+
   it("grows with count up to a cap", () => {
     expect(bubbleRadius(1)).toBeLessThan(bubbleRadius(25));
     expect(bubbleRadius(100000)).toBe(60);
+  });
+});
+
+describe("nameRequest", () => {
+  it("accepts and dismisses a candidate through /api/candidates", () => {
+    const cand = item("Lionfish", ["x"]);
+    expect(nameRequest(cand, "track")).toEqual({ method: "POST", url: "/api/candidates", body: { nameNorm: "Lionfish", action: "accept", type: "person" } });
+    expect(nameRequest(cand, "ignore").body).toEqual({ nameNorm: "Lionfish", action: "dismiss" });
+  });
+
+  it("patches an entity's status", () => {
+    const ent = { ...item("a", []), kind: "entity" as const, key: "42" };
+    expect(nameRequest(ent, "track")).toEqual({ method: "PATCH", url: "/api/entities/42", body: { status: "tracked" } });
+    expect(nameRequest(ent, "ignore").body).toEqual({ status: "dismissed" });
   });
 });

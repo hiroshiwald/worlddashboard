@@ -58,6 +58,7 @@ export function useEntityMap(focus: MapFocus) {
   const [load, setLoad] = useState<GraphLoad>({ status: "loading" });
   const [entityId, setEntityId] = useState<string | null>(null);
   const [bubble, setBubble] = useState<string | null>(null); // selected Universe bubble (anchor id)
+  const [item, setItem] = useState<string | null>(null); // open new-name card (EmergingItem key)
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -81,6 +82,7 @@ export function useEntityMap(focus: MapFocus) {
     if (data === null || focus === null) return;
     if (focus.kind === "entity" && data.byId.has(focus.id)) setEntityId(focus.id);
     setBubble(null);
+    setItem(null);
   }, [data, focus]);
 
   const trace: TraceResult = useMemo(
@@ -90,8 +92,9 @@ export function useEntityMap(focus: MapFocus) {
 
   const up = useCallback(() => {
     if (entityId !== null) setEntityId(null);
+    else if (item !== null) setItem(null);
     else setBubble(null);
-  }, [entityId]);
+  }, [entityId, item]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -101,9 +104,11 @@ export function useEntityMap(focus: MapFocus) {
     return () => window.removeEventListener("keydown", onKey);
   }, [up]);
 
-  const goEntity = useCallback((id: string) => { setEntityId(id); setBubble(null); }, []);
+  const goEntity = useCallback((id: string) => { setEntityId(id); setBubble(null); setItem(null); }, []);
+  const selectBubble = useCallback((id: string) => { setBubble(id); setItem(null); }, []);
+  const openName = useCallback((anchorId: string, key: string) => { setBubble(anchorId); setItem(key); }, []);
 
-  return { load, reload, data, entityId, bubble, from, to, trace, setBubble, setFrom, setTo, goEntity, up };
+  return { load, reload, data, entityId, bubble, item, from, to, trace, selectBubble, openName, setFrom, setTo, goEntity, up };
 }
 
 export type EntityMapState = ReturnType<typeof useEntityMap>;

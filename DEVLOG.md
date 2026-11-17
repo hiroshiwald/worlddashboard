@@ -2821,3 +2821,7 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - Newsfeed shows English headlines for non-English articles (title_en, migration 010) with a "Translated" tag; original on hover.
 - Touched llm-extract (parseTitleEn), entity-ingest (one UPDATE writes topic + title_en), feed.ts, FeedRow, feed-logic headline().
 - Gotcha: vitest has no JSX transform, so FeedRow logic lives in pure headline() for testing.
+## 2026-11-17 Universe: packed bubbles, name card, Track/Ignore
+- Replaced the force/grid layout with packCircles (entitymap/pack.ts); added context and links to /api/emerging; new NameCard with Track/Ignore via the Newsfeed calls.
+- Affected: entitymap tab, useEmerging, map-layout.ts (layoutMap deleted), stats table and countStats removed.
+- Gotcha: candidate headline links come from a separate title query, since the anchor join drops articles with no tracked neighbour.

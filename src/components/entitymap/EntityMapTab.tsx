@@ -44,7 +44,7 @@ export default function EntityMapTab({ dark, focus }: EntityMapTabProps) {
           {state.entityId === null && <MapSvg dark={dark} emerging={emerging} state={state} />}
           {state.entityId !== null && <EntityLevel dark={dark} data={state.data} id={state.entityId} state={state} />}
         </div>
-        <SidePanel dark={dark} data={state.data} emerging={emerging.load} generatedAt={graph.generatedAt} total={graph.stats} state={state} />
+        <SidePanel dark={dark} data={state.data} emerging={emerging} generatedAt={graph.generatedAt} state={state} />
       </div>
     </div>
   );
