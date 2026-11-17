@@ -68,8 +68,11 @@ function errorResponse(status: number) {
 function searchHit(id: string) {
   return { search: [{ id }] };
 }
-function entitiesBody(id: string, sitelinks: Record<string, { site: string; title: string }>, aliases: Record<string, { language: string; value: string }[]> = {}) {
-  return { entities: { [id]: { id, sitelinks, labels: {}, aliases } } };
+// `label` is the English label the hit carries; hasNameForm only accepts a hit
+// whose label matches the looked-up name, so name-matching tests pass it.
+function entitiesBody(id: string, sitelinks: Record<string, { site: string; title: string }>, label = "") {
+  const labels = label ? { en: { language: "en", value: label } } : {};
+  return { entities: { [id]: { id, sitelinks, labels, aliases: {} } } };
 }
 // Sustained views across every window month (not just one) — a single huge
 // month would correctly median down to ~0 by the spike-immunity rule this
@@ -99,7 +102,7 @@ function mockFamousLookup() {
     vi.fn()
       .mockResolvedValueOnce(noBatchMatchResponse())
       .mockResolvedValueOnce(okResponse(searchHit("Q1")))
-      .mockResolvedValueOnce(okResponse(entitiesBody("Q1", { enwiki: { site: "enwiki", title: "Famous Person" } })))
+      .mockResolvedValueOnce(okResponse(entitiesBody("Q1", { enwiki: { site: "enwiki", title: "Famous Person" } }, "Famous Person")))
       .mockResolvedValueOnce(okResponse(sustainedPageviewsBody(1_000_000))),
   );
 }
@@ -732,7 +735,7 @@ describe("runFameSweep: batched resolution path", () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("sites=enwiki")) return noBatchMatchResponse(); // "Putin" isn't an exact enwiki title
       if (url.includes("wbsearchentities")) return okResponse(searchHit("Q1"));
-      if (url.includes("wbgetentities")) return okResponse(entitiesBody("Q1", { enwiki: { site: "enwiki", title: "Vladimir Putin" } }));
+      if (url.includes("wbgetentities")) return okResponse(entitiesBody("Q1", { enwiki: { site: "enwiki", title: "Vladimir Putin" } }, "Putin"));
       if (url.includes("pageviews/per-article")) return okResponse(sustainedPageviewsBody(1_000_000));
       throw new Error(`unexpected fetch url in test: ${url}`);
     });

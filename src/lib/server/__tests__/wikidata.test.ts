@@ -11,6 +11,7 @@ import {
   lookupWikidataFame,
   lookupFameFromMatch,
   resolveNamesBatch,
+  hasNameForm,
   ALIAS_LANGUAGES,
   USER_AGENT,
   REQUEST_TIMEOUT_MS,
@@ -79,6 +80,10 @@ function entitiesBody(
       },
     },
   };
+}
+
+function enLabels(value: string) {
+  return { en: { language: "en", value } };
 }
 
 function pageviewsBody(entries: [string, number][]) {
@@ -398,6 +403,20 @@ describe("USER_AGENT", () => {
   });
 });
 
+describe("hasNameForm", () => {
+  it("exact label match -> true", () => {
+    expect(hasNameForm({ wikiTitle: null, sitelinks: 0, aliases: ["Vladimir Putin"] }, "Vladimir Putin")).toBe(true);
+  });
+
+  it("all-lowercase alias 'cola' does not match 'COLA' -> false", () => {
+    expect(hasNameForm({ wikiTitle: null, sitelinks: 0, aliases: ["cola"] }, "COLA")).toBe(false);
+  });
+
+  it("no matching label or alias -> false", () => {
+    expect(hasNameForm({ wikiTitle: null, sitelinks: 0, aliases: ["Pepsi"] }, "COLA")).toBe(false);
+  });
+});
+
 describe("lookupWikidataFame", () => {
   it("full success: search -> entities -> pageviews, User-Agent present on every request", async () => {
     const fetchMock = mockFetchSequence(
@@ -441,10 +460,22 @@ describe("lookupWikidataFame", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("search hit whose labels do not include the name -> ok:true, matched:false, pageviews never called", async () => {
+    const fetchMock = mockFetchSequence(
+      okResponse(SEARCH_HIT),
+      okResponse(entitiesBody("Q7747", { labels: enLabels("Vladimir Putin") })),
+    );
+    const result = await lookupWikidataFame("Anyone");
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.lookup.matched).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) expect(String(call[0])).not.toContain("pageviews");
+  });
+
   it("no enwiki sitelink -> matched true, wikiTitle null, zero median, pageviews never called", async () => {
     const fetchMock = mockFetchSequence(
       okResponse(SEARCH_HIT),
-      okResponse(entitiesBody("Q7747", { sitelinks: { dewiki: { site: "dewiki", title: "Etwas" } } })),
+      okResponse(entitiesBody("Q7747", { sitelinks: { dewiki: { site: "dewiki", title: "Etwas" } }, labels: enLabels("Someone") })),
     );
     const result = await lookupWikidataFame("Someone");
     expect(result.ok).toBe(true);
@@ -478,7 +509,7 @@ describe("lookupWikidataFame", () => {
   });
 
   it("non-2xx on the pageviews call -> typed failure (not the same as a 404)", async () => {
-    mockFetchSequence(okResponse(SEARCH_HIT), okResponse(entitiesBody("Q7747")), errorResponse(500));
+    mockFetchSequence(okResponse(SEARCH_HIT), okResponse(entitiesBody("Q7747", { labels: enLabels("Anyone") })), errorResponse(500));
     const result = await lookupWikidataFame("Anyone");
     expect(result).toEqual({ ok: false, reason: "pageviews_http_500" });
   });
@@ -535,7 +566,7 @@ describe("lookupWikidataFame: specific failure reasons at every stage", () => {
   });
 
   it.each(NON_TIMEOUT_CASES)("pageviews stage: %s", async (_label, response, suffix) => {
-    mockFetchSequence(okResponse(SEARCH_HIT), okResponse(entitiesBody("Q7747")), response);
+    mockFetchSequence(okResponse(SEARCH_HIT), okResponse(entitiesBody("Q7747", { labels: enLabels("Anyone") })), response);
     const result = await lookupWikidataFame("Anyone");
     expect(result).toEqual({ ok: false, reason: `pageviews_${suffix}` });
   });
@@ -563,7 +594,7 @@ describe("lookupWikidataFame: specific failure reasons at every stage", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(okResponse(SEARCH_HIT))
-      .mockResolvedValueOnce(okResponse(entitiesBody("Q7747")))
+      .mockResolvedValueOnce(okResponse(entitiesBody("Q7747", { labels: enLabels("Anyone") })))
       .mockImplementationOnce(
         (_url: string, init: { signal: AbortSignal }) =>
           new Promise((_resolve, reject) => {
@@ -585,14 +616,17 @@ describe("lookupWikidataFame: disambiguation among the top 5 search results", ()
   // `sitelinks` is the TOTAL sitelink count (matching production's
   // Object.keys(sitelinks).length) — when enwikiTitle is given, it counts as
   // one of that total, not an addition on top of it.
-  function multiEntitiesBody(entries: Array<{ id: string; sitelinks: number; enwikiTitle: string | null }>) {
+  // `label` is the English label, which hasNameForm needs before a hit counts
+  // as a candidate for the looked-up name.
+  function multiEntitiesBody(entries: Array<{ id: string; sitelinks: number; enwikiTitle: string | null; label?: string }>) {
     const entities: Record<string, unknown> = {};
     for (const e of entries) {
       const sitelinks: Record<string, { site: string; title: string }> = {};
       const otherCount = e.enwikiTitle ? e.sitelinks - 1 : e.sitelinks;
       for (let i = 0; i < otherCount; i++) sitelinks[`site${i}`] = { site: `site${i}`, title: "x" };
       if (e.enwikiTitle) sitelinks.enwiki = { site: "enwiki", title: e.enwikiTitle };
-      entities[e.id] = { id: e.id, sitelinks, labels: {}, aliases: {} };
+      const labels = e.label ? enLabels(e.label) : {};
+      entities[e.id] = { id: e.id, sitelinks, labels, aliases: {} };
     }
     return { entities };
   }
@@ -602,9 +636,9 @@ describe("lookupWikidataFame: disambiguation among the top 5 search results", ()
       okResponse(multiSearchHit(["Q_ANTWERP", "Q_OTHER", "Q_ICC", "Q_X", "Q_Y"])),
       okResponse(
         multiEntitiesBody([
-          { id: "Q_ANTWERP", sitelinks: 2, enwikiTitle: "Internationaal Cultureel Centrum" },
+          { id: "Q_ANTWERP", sitelinks: 2, enwikiTitle: "Internationaal Cultureel Centrum", label: "ICC" },
           { id: "Q_OTHER", sitelinks: 1, enwikiTitle: null },
-          { id: "Q_ICC", sitelinks: 100, enwikiTitle: "International Criminal Court" },
+          { id: "Q_ICC", sitelinks: 100, enwikiTitle: "International Criminal Court", label: "ICC" },
           { id: "Q_X", sitelinks: 5, enwikiTitle: "Something Else" },
           { id: "Q_Y", sitelinks: 3, enwikiTitle: null },
         ]),
@@ -623,7 +657,7 @@ describe("lookupWikidataFame: disambiguation among the top 5 search results", ()
   it("single-candidate response (one search hit) behaves exactly as before disambiguation existed", async () => {
     mockFetchSequence(
       okResponse(multiSearchHit(["Q1"])),
-      okResponse(multiEntitiesBody([{ id: "Q1", sitelinks: 5, enwikiTitle: "Some Article" }])),
+      okResponse(multiEntitiesBody([{ id: "Q1", sitelinks: 5, enwikiTitle: "Some Article", label: "Something" }])),
       okResponse(pageviewsBody([["202605", 40_000]])),
     );
     const result = await lookupWikidataFame("Something");
@@ -639,8 +673,8 @@ describe("lookupWikidataFame: disambiguation among the top 5 search results", ()
       okResponse(multiSearchHit(["Q1", "Q2"])),
       okResponse(
         multiEntitiesBody([
-          { id: "Q1", sitelinks: 10, enwikiTitle: "First Article" },
-          { id: "Q2", sitelinks: 10, enwikiTitle: "Second Article" },
+          { id: "Q1", sitelinks: 10, enwikiTitle: "First Article", label: "Something" },
+          { id: "Q2", sitelinks: 10, enwikiTitle: "Second Article", label: "Something" },
         ]),
       ),
       okResponse(pageviewsBody([])),
@@ -655,9 +689,9 @@ describe("lookupWikidataFame: disambiguation among the top 5 search results", ()
       okResponse(multiSearchHit(["Q1", "Q2", "Q3"])),
       okResponse(
         multiEntitiesBody([
-          { id: "Q1", sitelinks: 3, enwikiTitle: null },
-          { id: "Q2", sitelinks: 50, enwikiTitle: null }, // most sitelinks, but no English article
-          { id: "Q3", sitelinks: 1, enwikiTitle: null },
+          { id: "Q1", sitelinks: 3, enwikiTitle: null, label: "Something" },
+          { id: "Q2", sitelinks: 50, enwikiTitle: null, label: "Something" }, // most sitelinks, but no English article
+          { id: "Q3", sitelinks: 1, enwikiTitle: null, label: "Something" },
         ]),
       ),
     );

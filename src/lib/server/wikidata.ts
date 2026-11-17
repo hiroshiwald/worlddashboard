@@ -1,3 +1,4 @@
+import { normalizeName, isNameLikeAlias } from "./extract-v2";
 // The only module that talks to Wikimedia. Plain fetch, no SDK, mirroring
 // llm-extract.ts's timeout/failure-swallowing conventions: every call is
 // wrapped in a 4s AbortController timeout, and no failure ever throws to the
@@ -358,6 +359,14 @@ const NOT_FAMOUS_LOOKUP: WikidataLookup = { matched: false, wikiTitle: null, sit
  * enwiki sitelink at all, this falls back to the original single-top-hit
  * behavior (whatever the top result's own details are) rather than
  * inventing a new fallback. */
+/** True when `name` is one of the hit's name-like labels or aliases. A search
+ * hit alone is not a match: "COLA" found Coca-Cola via its alias "cola". */
+export function hasNameForm(details: EntityDetails | undefined, name: string): boolean {
+  if (!details) return false;
+  const key = normalizeName(name);
+  return details.aliases.some((alias) => isNameLikeAlias(alias) && normalizeName(alias) === key);
+}
+
 function pickBestCandidate(ids: string[], candidates: Map<string, EntityDetails>): EntityDetails | null {
   let best: EntityDetails | null = null;
   for (const id of ids) {
@@ -442,7 +451,10 @@ export async function lookupWikidataFame(name: string, now: Date = new Date()): 
   const entitiesResult = await fetchJson(buildEntitiesUrl(ids));
   if (entitiesResult.kind !== "ok") return { ok: false, reason: fetchFailureReason("entities", entitiesResult) };
   const candidates = parseEntitiesResponseMulti(entitiesResult.json, ids);
-  const details = pickBestCandidate(ids, candidates);
+  if (candidates.size === 0) return { ok: false, reason: "entities_malformed" };
+  const named = ids.filter((id) => hasNameForm(candidates.get(id), name));
+  if (named.length === 0) return { ok: true, lookup: NOT_FAMOUS_LOOKUP };
+  const details = pickBestCandidate(named, candidates);
   if (!details) return { ok: false, reason: "entities_malformed" };
 
   return lookupFameFromMatch(details, now);
