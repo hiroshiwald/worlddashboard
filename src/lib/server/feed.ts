@@ -282,14 +282,18 @@ async function searchArticlePage(sql: Sql, q: string, params: FeedParams): Promi
   const pattern = toLikePattern(q);
   const seenAt = params.before ? params.before.firstSeenAt : null;
   const id = params.before ? params.before.id : null;
-  return sql`SELECT a.id, a.title, a.link, a.source_name, a.source_category, a.first_seen_at, a.published_at, a.title_en, a.summary
+  // Two id lookups joined by UNION, not one OR: the text arm can use the
+  // trigram indexes (migration 012); the entity arm starts from the small
+  // entities table and uses article_entities_entity_idx.
+  return sql`WITH hits AS (
+      SELECT id FROM articles WHERE title ILIKE ${pattern} OR title_en ILIKE ${pattern} OR summary ILIKE ${pattern}
+      UNION
+      SELECT ae.article_id FROM entities e JOIN article_entities ae ON ae.entity_id = e.id
+      WHERE e.canonical_name ILIKE ${pattern} OR EXISTS (SELECT 1 FROM unnest(e.aliases) alias WHERE alias ILIKE ${pattern})
+    )
+    SELECT a.id, a.title, a.link, a.source_name, a.source_category, a.first_seen_at, a.published_at, a.title_en, a.summary
     FROM articles a
-    WHERE (a.title ILIKE ${pattern} OR a.title_en ILIKE ${pattern} OR a.summary ILIKE ${pattern}
-      OR EXISTS (
-        SELECT 1 FROM article_entities ae JOIN entities e ON e.id = ae.entity_id
-        WHERE ae.article_id = a.id
-          AND (e.canonical_name ILIKE ${pattern} OR EXISTS (SELECT 1 FROM unnest(e.aliases) alias WHERE alias ILIKE ${pattern}))
-      ))
+    WHERE a.id IN (SELECT id FROM hits)
       AND (${seenAt}::timestamptz IS NULL OR (a.first_seen_at, a.id) < (${seenAt}::timestamptz, ${id}::bigint))
     ORDER BY a.first_seen_at DESC, a.id DESC LIMIT ${params.limit + 1}`;
 }
