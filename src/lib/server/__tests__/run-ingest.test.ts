@@ -24,7 +24,7 @@ const { persistSignals } = await import("@/lib/server/signal-store");
 const { runFameSweep } = await import("@/lib/server/fame-sweep");
 const { runIngest } = await import("../run-ingest");
 
-const FAKE_SETTINGS = { surprise_k: 3, dismiss_cooldown_hours: 72, brief_max_blocks: 10, warmup_days: 7, llm_monthly_budget_usd: 5 };
+const FAKE_SETTINGS = { surprise_k: 3, dismiss_cooldown_hours: 72, brief_max_blocks: 10, warmup_days: 7, llm_monthly_budget_usd: 5, activity_paused: 0, activity_paused_since: 0 };
 
 beforeEach(() => {
   vi.mocked(fetchAllFeeds).mockResolvedValue({ items: [], feedsAttempted: 10, feedsSucceeded: 10, relayConfigured: false, feedDiagnostics: [] });
@@ -125,6 +125,36 @@ describe("runIngest: signals stats (purged/expired observability)", () => {
     await runIngest();
 
     expect(persistSignals).toHaveBeenCalledWith(expect.anything(), [], FAKE_SETTINGS, 0);
+  });
+});
+
+describe("runIngest: operator off switch", () => {
+  it("returns paused and touches no feed, LLM, Wikipedia or DB writer when activity_paused is 1", async () => {
+    vi.mocked(getSettings).mockResolvedValue({ ...FAKE_SETTINGS, activity_paused: 1, activity_paused_since: 123 });
+    vi.mocked(fetchAllFeeds).mockClear();
+    vi.mocked(processNewArticles).mockClear();
+    vi.mocked(runFameSweep).mockClear();
+    vi.mocked(persistArticles).mockClear();
+
+    const result = await runIngest();
+
+    expect(result).toEqual({ status: 200, body: { paused: true, since: 123 } });
+    expect(fetchAllFeeds).not.toHaveBeenCalled();
+    expect(processNewArticles).not.toHaveBeenCalled();
+    expect(runFameSweep).not.toHaveBeenCalled();
+    expect(persistArticles).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the settings read throws", async () => {
+    vi.mocked(getSettings).mockRejectedValueOnce(new Error("db down"));
+    vi.mocked(fetchAllFeeds).mockClear();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await runIngest();
+
+    expect(result.status).toBe(500);
+    expect(result.body.stage).toBe("check-paused");
+    expect(fetchAllFeeds).not.toHaveBeenCalled();
   });
 });
 
