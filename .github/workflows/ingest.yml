@@ -14,6 +14,10 @@ jobs:
           body=$(curl -fsS -X POST -H "x-ingest-key: ${{ secrets.INGEST_SECRET }}" \
             https://worlddashboard.vercel.app/api/ingest)
           echo "$body"
+          if [ "$(echo "$body" | jq -r '.paused // false')" = "true" ]; then
+            echo "Activity is paused by the operator; nothing collected."
+            exit 0
+          fi
           feeds_succeeded=$(echo "$body" | jq -r '.feedsSucceeded // 0')
           if [ "$feeds_succeeded" -eq 0 ]; then
             echo "::error::ingest collected nothing (feedsSucceeded=0)"
