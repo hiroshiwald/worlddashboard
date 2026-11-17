@@ -2836,3 +2836,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - Affects entity-ingest.ts submit/apply stages; reprocessed articles grow hourly/edge counts only for new article_entities links, candidates and relations skipped.
 - Gotcha: a head that keeps failing the LLM stays topic-less and is re-selected; delete backfill.ts and its call sites once remaining = 0.
 - Orchestrator addition: `markBackfillAttempted` sets topic "Other" on window articles still topic-less after their batch resolves (or fails), so a stuck article is not re-sent every run. Helper tokens (Sonnet): 151k (over cap; idempotency work).
+
+## 2026-11-17 — Catch-up window narrowed to Nov 10 to 16
+- What changed: `BACKFILL_FROM` = 2026-11-10 (operator decision). Nov 1 to 9 skipped for budget; noted in HANDOFF-PROMPT.md.
+- What it affected: `backfill.ts` and tests. Full window had 11,355 articles, estimate $7.38.
+- Gotchas: Pushed to `main`; the catch-up starts on the next scheduled ingest.

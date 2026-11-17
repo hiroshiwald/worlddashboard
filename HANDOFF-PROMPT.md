@@ -135,3 +135,11 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
 - Checked: tsc, 1223 tests, build. `/api/emerging` on the preview returned 200 anchored items. The map rendered with live data through route interception.
 - Not checked: Esri tiles in a real browser (the sandbox blocks the host). Newsfeed on live data.
 - Next: operator checks the preview, then pushes to `main`. Anchors are mostly countries; rank person and company anchors first if the operator wants a "near Sam Altman" view. Universe stats box still shows the old With/Without context table.
+
+### Update 2026-11-17 (end of session), branch `claude/modest-mendel-vvxklr` = `main`
+
+- On `main`: anchor ranking (people/companies first, places last), publisher removed from Newsfeed headlines, headline translation (migration 010 applied by operator), Entity map discovery (packed bubbles coloured by anchor kind, name card with context, headlines, Track/Ignore), emerging name hygiene, November catch-up.
+- LLM gap cause: GitHub "Hourly ingest" did not run 2026-10-31 to 2026-11-17. Re-enabled; run 1999 was fine.
+- Catch-up: `src/lib/server/backfill.ts`, window Nov 10 to 16 only. `GET /api/backfill` shows `{remaining, estimatedUsd}`. Delete the file, its call sites in `entity-ingest.ts` and `src/app/api/backfill` when remaining = 0.
+- SKIPPED, revisit with operator: Nov 1 to 9 catch-up. Full Nov 1 to 16 window was 11,355 articles, estimated $7.38 (300 in / 200 out tokens per article, batch rates) against the $10 monthly cap with $0.66 spent. To run it: set BACKFILL_FROM to 2026-11-01 after the Nov 10 to 16 run ends, ideally in December or with a higher cap.
+- Open: 32 of 106 feeds fail in ingest (not checked). Motion on the Entity map not checked in a real browser. Esri map tiles not checked in a real browser.

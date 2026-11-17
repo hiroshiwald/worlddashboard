@@ -54,6 +54,6 @@ describe("markBackfillAttempted", () => {
     await markBackfillAttempted(sql, [1, 2]);
     expect(calls).toHaveLength(1);
     expect(calls[0].text).toContain("topic IS NULL");
-    expect(calls[0].values).toEqual(["Other", [1, 2], "2026-11-01T00:00:00Z", "2026-11-17T00:00:00Z"]);
+    expect(calls[0].values).toEqual(["Other", [1, 2], "2026-11-10T00:00:00Z", "2026-11-17T00:00:00Z"]);
   });
 });

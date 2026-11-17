@@ -6,7 +6,8 @@ import { estimateCostUsd, MAX_BATCH_SIZE } from "./llm-extract";
 // LLM pass (entities, topic, title_en) that the paused ingest never gave them.
 // DELETE this file, its call sites in entity-ingest.ts, and
 // src/app/api/backfill once GET /api/backfill reports remaining = 0.
-export const BACKFILL_FROM = "2026-11-01T00:00:00Z";
+// Operator 2026-11-17: Nov 10-16 only. Nov 1-9 skipped for budget; see HANDOFF-PROMPT.md.
+export const BACKFILL_FROM = "2026-11-10T00:00:00Z";
 export const BACKFILL_TO = "2026-11-17T00:00:00Z";
 // 16 chunks of MAX_BATCH_SIZE per run: bounded spend and submit time.
 export const BACKFILL_MAX_PER_RUN = MAX_BATCH_SIZE * 16;

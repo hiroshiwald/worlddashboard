@@ -972,8 +972,8 @@ describe("llm.errorSamples", () => {
 describe("backfill: selection (one-off)", () => {
   const headRow = { id: "1", title: "Fresh head.", summary: "", published_at: "2026-11-17T01:00:00Z", first_seen_at: "2026-11-17T01:00:00Z", source_name: "A" };
   const backfillRows = [
-    { id: "10", title: "Old one.", summary: "", published_at: "2026-11-01T01:00:00Z", first_seen_at: "2026-11-01T01:00:00Z", source_name: "A", entities_processed_at: null },
-    { id: "11", title: "Old two.", summary: "", published_at: "2026-11-01T02:00:00Z", first_seen_at: "2026-11-01T02:00:00Z", source_name: "A", entities_processed_at: "2026-11-02T00:00:00Z" },
+    { id: "10", title: "Old one.", summary: "", published_at: "2026-11-11T01:00:00Z", first_seen_at: "2026-11-11T01:00:00Z", source_name: "A", entities_processed_at: null },
+    { id: "11", title: "Old two.", summary: "", published_at: "2026-11-11T02:00:00Z", first_seen_at: "2026-11-11T02:00:00Z", source_name: "A", entities_processed_at: "2026-11-12T00:00:00Z" },
   ];
 
   function makeSql() {
@@ -1003,7 +1003,7 @@ describe("backfill: selection (one-off)", () => {
     expect(selectCall.query).toContain("bf.topic IS NULL");
     expect(selectCall.query).toContain("bf.dup_group_id IS NULL");
     expect(selectCall.query).toContain("ORDER BY bf.first_seen_at ASC");
-    expect(selectCall.values).toContain("2026-11-01T00:00:00Z");
+    expect(selectCall.values).toContain("2026-11-10T00:00:00Z");
     expect(selectCall.values).toContain("2026-11-17T00:00:00Z");
     expect(selectCall.values).toContain(399); // 400 cap minus the 1 fresh head
     expect(selectCall.values).toContainEqual([1]); // fresh head excluded
