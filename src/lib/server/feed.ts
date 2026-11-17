@@ -1,7 +1,7 @@
 import type { Sql, SqlRow } from "./db";
 import { attachEntityRoles, type EntityRole } from "./entity-admin";
 import { getLastIngestAt } from "./tick";
-import { buildCandidateMatcher, foldText, stripPublisherSuffix, type CandidateMatcher } from "../candidate-match";
+import { buildCandidateMatcher, foldText, publisherSuffix, stripPublisherSuffix, type CandidateMatcher } from "../candidate-match";
 
 export class FeedParamError extends Error {}
 
@@ -150,7 +150,9 @@ export function matchArticleCandidates(
   matcher: CandidateMatcher<FeedCandidate & { displayName: string }>,
 ): FeedCandidate[] {
   const text = `${stripPublisherSuffix(String(row.title))}\n${row.summary == null ? "" : String(row.summary)}`;
+  const publisher = publisherSuffix(String(row.title));
   const exclude = new Set([...entities.map((e) => foldText(e.name)), foldText(String(row.source_name))]);
+  if (publisher !== null) exclude.add(foldText(publisher));
   return matcher.match(text, exclude).map(({ displayName: _unused, ...candidate }) => candidate);
 }
 

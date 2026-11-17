@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { buildCandidateMatcher, foldText, isMatchableName, stripPublisherSuffix } from "../candidate-match";
+import { buildCandidateMatcher, foldText, isMatchableName, publisherSuffix, stripPublisherSuffix } from "../candidate-match";
 
 const c = (displayName: string) => ({ nameNorm: displayName.toLowerCase(), displayName });
 
 describe("buildCandidateMatcher", () => {
   const matcher = buildCandidateMatcher([c("Okonjo"), c("São Tomé"), c("US"), c("Port Said"), c("Ana")]);
 
-  it("matches whole words, case and accent insensitive", () => {
-    expect(matcher.match("OKONJO wins vote in Sao Tome", new Set()).map((x) => x.displayName)).toEqual(["Okonjo", "São Tomé"]);
+  it("matches whole words; multi-word names ignore case and accents", () => {
+    expect(matcher.match("Okonjo wins vote in SAO TOME", new Set()).map((x) => x.displayName)).toEqual(["Okonjo", "São Tomé"]);
   });
 
   it("does not match inside a longer word", () => {
@@ -66,5 +66,25 @@ describe("stripPublisherSuffix", () => {
 
   it("keeps a title without a suffix", () => {
     expect(stripPublisherSuffix("Port-Said reopens")).toBe("Port-Said reopens");
+  });
+});
+
+describe("one-word names keep their capitals", () => {
+  const m = buildCandidateMatcher([c("EAST"), c("Shenzhen"), c("Port Said")]);
+
+  it("does not match an all-caps word inside normal text", () => {
+    expect(m.match("Tensions in the Middle East", new Set())).toEqual([]);
+  });
+
+  it("matches the same capitals, and multi-word names in any case", () => {
+    expect(m.match("Factory opens in Shenzhen", new Set())).toHaveLength(1);
+    expect(m.match("SHIPS WAIT AT PORT SAID", new Set())).toHaveLength(1);
+  });
+});
+
+describe("publisherSuffix", () => {
+  it("returns the publisher or null", () => {
+    expect(publisherSuffix("Rwanda deportation scheme - eKathimerini.com")).toBe("eKathimerini.com");
+    expect(publisherSuffix("No suffix here")).toBeNull();
   });
 });

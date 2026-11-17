@@ -15,7 +15,7 @@ import type { Sql, SqlRow } from "../db";
 /** Row-shape-specific queries added for growth/sources/nearestTracked; the
  * single-rowset mock must not answer them with entity rows. */
 function isFactsQuery(query: string): boolean {
-  return query.includes("bucket, mentions") || query.includes("entity_edges") || query.includes("AS article_count");
+  return query.includes("bucket, mentions") || query.includes("volume_mentions") || query.includes("entity_edges") || query.includes("AS article_count");
 }
 
 function makeMockSql(rows: SqlRow[]) {
@@ -367,7 +367,7 @@ describe("searchEntities — activity aggregates", () => {
           entityRow({ id: 2, canonical_name: "High" }),
         ];
       }
-      if (query.includes("SUM(mentions)")) {
+      if (query.includes("SUM(mentions)") && !query.includes("volume_mentions")) {
         return [
           { entity_id: "1", mentions_in_window: "2" },
           { entity_id: "2", mentions_in_window: "40" },

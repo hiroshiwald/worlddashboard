@@ -73,13 +73,14 @@ describe("loadEntityFacts", () => {
     await expect(loadEntityFacts(sql, Array.from({ length: 2001 }, (_, i) => String(i)), NOW)).rejects.toThrow();
   });
 
-  it("loads merge groups, then three ANY queries, with no INTERVAL literal", async () => {
-    const { sql, calls } = makeSql([[], [entity], [], []]);
+  it("loads merge groups, three ANY queries and one volume query, with no INTERVAL literal", async () => {
+    const { sql, calls } = makeSql([[], [entity], [], [], []]);
     const result = await loadEntityFacts(sql, ["1"], NOW);
     expect(result.get("1")?.id).toBe("1");
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(5);
     expect(calls[0].query).toContain("status <> 'dismissed'");
-    for (const call of calls.slice(1)) {
+    expect(calls[4].query).toContain("volume_mentions");
+    for (const call of calls.slice(1, 4)) {
       expect(call.query).toContain("= ANY(");
       expect(call.query).not.toContain("INTERVAL");
     }

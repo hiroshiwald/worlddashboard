@@ -16,11 +16,15 @@ const RATIO_CAP = 10;
 
 export type GrowthState = "New" | "Rising" | "Falling" | "Steady" | "WarmingUp";
 export interface HourlyCount { hourStart: Date; count: number }
-export interface GrowthInput { hourly: HourlyCount[]; firstSeenAt: Date | null; tracked: boolean; now: Date }
+// totals: mentions of ALL entities per hour (collection volume). Recent counts
+// are scaled to the usual volume, so collecting more articles is not growth.
+// Empty totals means no scaling.
+export interface GrowthInput { hourly: HourlyCount[]; totals: HourlyCount[]; firstSeenAt: Date | null; tracked: boolean; now: Date }
 export interface Growth {
   recent72h: number;      // sum of counts with now-72h <= hourStart < now
   usualPerDay: number;    // sum over now-336h <= hourStart < now-72h, divided by 11 (raw, no floor)
-  ratio: number;          // (recent72h / 3) / max(usualPerDay, 0.3)
+  ratio: number;          // (recent72h / 3 * volumeScale) / max(usualPerDay, 0.3)
+  volumeScale: number;    // usual daily volume / recent daily volume; 1 when either is 0
   state: GrowthState;
   daily: number[];        // length 14, index 0 = oldest day (13 to 14 days ago), index 13 = last 24h
 }
@@ -44,10 +48,19 @@ function validateInput(input: GrowthInput): void {
   if (input.firstSeenAt !== null) {
     assertValidDate(input.firstSeenAt, "firstSeenAt");
   }
-  for (const entry of input.hourly) {
+  for (const entry of [...input.hourly, ...input.totals]) {
     assertValidDate(entry.hourStart, "hourStart");
     assertValidCount(entry.count);
   }
+}
+
+function volumeScale(totals: HourlyCount[], nowMs: number): number {
+  const usualVolume = sumCounts(totals, nowMs - WINDOW_MS, nowMs - RECENT_MS) / PRIOR_DAYS;
+  const recentVolume = sumCounts(totals, nowMs - RECENT_MS, nowMs) / RECENT_DAYS;
+  if (usualVolume === 0 || recentVolume === 0) {
+    return 1;
+  }
+  return usualVolume / recentVolume;
 }
 
 // Half-open range: from <= hourStart < to.
@@ -121,11 +134,13 @@ export function computeGrowth(input: GrowthInput): Growth {
   const recent72h = sumCounts(input.hourly, nowMs - RECENT_MS, nowMs);
   const priorTotal = sumCounts(input.hourly, nowMs - WINDOW_MS, nowMs - RECENT_MS);
   const usualPerDay = priorTotal / PRIOR_DAYS;
-  const ratio = (recent72h / RECENT_DAYS) / Math.max(usualPerDay, RATIO_FLOOR);
+  const scale = volumeScale(input.totals, nowMs);
+  const ratio = ((recent72h / RECENT_DAYS) * scale) / Math.max(usualPerDay, RATIO_FLOOR);
   return {
     recent72h,
     usualPerDay,
     ratio,
+    volumeScale: scale,
     state: classifyState(input, recent72h, usualPerDay, ratio),
     daily: buildDaily(input.hourly, nowMs),
   };

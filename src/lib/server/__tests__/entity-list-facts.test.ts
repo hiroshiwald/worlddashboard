@@ -11,6 +11,7 @@ function facts(id: string, overrides: Partial<EntityFacts>): EntityFacts {
     recent72h: 0,
     usualPerDay: 0,
     ratio: 0,
+    volumeScale: 1,
     state: "Steady",
     daily: new Array<number>(14).fill(0),
     sources: { count: 0, label: "No sources", top: [] },

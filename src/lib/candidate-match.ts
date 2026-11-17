@@ -24,6 +24,14 @@ function wholeWordPattern(name: string): RegExp {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(name)}(?![\\p{L}\\p{N}])`, "u");
 }
 
+function stripAccents(text: string): string {
+  return text.normalize("NFKD").replace(/\p{M}/gu, "");
+}
+
+function isSingleWord(name: string): boolean {
+  return !/\s/u.test(name.trim());
+}
+
 /** Rejects names that are junk in the candidate table: no capital letter
  * ("administration"), led by punctuation ("- BBC"), one short word ("The",
  * "DIE"), or HTML codes left in ("OutKick&nbsp;Fox News"). */
@@ -39,6 +47,13 @@ export function isMatchableName(name: string): boolean {
 
 export function stripPublisherSuffix(title: string): string {
   return title.replace(PUBLISHER_SUFFIX, "");
+}
+
+/** The " - Publisher" text at the end of a title, or null. */
+export function publisherSuffix(title: string): string | null {
+  const match = PUBLISHER_SUFFIX.exec(title);
+  if (match === null) return null;
+  return match[0].replace(/^\s[-–—|]\s/u, "").trim();
 }
 
 /** Drops a match whose name sits inside a longer matched or excluded name
@@ -57,20 +72,26 @@ export interface CandidateMatcher<T extends CandidateName> {
 /** Builds one pattern per name once, so a page of articles reuses them.
  * Names that fail isMatchableName are dropped. */
 export function buildCandidateMatcher<T extends CandidateName>(candidates: T[]): CandidateMatcher<T> {
-  const compiled: { candidate: T; folded: string; pattern: RegExp }[] = [];
+  // One-word names match with their own capitals ("EAST" must not match
+  // "Middle East"); longer names ignore case.
+  const compiled: { candidate: T; folded: string; exact: boolean; pattern: RegExp }[] = [];
   for (const candidate of candidates) {
-    const folded = foldText(candidate.displayName.trim());
-    if (isMatchableName(candidate.displayName)) {
-      compiled.push({ candidate, folded, pattern: wholeWordPattern(folded) });
+    const name = candidate.displayName.trim();
+    const folded = foldText(name);
+    const exact = isSingleWord(name);
+    if (isMatchableName(name)) {
+      compiled.push({ candidate, folded, exact, pattern: wholeWordPattern(exact ? stripAccents(name) : folded) });
     }
   }
   return {
     match(text: string, exclude: Set<string>): T[] {
       const haystack = foldText(text);
+      const caseKept = stripAccents(text);
       const found: { candidate: T; folded: string }[] = [];
       for (const entry of compiled) {
         if (exclude.has(entry.folded)) continue;
-        if (haystack.includes(entry.folded) && entry.pattern.test(haystack)) found.push(entry);
+        if (!haystack.includes(entry.folded)) continue;
+        if (entry.pattern.test(entry.exact ? caseKept : haystack)) found.push(entry);
       }
       return keepLongest(found, exclude);
     },

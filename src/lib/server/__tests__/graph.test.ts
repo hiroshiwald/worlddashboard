@@ -18,7 +18,7 @@ function row(id: number, status: string, name = `Entity ${id}`): SqlRow {
 
 function fact(id: number, mentions14d: number): EntityFacts {
   return {
-    id: String(id), mentions14d, recent72h: 0, usualPerDay: 0, ratio: 1.5, state: "Rising",
+    id: String(id), mentions14d, recent72h: 0, usualPerDay: 0, ratio: 1.5, volumeScale: 1, state: "Rising",
     daily: [], sources: { count: 1, label: "Single source", top: [] },
     firstSeenAt: NOW.toISOString(), lastSeenAt: null,
   };

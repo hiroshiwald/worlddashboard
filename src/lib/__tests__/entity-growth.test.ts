@@ -10,7 +10,7 @@ function hoursAgo(hours: number): Date {
 }
 
 function input(overrides: Partial<GrowthInput>): GrowthInput {
-  return { hourly: [], firstSeenAt: hoursAgo(24 * 30), tracked: true, now: NOW, ...overrides };
+  return { hourly: [], totals: [], firstSeenAt: hoursAgo(24 * 30), tracked: true, now: NOW, ...overrides };
 }
 
 // A count placed `hours` before NOW, for the common case of a single hourly bucket.
@@ -265,5 +265,23 @@ describe("diversity", () => {
 
   it("throws on a non-string name", () => {
     expect(() => diversity([42 as unknown as string])).toThrow(/string/);
+  });
+});
+
+describe("computeGrowth volume scaling", () => {
+  // Usual volume 100 a day (1,100 over 11 days); recent volume 200 a day (600 over 3).
+  const doubled = [at(100, 1100), at(10, 600)];
+
+  it("halves recent counts when recent collection volume doubled", () => {
+    const result = computeGrowth(input({ hourly: [priorTotal(22), at(10, 12)], totals: doubled }));
+    expect(result.volumeScale).toBe(0.5);
+    expect(result.usualPerDay).toBe(2);
+    expect(result.ratio).toBe(1);
+    expect(result.state).toBe("Steady");
+  });
+
+  it("does not scale when either window has no volume", () => {
+    expect(computeGrowth(input({ totals: [at(10, 50)] })).volumeScale).toBe(1);
+    expect(computeGrowth(input({ totals: [] })).volumeScale).toBe(1);
   });
 });

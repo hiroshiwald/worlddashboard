@@ -8,6 +8,7 @@ export interface EntityFacts {
   recent72h: number;
   usualPerDay: number;
   ratio: number;
+  volumeScale: number;
   state: GrowthState;
   daily: number[];
   sources: { count: number; label: DiversityLabel; top: string[] };
@@ -104,13 +105,14 @@ function combineEntity(entity: SqlRow, groupRows: SqlRow[]): SqlRow {
   return { ...entity, first_seen_at: first, last_seen_at: last };
 }
 
-function assembleOne(entity: SqlRow, hourlyRows: SqlRow[], sourceRows: SqlRow[], now: Date): EntityFacts {
+function toHourly(rows: SqlRow[], countKey: string): HourlyCount[] {
+  return rows.map((row) => ({ hourStart: toDate(row.bucket, "bucket"), count: Number(row[countKey]) }));
+}
+
+function assembleOne(entity: SqlRow, hourlyRows: SqlRow[], sourceRows: SqlRow[], totals: HourlyCount[], now: Date): EntityFacts {
   const firstSeen = toDate(entity.first_seen_at, "first_seen_at");
-  const hourly: HourlyCount[] = hourlyRows.map((row) => ({
-    hourStart: toDate(row.bucket, "bucket"),
-    count: Number(row.mentions),
-  }));
-  const growth = computeGrowth({ hourly, firstSeenAt: firstSeen, tracked: entity.status === "tracked", now });
+  const hourly = toHourly(hourlyRows, "mentions");
+  const growth = computeGrowth({ hourly, totals, firstSeenAt: firstSeen, tracked: entity.status === "tracked", now });
   const names = sourceRows.map((row) => String(row.source_name));
   let mentions14d = 0;
   for (const row of sourceRows) {
@@ -130,7 +132,8 @@ function assembleOne(entity: SqlRow, hourlyRows: SqlRow[], sourceRows: SqlRow[],
  * {entity_id,bucket,mentions}; sources {entity_id,source_name,article_count}
  * (one row per entity+source, so article_count sums to distinct articles).
  * requestedIds: the ids to return; entityRows may hold their group members too.
- * membersById: from groupMembersById; an id missing from it stands alone. */
+ * membersById: from groupMembersById; an id missing from it stands alone.
+ * totalRows {bucket, volume_mentions}: all-entity mentions per hour. */
 export function assembleEntityFacts(
   entityRows: SqlRow[],
   hourlyRows: SqlRow[],
@@ -138,7 +141,9 @@ export function assembleEntityFacts(
   now: Date,
   membersById: Map<string, string[]> = new Map(),
   requestedIds: string[] = entityRows.map((row) => String(row.id)),
+  totalRows: SqlRow[] = [],
 ): Map<string, EntityFacts> {
+  const totals = toHourly(totalRows, "volume_mentions");
   const hourlyById = groupBy(hourlyRows, "entity_id");
   const sourcesById = groupBy(sourceRows, "entity_id");
   const entityById = groupBy(entityRows, "id");
@@ -149,7 +154,7 @@ export function assembleEntityFacts(
     const members = membersOf(id, membersById);
     const combined = combineEntity(entity, collect(members, entityById));
     const sources = combineSources(collect(members, sourcesById));
-    facts.set(id, assembleOne(combined, collect(members, hourlyById), sources, now));
+    facts.set(id, assembleOne(combined, collect(members, hourlyById), sources, totals, now));
   }
   return facts;
 }
@@ -193,5 +198,8 @@ export async function loadEntityFacts(sql: Sql, ids: string[], now: Date): Promi
     JOIN articles a ON a.id = ae.article_id
     WHERE ae.entity_id = ANY(${expanded}::bigint[]) AND a.first_seen_at >= ${since}::timestamptz
     GROUP BY ae.entity_id, a.source_name`;
-  return assembleEntityFacts(entityRows, hourlyRows, sourceRows, now, membersById, ids);
+  const totalRows = await sql`
+    SELECT bucket, SUM(mentions) AS volume_mentions FROM entity_mentions_hourly
+    WHERE bucket >= ${since}::timestamptz GROUP BY bucket`;
+  return assembleEntityFacts(entityRows, hourlyRows, sourceRows, now, membersById, ids, totalRows);
 }
