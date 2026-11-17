@@ -1,5 +1,7 @@
 "use client";
 
+import { useIsAdmin } from "@/components/AdminContext";
+
 interface BulkActionsBarProps {
   selectedCount: number;
   bulkBusy: boolean;
@@ -9,7 +11,8 @@ interface BulkActionsBarProps {
 }
 
 export default function BulkActionsBar({ selectedCount, bulkBusy, dark, onAcceptSelected, onDismissSelected }: BulkActionsBarProps) {
-  if (selectedCount === 0) return null;
+  const isAdmin = useIsAdmin();
+  if (selectedCount === 0 || !isAdmin) return null;
   return (
     <div className={`flex items-center gap-3 mb-3 px-4 py-2.5 rounded-xl border ${dark ? "bg-slate-900 border-slate-800" : "bg-white border-gray-100 shadow-sm"}`}>
       <span className={`text-sm font-medium ${dark ? "text-slate-200" : "text-gray-700"}`}>{selectedCount} selected</span>

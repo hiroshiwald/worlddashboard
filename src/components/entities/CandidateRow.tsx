@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useIsAdmin } from "@/components/AdminContext";
 import { CandidateRowData, ENTITY_TYPES } from "./types";
 import { formatReportedWindow } from "./activity-format";
 import SampleTitleLink from "./SampleTitleLink";
@@ -61,11 +62,13 @@ function TitlesCell({ titles, dark }: { titles: string[]; dark: boolean }) {
 function ActionsCell({
   candidate, rowType, busy, dark, onAccept, onMerge, onDismiss,
 }: { candidate: CandidateRowData; rowType: string; busy: boolean; dark: boolean; onAccept: () => void; onMerge: (mergeInto: string) => void; onDismiss: () => void }) {
+  const isAdmin = useIsAdmin();
   const [mergeTarget, setMergeTarget] = useState("");
   const inputBg = dark ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-gray-50 border-gray-200 text-gray-900";
   const mergeTitle = mergeTarget.trim().length > 0
     ? `Merges ${candidate.displayName} into "${mergeTarget.trim()}" — combines their mentions immediately. Not reversible here.`
     : "Enter the exact existing entity name to merge into.";
+  if (!isAdmin) return null;
   return (
     <div className="flex flex-col gap-1.5 min-w-[11rem]">
       <button

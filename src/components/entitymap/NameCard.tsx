@@ -3,6 +3,7 @@
 import type { EntityMapState } from "@/hooks/useEntityMap";
 import type { EmergingState } from "@/hooks/useEmerging";
 import type { EmergingItem } from "@/lib/emerging-types";
+import { useIsAdmin } from "@/components/AdminContext";
 import { NO_ANCHOR_LABEL } from "./universe";
 
 const BTN = "rounded border px-2 py-1 disabled:opacity-50";
@@ -51,6 +52,8 @@ function Headlines({ item, muted }: { item: EmergingItem; muted: string }) {
 }
 
 function Actions({ item, emerging }: { item: EmergingItem; emerging: EmergingState }) {
+  const isAdmin = useIsAdmin();
+  if (!isAdmin) return null;
   const done = emerging.resolved[item.key];
   if (done !== undefined) {
     return <p className="mt-3 font-medium" role="status" data-testid="name-resolved">{done === "tracked" ? "Tracked." : "Ignored."}</p>;

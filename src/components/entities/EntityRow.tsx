@@ -1,6 +1,7 @@
 "use client";
 
 import type { KeyboardEvent, MouseEvent } from "react";
+import { useIsAdmin } from "@/components/AdminContext";
 import { EntityPatch, EntityRowData } from "./types";
 import { growthChipText, sparklinePoints } from "./growth-format";
 
@@ -64,6 +65,8 @@ function NameCell({ row, dark, busy, onSelect }: { row: EntityRowData; dark: boo
 // Operator correction of the fame verdict, kept from the previous tab. The
 // Developments engine reads it: Established never headlines a card.
 function FameControl({ row, busy, onPatch, dark }: { row: EntityRowData; busy: boolean; onPatch: EntityRowProps["onPatch"]; dark: boolean }) {
+  const isAdmin = useIsAdmin();
+  if (!isAdmin) return null;
   const btn = (active: boolean) =>
     `text-[10px] px-1.5 py-0.5 rounded font-medium disabled:opacity-40 ${
       active ? "bg-blue-600 text-white" : dark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
@@ -90,6 +93,7 @@ function FameControl({ row, busy, onPatch, dark }: { row: EntityRowData; busy: b
 }
 
 function StatusCell({ row, busy, onPatch }: { row: EntityRowData; busy: boolean; onPatch: EntityRowProps["onPatch"] }) {
+  const isAdmin = useIsAdmin();
   const next = row.status === "tracked" ? "dismissed" : "tracked";
   const label = row.status === "tracked" ? "Ignore" : "Track";
   const title = row.status === "tracked"
@@ -98,14 +102,16 @@ function StatusCell({ row, busy, onPatch }: { row: EntityRowData; busy: boolean;
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs">{row.status === "dismissed" ? "ignored" : row.status}</span>
-      <button
-        onClick={(e) => { stopRow(e); onPatch(row.id, { status: next }); }}
-        disabled={busy}
-        title={title}
-        className="text-[11px] px-2 py-1 rounded-lg font-medium bg-slate-700/20 hover:bg-slate-700/40 disabled:opacity-40"
-      >
-        {label}
-      </button>
+      {isAdmin && (
+        <button
+          onClick={(e) => { stopRow(e); onPatch(row.id, { status: next }); }}
+          disabled={busy}
+          title={title}
+          className="text-[11px] px-2 py-1 rounded-lg font-medium bg-slate-700/20 hover:bg-slate-700/40 disabled:opacity-40"
+        >
+          {label}
+        </button>
+      )}
     </div>
   );
 }

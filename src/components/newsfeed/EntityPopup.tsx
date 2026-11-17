@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useIsAdmin } from "@/components/AdminContext";
 import { isContext, type RowEntity } from "./feed-logic";
 import { useEntityEvidence, type EntityGrowth } from "@/hooks/useNewsfeed";
 
@@ -58,17 +59,19 @@ function Evidence({ entityId }: { entityId: string }) {
 }
 
 function Buttons({ row, busy, actions }: { row: RowEntity; busy: boolean; actions: PopupActions }) {
+  const isAdmin = useIsAdmin();
   const base = "rounded-md border px-2.5 py-1 text-xs disabled:opacity-50";
   return (
     <div className="flex flex-wrap gap-2">
-      {row.status === "tracked" ? (
+      {isAdmin && row.status === "tracked" && (
         <button type="button" disabled={busy} className={base} onClick={() => actions.onStopTracking(row)}>Stop tracking</button>
-      ) : (
+      )}
+      {isAdmin && row.status !== "tracked" && (
         <button type="button" disabled={busy} className={`${base} border-blue-600 bg-blue-600 text-white`} onClick={() => actions.onTrack(row)}>
           Track
         </button>
       )}
-      {row.status === "candidate" && row.entity !== null && (
+      {isAdmin && row.status === "candidate" && row.entity !== null && (
         <button type="button" disabled={busy} className={base} onClick={() => actions.onNotInterested(row)}>Not interested</button>
       )}
       {row.entity !== null && /^\d+$/.test(row.entity.id) && (

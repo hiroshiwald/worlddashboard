@@ -5,6 +5,8 @@ import HeaderBar from "./HeaderBar";
 import EntityPanel from "./EntityPanel";
 import { EntityFilterBanner, FeedTable, FeedCardList, TabContent } from "./dashboard";
 import { TabKey } from "@/hooks/useDashboardTable";
+import { useSession } from "@/hooks/useSession";
+import { AdminProvider } from "./AdminContext";
 
 // Brief, Developments, and Entities are DB-backed and render independently
 // of the live feed items array (see TabContent.tsx) — every other tab needs
@@ -27,8 +29,10 @@ export default function DashboardTable() {
     panelEntityId, setPanelEntityId, mapFocus, openOnMap,
   } = useDashboardTable();
   const itemsDependentTab = isItemsDependentTab(activeTab);
+  const session = useSession();
 
   return (
+    <AdminProvider value={session.role === "admin"}>
     <div className={`h-screen flex flex-col ${t.bg} transition-colors duration-200 ${dark ? "dark-scrollbar" : ""}`}>
       <HeaderBar
         dark={dark} toggleTheme={toggleTheme} searchQuery={searchQuery}
@@ -40,7 +44,7 @@ export default function DashboardTable() {
         fetchedAt={fetchedAt} loading={loading} refresh={refresh}
         t={t}
         mode={mode} lastIngestAt={lastIngestAt} refreshState={refreshState}
-        candidateCount={candidateCount}
+        candidateCount={candidateCount} session={session}
       />
 
       <div className={`flex-1 overflow-auto min-h-0 ${dark ? "dark-scrollbar" : ""}`}>
@@ -105,5 +109,6 @@ export default function DashboardTable() {
         />
       )}
     </div>
+    </AdminProvider>
   );
 }

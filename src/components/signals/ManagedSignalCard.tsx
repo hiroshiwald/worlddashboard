@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useIsAdmin } from "@/components/AdminContext";
 import { severityColor, timeAgo } from "./utils";
 import { formatEvidenceNumbers } from "./evidence-format";
 import { SignalCardData, SignalAction } from "./types";
@@ -81,6 +82,8 @@ function ActionButtons({
   signal: SignalCardData; busy: boolean; dark: boolean; actions: SignalAction[];
   onAction: (id: number, action: SignalAction) => void;
 }) {
+  const isAdmin = useIsAdmin();
+  if (!isAdmin) return null;
   const buttonCls = "text-[11px] px-2.5 py-1 rounded-lg font-medium disabled:opacity-40";
   return (
     <div className="flex gap-1.5">

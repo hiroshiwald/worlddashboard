@@ -142,3 +142,8 @@ Older entries (2026-08-20 to 2026-11-16): DEVLOG-ARCHIVE.md. Do not read it at s
 - What changed: entries 2026-08-20 to 2026-11-16 (85 entries, 254 KB) moved to `DEVLOG-ARCHIVE.md`. `DEVLOG.md` keeps 2026-11-17 on (23 KB) with a one-line pointer.
 - What it affected: start-of-session reads only. HANDOFF-PROMPT.md read note updated.
 - Gotchas: move entries to the archive again when DEVLOG.md passes 32 KB.
+
+## 2026-11-17 — Login UI (docs/LOGIN-SPEC.md, UI section)
+- What changed: `useSession` hook, `AdminContext` (one provider in `DashboardTable`), `AdminAuthControl` in the header, `PauseActivityButton` restored (admin only). Track/Ignore, candidate queue actions, entity status/fame edits and signal actions hidden for general.
+- What it affected: HeaderBar, DashboardTable, FeedRow, EntityPopup, NameCard, EntityRow, CandidateRow, BulkActionsBar, ManagedSignalCard. A 401 shows the server's "Admin login required" through the existing `sendJson` error message.
+- Gotchas: vitest 4 had no JSX transform; added `oxc.jsx.runtime: "automatic"` to vitest.config.ts so component tests can import .tsx. Context chosen over a prop because controls span six tabs. `git stash` is unsafe while the server helper edits the same tree.

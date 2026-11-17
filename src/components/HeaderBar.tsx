@@ -2,6 +2,9 @@
 
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
+import type { SessionState } from "@/hooks/useSession";
+import PauseActivityButton from "./PauseActivityButton";
+import AdminAuthControl from "./AdminAuthControl";
 
 type TabKey = "brief" | "newsfeed" | "feeds" | "network" | "map" | "developments" | "entities" | "entitymap";
 
@@ -27,6 +30,7 @@ interface HeaderBarProps {
   lastIngestAt?: string | null;
   refreshState?: "idle" | "collecting" | "fresh";
   candidateCount: number;
+  session: SessionState;
 }
 
 const STALE_INGEST_MS = 3 * 60 * 60 * 1000;
@@ -180,6 +184,7 @@ export default function HeaderBar({
   lastIngestAt,
   refreshState,
   candidateCount,
+  session,
 }: HeaderBarProps) {
   return (
     <div className={`shrink-0 z-30 ${t.headerBg}`}>
@@ -240,6 +245,9 @@ export default function HeaderBar({
               </option>
             ))}
           </select>
+
+          {session.role === "admin" && <PauseActivityButton btnClass={t.btnBg} />}
+          <AdminAuthControl session={session} btnClass={t.btnBg} />
 
           <IngestBadge mode={mode} lastIngestAt={lastIngestAt} fetchedAt={fetchedAt} dark={dark} />
 

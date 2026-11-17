@@ -1,4 +1,5 @@
 "use client";
+import { useIsAdmin } from "@/components/AdminContext";
 import {
   headline,
   rowEntities,
@@ -51,6 +52,7 @@ function nameClasses(row: RowEntity, dark: boolean): string {
 }
 
 function EntityLine({ row, index, h }: { row: RowEntity; index: number; h: RowHandlers }) {
+  const isAdmin = useIsAdmin();
   const rising = row.entity !== null && h.growth[row.entity.id]?.state === "Rising";
   const isBusy = h.busy.includes(row.key);
   return (
@@ -72,7 +74,7 @@ function EntityLine({ row, index, h }: { row: RowEntity; index: number; h: RowHa
         )}
       </span>
       {row.status === "tracked" && <span className="font-bold text-emerald-500" aria-label="Tracked">✓</span>}
-      {row.status === "candidate" && (
+      {row.status === "candidate" && isAdmin && (
         <span className="flex gap-1">
           <button
             type="button"
