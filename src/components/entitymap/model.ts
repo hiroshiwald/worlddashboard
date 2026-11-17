@@ -1,13 +1,7 @@
-// Pure model for the Entity map: filtering, trace, entity-level layout.
+// Pure model for the Entity map: filtering and trace.
 import type { GraphEdge, GraphNode, GraphResponse } from "@/lib/server/graph";
-import { ratioText } from "@/lib/entity-growth";
 import { buildAdjacency, shortestPath, type Adjacency } from "@/lib/entity-paths";
-import type { Point } from "@/lib/map-layout";
 
-const ENTITY_RING = 190;
-const MAX_IN_BUBBLE = 12;
-export const LINKED_ID = "linked";
-export const CONTEXT_ID = "ctx";
 
 export interface MapData {
   nodes: GraphNode[];
@@ -18,10 +12,6 @@ export interface MapData {
 
 export function isGrowing(n: GraphNode): boolean {
   return n.state === "New" || n.state === "Rising";
-}
-
-export function labelText(n: GraphNode): string {
-  return isGrowing(n) ? `${n.name} ▲ ×${ratioText(n.ratio)}` : n.name;
 }
 
 export function isContext(n: GraphNode): boolean {
@@ -96,51 +86,4 @@ const TWO_DAYS_MS = 2 * 24 * 3600 * 1000;
 
 export function isNewLink(edge: GraphEdge, generatedAt: string): boolean {
   return Date.parse(generatedAt) - Date.parse(edge.firstSeenAt) < TWO_DAYS_MS;
-}
-
-export interface Bubble {
-  gid: string;
-  label: string;
-  x: number;
-  y: number;
-  r: number;
-  members: Array<{ id: string; x: number; y: number }>;
-  more: number;
-}
-
-export interface EntityLayout {
-  center: Point;
-  bubbles: Bubble[];
-  width: number;
-  height: number;
-}
-
-function bubbleOf(gid: string, ids: string[], at: Point): Bubble {
-  const shown = ids.slice(0, MAX_IN_BUBBLE);
-  const r = 34 + shown.length * 4;
-  const members = shown.map((id, i) => {
-    const a = (2 * Math.PI * i) / shown.length - Math.PI / 2;
-    const ring = shown.length === 1 ? 0 : r - 16;
-    return { id, x: at.x + ring * Math.cos(a), y: at.y + ring * Math.sin(a) };
-  });
-  const label = gid === CONTEXT_ID ? "Context" : "Linked";
-  return { gid, label, x: at.x, y: at.y, r, members, more: ids.length - shown.length };
-}
-
-/** Entity at the centre; context neighbours in one bubble, the rest in another. */
-export function layoutEntity(data: MapData, id: string, width: number): EntityLayout {
-  const buckets = new Map<string, string[]>();
-  for (const { node } of neighboursOf(data, id)) {
-    const gid = isContext(node) ? CONTEXT_ID : LINKED_ID;
-    buckets.set(gid, [...(buckets.get(gid) ?? []), node.id]);
-  }
-  const height = 2 * (ENTITY_RING + 110);
-  const center = { x: width / 2, y: height / 2 };
-  const entries = [...buckets];
-  const bubbles = entries.map(([gid, ids], i) => {
-    const a = (2 * Math.PI * i) / entries.length - Math.PI / 2;
-    const at = { x: center.x + ENTITY_RING * Math.cos(a) * 1.3, y: center.y + ENTITY_RING * Math.sin(a) };
-    return bubbleOf(gid, ids, at);
-  });
-  return { center, bubbles, width, height };
 }

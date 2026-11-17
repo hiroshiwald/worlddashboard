@@ -1,119 +1,98 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ForceGraph2D from "react-force-graph-2d";
-import { centringForce, showLabel, type UniNode, type Universe } from "./forcegraph";
+import { useEffect, useMemo, useRef } from "react";
+import type Graph from "graphology";
+import FA2Layout from "graphology-layout-forceatlas2/worker";
+import forceAtlas2 from "graphology-layout-forceatlas2";
+import Sigma from "sigma";
+import { communities } from "./graph-metrics";
+import { edgeHidden, legend, litSet, nodeLook, paintGraph } from "./universe-view";
 
-const NEW_COLOR = "#0ea5e9";
+const LAYOUT_MS = 4000;
+const TEXT_DARK = "#e2e8f0";
+const TEXT_LIGHT = "#1e293b";
+const EDGE_DARK = "#33415566";
+const EDGE_LIGHT = "#cbd5e1aa";
 
 interface Props {
   dark: boolean;
-  universe: Universe;
+  graph: Graph;
   selected: string | null;
   onSelect: (id: string | null) => void;
 }
 
-// The library replaces link source/target ids with node objects once it runs.
-function endId(end: unknown): string {
-  return typeof end === "object" && end !== null ? (end as UniNode).id : String(end);
+/** Colours and positions a graph once; the result is the same object, painted. */
+function usePaintedGraph(graph: Graph) {
+  return useMemo(() => {
+    const result = communities(graph);
+    paintGraph(graph, result, Math.random);
+    return legend(result);
+  }, [graph]);
 }
 
-function useSize(): [React.RefObject<HTMLDivElement>, { w: number; h: number }] {
-  const ref = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 600, h: 400 });
-  useEffect(() => {
-    const el = ref.current;
-    if (el === null) return;
-    const observer = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, size];
+interface View {
+  dark: boolean;
+  selected: string | null;
 }
 
-/** The whole universe in one view: new names bright, known entities muted, zoom and pan on. */
-export default function UniverseGraph({ dark, universe, selected, onSelect }: Props) {
-  const [box, size] = useSize();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the library's ref type is not exported
-  const graphRef = useRef<any>(null);
-  const [hovered, setHovered] = useState<string | null>(null);
-  // Fresh copies: the library mutates what it is given, and `universe` must stay pure.
-  const graphData = useMemo(
-    () => ({ nodes: universe.nodes.map((n) => ({ ...n })), links: universe.links.map((l) => ({ ...l })) }),
-    [universe],
-  );
-  // Spread the dense core: stronger repulsion, longer links.
+/**
+ * sigma and the FA2 worker live and die with the graph. Layout runs a few seconds, then stops.
+ * Reducers read `view` (a ref local to this hook) so selection and theme changes need only a refresh.
+ */
+function useSigma(graph: Graph, view: View, onSelect: Props["onSelect"]) {
+  const box = useRef<HTMLDivElement>(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const sigma = useRef<Sigma | null>(null);
   useEffect(() => {
-    const g = graphRef.current;
-    if (!g) return;
-    g.d3Force("charge")?.strength(-60);
-    g.d3Force("link")?.distance(40);
-    g.d3Force("centring", centringForce(0.2));
-  }, [graphData]);
-  const lit = useMemo(() => {
-    if (selected === null) return null;
-    return new Set([selected, ...(universe.neighbours.get(selected) ?? [])]);
-  }, [selected, universe]);
+    if (box.current === null) return;
+    const s = new Sigma(graph, box.current, {
+      settings: { labelDensity: 0.5, labelGridCellSize: 90, labelRenderedSizeThreshold: 8 },
+      nodeReducer: (id, d) => {
+        const { dark, selected } = viewRef.current;
+        return nodeLook(id, d.color, d.label ?? "", litSet(graph, selected), selected, dark ? TEXT_DARK : TEXT_LIGHT);
+      },
+      edgeReducer: (edge) => {
+        const { dark, selected } = viewRef.current;
+        const [source, target] = graph.extremities(edge);
+        const hidden = edgeHidden(selected, litSet(graph, selected), source, target);
+        return { color: dark ? EDGE_DARK : EDGE_LIGHT, visibility: hidden ? "hidden" : "visible" };
+      },
+    });
+    const layout = new FA2Layout(graph, { settings: { ...forceAtlas2.inferSettings(graph), edgeWeightInfluence: 0 } });
+    layout.start();
+    const stop = window.setTimeout(() => layout.stop(), LAYOUT_MS);
+    s.on("clickNode", ({ node }) => onSelect(node));
+    s.on("clickStage", () => onSelect(null));
+    sigma.current = s;
+    return () => {
+      window.clearTimeout(stop);
+      layout.kill();
+      s.kill();
+      sigma.current = null;
+    };
+  }, [graph, onSelect]);
+  useEffect(() => {
+    sigma.current?.refresh();
+  }, [view.dark, view.selected]);
+  return box;
+}
 
-  const paintNode = useCallback((n: UniNode & { x: number; y: number }, ctx: CanvasRenderingContext2D, scale: number) => {
-    const dim = lit !== null && !lit.has(n.id);
-    ctx.globalAlpha = dim ? 0.15 : 1;
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, n.radius, 0, 2 * Math.PI);
-    ctx.fillStyle = n.isNew ? NEW_COLOR : dark ? "#64748b" : "#94a3b8";
-    ctx.fill();
-    if (n.isNew || n.id === selected) {
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, n.radius + 2.5, 0, 2 * Math.PI);
-      ctx.strokeStyle = n.id === selected ? (dark ? "#f8fafc" : "#0f172a") : NEW_COLOR;
-      ctx.lineWidth = 1.2 / scale;
-      ctx.stroke();
-    }
-    if (showLabel(n, hovered, selected, universe.neighbours)) {
-      ctx.font = `${n.isNew ? 600 : 400} ${11 / scale}px Inter, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = n.isNew ? (dark ? "#7dd3fc" : "#0369a1") : dark ? "#cbd5e1" : "#475569";
-      ctx.fillText(n.name, n.x, n.y + n.radius + 3);
-    }
-    ctx.globalAlpha = 1;
-  }, [dark, hovered, selected, lit, universe.neighbours]);
-
-  const paintPointer = useCallback((n: UniNode & { x: number; y: number }, color: string, ctx: CanvasRenderingContext2D) => {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, n.radius + 3, 0, 2 * Math.PI);
-    ctx.fill();
-  }, []);
-
-  const linkColor = useCallback((l: { source: unknown; target: unknown }) => {
-    const faint = dark ? "rgba(148,163,184,0.18)" : "rgba(100,116,139,0.22)";
-    if (lit === null) return faint;
-    const touches = lit.has(endId(l.source)) && lit.has(endId(l.target)) && (endId(l.source) === selected || endId(l.target) === selected);
-    return touches ? NEW_COLOR : dark ? "rgba(148,163,184,0.05)" : "rgba(100,116,139,0.06)";
-  }, [dark, lit, selected]);
-
+/** The whole universe in one sigma view. Click a node to light it and its neighbours. */
+export default function UniverseGraph({ dark, graph, selected, onSelect }: Props) {
+  const entries = usePaintedGraph(graph);
+  const box = useSigma(graph, { dark, selected }, onSelect);
   return (
-    <div ref={box} className="h-[60vh] min-h-[320px] w-full lg:h-[calc(100vh-8rem)]" data-testid="universe-graph">
-      <ForceGraph2D
-        ref={graphRef}
-        width={size.w}
-        height={size.h}
-        graphData={graphData}
-        backgroundColor="rgba(0,0,0,0)"
-        nodeRelSize={1}
-        nodeCanvasObject={paintNode as never}
-        nodePointerAreaPaint={paintPointer as never}
-        nodeLabel={(n: object) => (n as UniNode).name}
-        linkColor={linkColor as never}
-        linkWidth={0.5}
-        onNodeClick={(n: object) => onSelect((n as UniNode).id)}
-        onNodeHover={(n: object | null) => setHovered(n === null ? null : (n as UniNode).id)}
-        onBackgroundClick={() => onSelect(null)}
-        cooldownTicks={150}
-        onEngineStop={() => graphRef.current?.zoomToFit(400, 40)}
-        d3VelocityDecay={0.3}
-      />
+    <div>
+      <ul className="flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 text-xs" data-testid="universe-legend">
+        {entries.map((e) => (
+          <li key={e.community} className="inline-flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: e.color }} />
+            {e.label}
+          </li>
+        ))}
+      </ul>
+      <div ref={box} className="h-[60vh] min-h-[320px] w-full lg:h-[calc(100vh-10rem)]" data-testid="universe-graph" />
     </div>
   );
 }

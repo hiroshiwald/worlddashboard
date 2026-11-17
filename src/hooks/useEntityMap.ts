@@ -52,7 +52,6 @@ export function useEntityArticles(id: string | null): Evidence | null {
 
 export function useEntityMap(focus: MapFocus) {
   const [load, setLoad] = useState<GraphLoad>({ status: "loading" });
-  const [entityId, setEntityId] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null); // clicked Universe node: entity id or EmergingItem key
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -74,8 +73,7 @@ export function useEntityMap(focus: MapFocus) {
 
   useEffect(() => {
     if (data === null || focus === null) return;
-    if (focus.kind === "entity" && data.byId.has(focus.id)) setEntityId(focus.id);
-    setSelected(null);
+    setSelected(focus.kind === "entity" && data.byId.has(focus.id) ? focus.id : null);
   }, [data, focus]);
 
   const trace: TraceResult = useMemo(
@@ -83,10 +81,7 @@ export function useEntityMap(focus: MapFocus) {
     [data, from, to],
   );
 
-  const up = useCallback(() => {
-    if (entityId !== null) setEntityId(null);
-    else setSelected(null);
-  }, [entityId]);
+  const up = useCallback(() => setSelected(null), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -96,9 +91,7 @@ export function useEntityMap(focus: MapFocus) {
     return () => window.removeEventListener("keydown", onKey);
   }, [up]);
 
-  const goEntity = useCallback((id: string) => { setEntityId(id); setSelected(null); }, []);
-
-  return { load, reload, data, entityId, selected, from, to, trace, select: setSelected, setFrom, setTo, goEntity, up };
+  return { load, reload, data, selected, from, to, trace, select: setSelected, setFrom, setTo, up };
 }
 
 export type EntityMapState = ReturnType<typeof useEntityMap>;

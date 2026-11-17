@@ -1,5 +1,7 @@
 "use client";
 
+import { useMemo } from "react";
+import type Graph from "graphology";
 import { ratioText } from "@/lib/entity-growth";
 import { useEntityArticles, type EntityMapState } from "@/hooks/useEntityMap";
 import type { EmergingState } from "@/hooks/useEmerging";
@@ -7,6 +9,7 @@ import {
   edgeBetween, growingFastest, isContext, isGrowing, isNewLink, neighboursOf, type MapData,
 } from "./model";
 import { NameCard } from "./NameCard";
+import { brokers, newEdges } from "./graph-metrics";
 import { nearKnown } from "./universe";
 import type { GraphNode } from "@/lib/server/graph";
 
@@ -15,6 +18,7 @@ interface Props {
   data: MapData;
   emerging: EmergingState;
   generatedAt: string;
+  graph: Graph;
   state: EntityMapState;
 }
 
@@ -24,24 +28,26 @@ function growthText(n: GraphNode): string {
   return n.state;
 }
 
-export default function SidePanel({ dark, data, emerging, generatedAt, state }: Props) {
+export default function SidePanel({ dark, data, emerging, generatedAt, graph, state }: Props) {
   const muted = dark ? "text-slate-400" : "text-gray-500";
   const card = `rounded border p-3 ${dark ? "border-slate-700 bg-slate-800/50" : "border-gray-200 bg-white"}`;
-  const subject = state.entityId;
   const picked = pickedKind(data, emerging, state.selected);
   return (
     <aside className="flex flex-col gap-3 text-sm lg:sticky lg:top-3 lg:max-h-[calc(100vh-1.5rem)] lg:overflow-y-auto" aria-label="Map details">
       <div className={card} data-testid="detail">
-        {subject !== null && <EntityDetail data={data} id={subject} state={state} muted={muted} />}
-        {subject === null && picked === "name" && <NameCard data={data} emerging={emerging} state={state} muted={muted} />}
-        {subject === null && picked === "entity" && <EntityDetail data={data} id={state.selected!} state={state} muted={muted} />}
-        {subject === null && picked === "gone" && <p className={muted}>This node is no longer listed.</p>}
-        {subject === null && picked === "none" && (
+        {picked === "name" && <NameCard emerging={emerging} state={state} muted={muted} />}
+        {picked === "entity" && <EntityDetail data={data} id={state.selected!} state={state} muted={muted} />}
+        {picked === "gone" && <p className={muted}>This node is no longer listed.</p>}
+        {picked === "none" && (
           <>
             <NewNear emerging={emerging} state={state} muted={muted} />
             <Fastest data={data} state={state} muted={muted} />
           </>
         )}
+      </div>
+      <div className={card} data-testid="graph-insights">
+        <Brokers graph={graph} generatedAt={generatedAt} state={state} muted={muted} />
+        <NewLinks data={data} graph={graph} generatedAt={generatedAt} state={state} muted={muted} />
       </div>
       <Trace data={data} state={state} muted={muted} card={card} dark={dark} generatedAt={generatedAt} />
     </aside>
@@ -89,7 +95,7 @@ function Fastest({ data, state, muted }: { data: MapData; state: EntityMapState;
       <ol className="flex flex-col gap-1">
         {list.map((n) => (
           <li key={n.id}>
-            <button type="button" className="flex w-full justify-between gap-2 text-left hover:underline" onClick={() => state.goEntity(n.id)}>
+            <button type="button" className="flex w-full justify-between gap-2 text-left hover:underline" onClick={() => state.select(n.id)}>
               <span>{n.name}</span><span className="tabular-nums text-sky-600">{growthText(n)}</span>
             </button>
           </li>
@@ -110,15 +116,58 @@ function EntityDetail({ data, id, state, muted }: { data: MapData; id: string; s
       <p className={muted}>{n.type}, {n.followed ? "tracked" : "not tracked"}, {n.mentions14d} mentions in 14 days</p>
       {isGrowing(n) && <p className="text-sky-600">{growthText(n)}</p>}
       <div className="my-2 flex flex-wrap gap-1">
-        {state.entityId !== id && <button type="button" className="rounded border px-2 py-1" onClick={() => state.goEntity(id)}>Open entity level</button>}
         <button type="button" className="rounded border px-2 py-1" onClick={() => state.setFrom(id)}>Trace from here</button>
         <button type="button" className="rounded border px-2 py-1" onClick={() => state.setTo(id)}>Trace to here</button>
       </div>
       {links.length > 0 && <p className={muted}>Linked to</p>}
       <ul>{links.map(({ node, edge }) => (
-        <li key={node.id}><button type="button" className="hover:underline" onClick={() => state.goEntity(node.id)}>{node.name}</button> <span className={muted}>{edge.articleCount} articles</span></li>
+        <li key={node.id}><button type="button" className="hover:underline" onClick={() => state.select(node.id)}>{node.name}</button> <span className={muted}>{edge.articleCount} articles</span></li>
       ))}</ul>
       <Articles evidence={evidence} muted={muted} />
+    </>
+  );
+}
+
+function Brokers({ graph, generatedAt, state, muted }: { graph: Graph; generatedAt: string; state: EntityMapState; muted: string }) {
+  const list = useMemo(() => brokers(graph, new Date(generatedAt)).filter((b) => b.now > b.before), [graph, generatedAt]);
+  return (
+    <>
+      <h3 className="mb-1 font-semibold">New brokers</h3>
+      {list.length === 0 && <p className={muted}>No entity gained a bridging role this week.</p>}
+      <ol className="flex flex-col gap-1" data-testid="brokers">
+        {list.map((b) => (
+          <li key={b.id}>
+            <button type="button" className="flex w-full justify-between gap-2 text-left hover:underline" onClick={() => state.select(b.id)}>
+              <span>{b.name}</span><span className={`tabular-nums ${muted}`}>{Math.round(b.before)} to {Math.round(b.now)}</span>
+            </button>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+interface NewLinksProps { data: MapData; graph: Graph; generatedAt: string; state: EntityMapState; muted: string }
+
+function NewLinks({ data, graph, generatedAt, state, muted }: NewLinksProps) {
+  const list = useMemo(
+    () => newEdges(data.edges, new Date(generatedAt)).filter((e) => graph.hasNode(e.a) && graph.hasNode(e.b)).slice(0, 10),
+    [data, graph, generatedAt],
+  );
+  return (
+    <>
+      <h3 className="mb-1 mt-3 font-semibold">New links this week</h3>
+      {list.length === 0 && <p className={muted}>No new links this week.</p>}
+      <ol className="flex flex-col gap-1" data-testid="new-links">
+        {list.map((e) => (
+          <li key={`${e.a}|${e.b}`}>
+            <button type="button" className="text-left hover:underline" onClick={() => state.select(e.a)}>
+              {data.byId.get(e.a)?.name} and {data.byId.get(e.b)?.name}
+            </button>
+            <span className={`ml-1 ${muted}`}>{e.articleCount} articles</span>
+          </li>
+        ))}
+      </ol>
     </>
   );
 }

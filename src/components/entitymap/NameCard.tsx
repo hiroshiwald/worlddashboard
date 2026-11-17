@@ -3,7 +3,6 @@
 import type { EntityMapState } from "@/hooks/useEntityMap";
 import type { EmergingState } from "@/hooks/useEmerging";
 import type { EmergingItem } from "@/lib/emerging-types";
-import type { MapData } from "./model";
 import { NO_ANCHOR_LABEL } from "./universe";
 
 const BTN = "rounded border px-2 py-1 disabled:opacity-50";
@@ -18,16 +17,12 @@ interface ListProps {
   muted: string;
 }
 
-interface CardProps extends ListProps {
-  data: MapData;
-}
 
 /** One new name: what it is, the evidence, and Track or Ignore. */
-export function NameCard({ data, emerging, state, muted }: CardProps) {
+export function NameCard({ emerging, state, muted }: ListProps) {
   const item = emerging.load.status === "ready" ? emerging.load.data.items.find((i) => i.key === state.selected) : undefined;
   if (item === undefined) return <p className={muted}>This name is no longer listed.</p>;
   const others = item.anchors.slice(1);
-  const inGraph = item.kind === "entity" && data.byId.has(item.key);
   return (
     <div data-testid="name-card">
       <button type="button" className={`mb-2 text-xs hover:underline ${muted}`} onClick={state.up}>Back to the list (Esc)</button>
@@ -38,7 +33,6 @@ export function NameCard({ data, emerging, state, muted }: CardProps) {
       {others.length > 0 && <p className={muted}>Also near {others.map((a) => a.name).join(", ")}</p>}
       <Headlines item={item} muted={muted} />
       <Actions item={item} emerging={emerging} />
-      {inGraph && <button type="button" className={`mt-2 text-xs ${BTN}`} onClick={() => state.goEntity(item.key)}>Open entity level</button>}
     </div>
   );
 }

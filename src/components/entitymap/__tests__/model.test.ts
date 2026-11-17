@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GraphEdge, GraphNode } from "@/lib/server/graph";
 import {
-  buildMapData, growingFastest, layoutEntity, liveGraph, parseGraph, traceConnection,
+  buildMapData, growingFastest, liveGraph, parseGraph, traceConnection,
 } from "../model";
 
 function node(id: string, over: Partial<GraphNode> = {}): GraphNode {
@@ -55,15 +55,7 @@ describe("traceConnection", () => {
   });
 });
 
-describe("layoutEntity and parseGraph", () => {
-  it("puts context neighbours and other neighbours in separate bubbles", () => {
-    const nodes = [node("1"), node("2"), node("3"), node("c", { role: "anchor" })];
-    const data = buildMapData(nodes, [edge("1", "2"), edge("1", "3"), edge("1", "c")]);
-    const lay = layoutEntity(data, "1", 900);
-    expect(lay.bubbles.map((b) => b.gid).sort()).toEqual(["ctx", "linked"]);
-    expect(lay.bubbles.find((b) => b.gid === "linked")?.members).toHaveLength(2);
-  });
-
+describe("parseGraph", () => {
   it("rejects a malformed graph payload", () => {
     expect(() => parseGraph({ nodes: [] })).toThrow();
     expect(() => parseGraph(null)).toThrow();

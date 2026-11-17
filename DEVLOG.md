@@ -2868,3 +2868,13 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: ingest name index skips all-lowercase aliases (`isNameLikeAlias` in `entity-ingest.ts`).
 - What it affected: entity resolution at ingest only. Old article links to Coca-Cola stay.
 - Gotchas: Neon showed Coca-Cola (284) and Coke (359) carry Wikidata aliases "cola" and "kola"; the index keys names in lowercase, so "COLA" matched.
+
+## 2026-11-17 — Wikidata test fixtures carry the looked-up name as a label
+- What changed: `wikidata.test.ts` and `fame-sweep.test.ts` fixtures now give the mocked wbgetentities hits an English label equal to the name looked up, so `hasNameForm` accepts them. Added a `hasNameForm` describe (3 cases) and a lookup case for a hit whose labels lack the name (matched:false, pageviews never called). No source or assertion changes.
+- What it affected: 13 failing tests in those two files; pass now (113 passed, 8 skipped in the two files).
+- Gotchas: Disambiguation fixtures label every hit that competes for the name (ICC: Q_ANTWERP and Q_ICC), or the sitelink comparison is not exercised. The default entity label is "Vladimir Putin", so any test looking up another name needs an explicit label.
+
+## 2026-11-17 — Entity map Universe moved to sigma + graphology
+- What changed: `UniverseGraph.tsx` now renders sigma (ForceAtlas2 worker runs 4 s, Louvain colours, community legend, hubs toggle). Pure helpers in `universe-view.ts`. Side panel gains "New brokers" and "New links this week". Removed `EntityLevel.tsx`, `forcegraph.ts` and their tests; `layoutEntity`/`labelText` removed from `model.ts`; `entityId`/`goEntity` removed from `useEntityMap`.
+- What it affected: `EntityMapTab.tsx`, `SidePanel.tsx`, `NameCard.tsx`, `useEntityMap.ts`, `model.ts`. `lib/map-layout.ts` is now unused by the app (own test only).
+- Gotchas: sigma 4 takes reducers as constructor options (no `setSetting("nodeReducer")`), so they read a ref and the view calls `refresh()`. sigma reads node attr `type` as a program name, so `paintGraph` removes it. `react-force-graph-2d` stays: `NetworkTab.tsx` still imports it. Not checked in a real WebGL browser.

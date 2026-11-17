@@ -12,12 +12,17 @@
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
     "compromise": "^14.15.0",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-layout-forceatlas2": "^0.10.1",
+    "graphology-metrics": "^2.4.2",
     "leaflet": "^1.9.4",
     "next": "^14.2.21",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-force-graph-2d": "^1.29.1",
-    "react-leaflet": "^4.2.1"
+    "react-leaflet": "^4.2.1",
+    "sigma": "^4.0.6"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
