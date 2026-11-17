@@ -24,6 +24,13 @@ export interface Candidate {
   roleContext?: string;
   /** Undefined for every heuristic layer — see Prominence. */
   prominence?: Prominence;
+  /** English Wikipedia title from the LLM layer; matches entities.wiki_title. */
+  wiki?: string;
+}
+
+/** False for an all-lowercase form ("cola"): a generic word, not a name. */
+export function isNameLikeAlias(alias: string): boolean {
+  return /\p{Lu}/u.test(alias) || !/\p{Ll}/u.test(alias);
 }
 
 const CORPORATE_SUFFIXES = new Set(["inc", "ltd", "llc", "corp", "plc", "ag", "gmbh"]);
@@ -92,6 +99,7 @@ export function addCandidate(
   layer: CandidateLayer,
   roleContext?: string,
   prominence?: Prominence,
+  wiki?: string,
 ): void {
   display = stripPossessive(display);
   const norm = normalizeName(display);
@@ -102,6 +110,7 @@ export function addCandidate(
       display, norm, typeHint, layer,
       ...(roleContext ? { roleContext } : {}),
       ...(prominence ? { prominence } : {}),
+      ...(wiki ? { wiki } : {}),
     });
     return;
   }
@@ -112,6 +121,7 @@ export function addCandidate(
   const longestDisplay = newRank >= existingRank && display.length > existing.display.length ? display : existing.display;
   const winnerRoleContext = newRank > existingRank ? roleContext : existing.roleContext;
   const winnerProminence = newRank > existingRank ? prominence : existing.prominence;
+  const keptWiki = existing.wiki ?? wiki;
 
   map.set(norm, {
     display: longestDisplay,
@@ -120,6 +130,7 @@ export function addCandidate(
     layer: winner.layer,
     ...(winnerRoleContext ? { roleContext: winnerRoleContext } : {}),
     ...(winnerProminence ? { prominence: winnerProminence } : {}),
+    ...(keptWiki ? { wiki: keptWiki } : {}),
   });
 }
 

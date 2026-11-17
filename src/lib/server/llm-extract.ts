@@ -45,9 +45,10 @@ const RELATION_TYPES = [
 
 const SYSTEM_PROMPT = [
   "You are an entity and relationship extractor for news headlines.",
-  'Return ONLY a JSON array, one object per article: {"index": n, "entities": [{"name": "...", "type": "...", "role": "short role/context phrase if stated, else omit", "prominence": "famous"|"known"|"obscure"}], "relations": [{"source": "...", "target": "...", "relation": "..."}], "topic": "...", "title_en": "..."}.',
+  'Return ONLY a JSON array, one object per article: {"index": n, "entities": [{"name": "...", "type": "...", "role": "short role/context phrase if stated, else omit", "prominence": "famous"|"known"|"obscure", "wiki": "..."}], "relations": [{"source": "...", "target": "...", "relation": "..."}], "topic": "...", "title_en": "..."}.',
   `"topic" is a broad, reusable theme of 1 to 3 words, never an event-specific label. Good: "AI", "US politics", "Crypto", "Ukraine war", "Aviation". Bad: "Hungarian corruption investigation", "FAA funding request". Use "${OTHER_TOPIC}" when you cannot place it.`,
   '"title_en" is an English translation of the article title, without any " - Publisher" suffix. Include it only when the title is not in English; omit it otherwise.',
+  '"wiki" is the exact title of the entity\'s English Wikipedia article. Omit it when the entity has no article, when the term is generic (COLA is a cost-of-living adjustment, not Coca-Cola), or when you are unsure. Expand company acronyms (HII is "Huntington Ingalls Industries").',
   `"type" is one of: ${ENTITY_TYPES.join("|")}.`,
   '"prominence" is how widely known the entity is to a general news reader: "famous" (a household name), "known" (a regular news reader would recognize it), or "obscure" (needs explanation).',
   `"relation" is one of: ${RELATION_TYPES.join("|")}; a relation's "source" and "target" must exactly match names in that same article's own "entities" list.`,
@@ -312,6 +313,19 @@ interface RawEntity {
   type: RawEntityType;
   role?: string;
   prominence: Prominence;
+  wiki?: string;
+}
+
+const MAX_WIKI_TITLE_CHARS = 200;
+
+/** A Wikipedia title from the model, or null when absent or malformed. Used
+ * only to match existing entities, never as a fame signal. */
+export function parseWikiTitle(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const title = raw.replace(/_/g, " ").trim();
+  if (title.length === 0 || title.length > MAX_WIKI_TITLE_CHARS) return null;
+  if (/[\n\r\t#<>[\]{}|]/.test(title)) return null;
+  return title;
 }
 
 // Unlike a malformed entity shape (dropped entirely, see parseRawArticleResult),
@@ -328,6 +342,8 @@ function parseRawEntity(raw: unknown): RawEntity | null {
 
   const entity: RawEntity = { name: r.name.trim(), type, prominence };
   if (typeof r.role === "string" && r.role.trim().length > 0) entity.role = r.role.trim();
+  const wiki = parseWikiTitle(r.wiki);
+  if (wiki) entity.wiki = wiki;
   return entity;
 }
 
@@ -473,7 +489,7 @@ const TYPE_MAP: Record<RawEntityType, TypeHint> = {
 function buildCandidates(entities: RawEntity[]): Candidate[] {
   const map = new Map<string, Candidate>();
   for (const entity of entities) {
-    addCandidate(map, entity.name, TYPE_MAP[entity.type], "llm", entity.role, entity.prominence);
+    addCandidate(map, entity.name, TYPE_MAP[entity.type], "llm", entity.role, entity.prominence, entity.wiki);
   }
   return Array.from(map.values());
 }

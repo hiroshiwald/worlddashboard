@@ -1,5 +1,5 @@
 import type { Sql, SqlRow } from "./db";
-import { extractCandidates, extractDictionaryOnlyCandidates, addCandidate, normalizeName, Candidate, TypeHint } from "./extract-v2";
+import { extractCandidates, extractDictionaryOnlyCandidates, addCandidate, normalizeName, isNameLikeAlias, Candidate, TypeHint } from "./extract-v2";
 import { scoreSentiment } from "../entity-extractor";
 import {
   isLlmConfigured,
@@ -160,8 +160,26 @@ interface EntityRecord {
   type: TypeHint;
 }
 
-export function isNameLikeAlias(alias: string): boolean {
-  return /\p{Lu}/u.test(alias) || !/\p{Ll}/u.test(alias);
+export interface EntityRegistry {
+  byName: Map<string, EntityRecord>;
+  /** Keyed by wikiKey(entities.wiki_title); matched against the LLM's `wiki` field. */
+  byWiki: Map<string, EntityRecord>;
+}
+
+/** Wikipedia title comparison: case-, underscore- and space-insensitive. */
+export function wikiKey(title: string): string {
+  return title.replace(/_/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function buildWikiIndex(rows: SqlRow[], byName: Map<string, EntityRecord>): Map<string, EntityRecord> {
+  const index = new Map<string, EntityRecord>();
+  for (const row of rows) {
+    if (typeof row.wiki_title !== "string" || row.wiki_title.trim() === "") continue;
+    const record = byName.get(normalizeName(String(row.canonical_name)));
+    const key = wikiKey(row.wiki_title);
+    if (record && record.id === Number(row.id) && !index.has(key)) index.set(key, record);
+  }
+  return index;
 }
 
 function buildRegistryIndex(rows: SqlRow[]): Map<string, EntityRecord> {
@@ -185,9 +203,10 @@ function buildRegistryIndex(rows: SqlRow[]): Map<string, EntityRecord> {
   return index;
 }
 
-async function loadEntityRegistry(sql: Sql): Promise<Map<string, EntityRecord>> {
-  const rows = await sql`SELECT id, canonical_name, type, aliases FROM entities ORDER BY id ASC`;
-  return buildRegistryIndex(rows);
+async function loadEntityRegistry(sql: Sql): Promise<EntityRegistry> {
+  const rows = await sql`SELECT id, canonical_name, type, aliases, wiki_title FROM entities ORDER BY id ASC`;
+  const byName = buildRegistryIndex(rows);
+  return { byName, byWiki: buildWikiIndex(rows, byName) };
 }
 
 // ---- candidate resolution (registry -> dictionary -> entity_candidates) ----
@@ -236,7 +255,7 @@ interface CandidateSighting {
 }
 
 type Classification =
-  | { kind: "resolved"; mention: ResolvedMention; canonicalName: string }
+  | { kind: "resolved"; mention: ResolvedMention; canonicalName: string; wikiAlias?: string }
   | { kind: "new-entity"; canonicalName: string; type: TypeHint; mention: PendingMention; autoAccepted: boolean }
   | { kind: "candidate"; sighting: CandidateSighting };
 
@@ -250,9 +269,9 @@ function classifyCandidate(
   candidate: Candidate,
   article: HeadArticle,
   sentiment: number,
-  registry: Map<string, EntityRecord>,
+  registry: EntityRegistry,
 ): Classification {
-  const known = registry.get(candidate.norm);
+  const known = registry.byName.get(candidate.norm);
   const mention: PendingMention = {
     articleId: article.id,
     effectiveAt: article.effectiveAt,
@@ -263,6 +282,12 @@ function classifyCandidate(
 
   if (known) {
     return { kind: "resolved", mention: { ...mention, entityId: known.id }, canonicalName: known.canonicalName };
+  }
+  // Merge at arrival: a new surface form ("HII") whose LLM Wikipedia title
+  // equals a stored entity's wiki_title resolves to it and becomes an alias.
+  const wikiHit = candidate.wiki ? registry.byWiki.get(wikiKey(candidate.wiki)) : undefined;
+  if (wikiHit) {
+    return { kind: "resolved", mention: { ...mention, entityId: wikiHit.id }, canonicalName: wikiHit.canonicalName, wikiAlias: candidate.display };
   }
   if (candidate.layer === "dictionary") {
     return { kind: "new-entity", canonicalName: candidate.display, type: candidate.typeHint, mention, autoAccepted: false };
@@ -302,7 +327,13 @@ interface ClassifiedBatch {
   resolved: ResolvedMention[];
   newEntities: Map<string, PendingNewEntity>;
   candidateSightings: CandidateSighting[];
+  wikiAliases: WikiAlias[];
   processedArticleIds: number[];
+}
+
+interface WikiAlias {
+  entityId: number;
+  alias: string;
 }
 
 function addNewEntityMention(
@@ -333,7 +364,7 @@ function logArticleFailure(articleId: number, err: unknown): void {
 function processArticle(
   article: HeadArticle,
   candidates: Candidate[],
-  registry: Map<string, EntityRecord>,
+  registry: EntityRegistry,
   batch: Omit<ClassifiedBatch, "processedArticleIds">,
 ): boolean {
   try {
@@ -342,8 +373,10 @@ function processArticle(
     const resolvedNames = collectResolvedNames(classifications);
 
     for (const result of classifications) {
-      if (result.kind === "resolved") batch.resolved.push(result.mention);
-      else if (result.kind === "new-entity") {
+      if (result.kind === "resolved") {
+        batch.resolved.push(result.mention);
+        if (result.wikiAlias) batch.wikiAliases.push({ entityId: result.mention.entityId, alias: result.wikiAlias });
+      } else if (result.kind === "new-entity") {
         addNewEntityMention(batch.newEntities, result.canonicalName, result.type, result.mention, result.autoAccepted);
       } else batch.candidateSightings.push({ ...result.sighting, coEntities: resolvedNames });
     }
@@ -361,12 +394,13 @@ function processArticle(
 function classifyAll(
   heads: HeadArticle[],
   candidatesByArticle: Map<number, Candidate[] | null>,
-  registry: Map<string, EntityRecord>,
+  registry: EntityRegistry,
 ): ClassifiedBatch {
   const batch = {
     resolved: [] as ResolvedMention[],
     newEntities: new Map<string, PendingNewEntity>(),
     candidateSightings: [] as CandidateSighting[],
+    wikiAliases: [] as WikiAlias[],
   };
   const processedArticleIds: number[] = [];
   for (const article of heads) {
@@ -387,7 +421,7 @@ export function chunkArticles<T>(items: T[], size: number): T[][] {
 
 function mergeLlmWithDictionary(llmCandidates: Candidate[], title: string, summary: string): Candidate[] {
   const map = new Map<string, Candidate>();
-  for (const c of llmCandidates) addCandidate(map, c.display, c.typeHint, c.layer, c.roleContext, c.prominence);
+  for (const c of llmCandidates) addCandidate(map, c.display, c.typeHint, c.layer, c.roleContext, c.prominence, c.wiki);
   for (const c of extractDictionaryOnlyCandidates(title, summary)) addCandidate(map, c.display, c.typeHint, c.layer, c.roleContext, c.prominence);
   return Array.from(map.values());
 }
@@ -775,6 +809,23 @@ async function bumpEntityLastSeen(sql: Sql, mentions: ResolvedMention[]): Promis
     UPDATE entities SET last_seen_at = GREATEST(COALESCE(entities.last_seen_at, '-infinity'), v.max_seen)
     FROM UNNEST(${ids}::bigint[], ${maxes}::timestamptz[]) AS v(id, max_seen)
     WHERE entities.id = v.id
+  `;
+}
+
+// One alias per entity per run: UPDATE ... FROM applies only one joined row
+// to each target row, so later aliases for the same entity wait a run.
+async function appendWikiAliases(sql: Sql, adds: WikiAlias[]): Promise<void> {
+  const byEntity = new Map<number, string>();
+  for (const add of adds) {
+    if (!byEntity.has(add.entityId)) byEntity.set(add.entityId, add.alias);
+  }
+  if (byEntity.size === 0) return;
+  const ids = Array.from(byEntity.keys());
+  const aliases = ids.map((id) => byEntity.get(id)!);
+  await sql`
+    UPDATE entities SET aliases = array_append(entities.aliases, v.alias)
+    FROM UNNEST(${ids}::bigint[], ${aliases}::text[]) AS v(id, alias)
+    WHERE entities.id = v.id AND NOT (v.alias = ANY(entities.aliases)) AND v.alias <> entities.canonical_name
   `;
 }
 
@@ -1301,13 +1352,14 @@ export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
   const allMentions = dedupeMentions([...classified.resolved, ...newEntityMentions]);
 
   await bumpEntityLastSeen(sql, allMentions);
+  await appendWikiAliases(sql, classified.wikiAliases);
   const newLinks = await insertArticleEntities(sql, allMentions);
   const counted = countableMentions(allMentions, reprocessedIds, newLinks);
   await upsertHourlyMentions(sql, rollupHourlyMentions(counted));
   await upsertEntityEdges(sql, rollupEntityEdges(counted));
   const candidatesTouched = await persistCandidates(sql, sightings);
   const relationIds = classified.processedArticleIds.filter((id) => !reprocessedIds.has(id));
-  const relationsWritten = await persistRelations(sql, registry, insertedEntities, heads, relationIds, pending.relationsByArticle);
+  const relationsWritten = await persistRelations(sql, registry.byName, insertedEntities, heads, relationIds, pending.relationsByArticle);
   // Marking processed is deliberately the LAST WRITE of a run: a crash
   // between the aggregate writes above and this UPDATE leaves this batch's
   // articles unmarked, so they retry next run — additive rollups (mentions,

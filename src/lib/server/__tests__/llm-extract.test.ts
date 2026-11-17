@@ -479,6 +479,20 @@ describe("fetchBatchResults: entity/relation/prominence parsing (via a succeeded
     expect([0, 1, 2, 3, 4, 5].map((i) => titlesEn.get(i))).toEqual(["Iran strikes continue", undefined, undefined, undefined, undefined, "x".repeat(300)]);
   });
 
+  it("parses an optional wiki title; underscores become spaces; bad values are dropped", async () => {
+    const line = resultLine("0", succeededResult(JSON.stringify([{ index: 0, entities: [
+      { name: "HII", type: "company", wiki: " Huntington_Ingalls_Industries " },
+      { name: "COLA", type: "other" },
+      { name: "A", type: "other", wiki: 7 },
+      { name: "B", type: "other", wiki: "Bad|Title" },
+      { name: "C", type: "other", wiki: "x".repeat(201) },
+    ] }])));
+    mockFetchOnce(textResponse(200, line));
+    const results = await fetchBatchResults("https://x/results") as { byChunk: Map<number, { candidates: Map<number, { display: string; wiki?: string }[]> }> };
+    const wikis = results.byChunk.get(0)!.candidates.get(0)!.map((c) => [c.display, c.wiki]);
+    expect(wikis).toEqual([["HII", "Huntington Ingalls Industries"], ["COLA", undefined], ["A", undefined], ["B", undefined], ["C", undefined]]);
+  });
+
   it("defaults prominence to 'known' when missing or invalid", async () => {
     const line = resultLine("0", succeededResult(JSON.stringify([{ index: 0, entities: [{ name: "Someone", type: "person", prominence: "legendary" }] }])));
     mockFetchOnce(textResponse(200, line));

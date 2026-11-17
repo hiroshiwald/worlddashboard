@@ -8,7 +8,6 @@ import {
   dedupeMentions,
   chunkArticles,
   countableMentions,
-  isNameLikeAlias,
 } from "../entity-ingest";
 import { isLlmConfigured, submitBatch, pollBatch, fetchBatchResults } from "../llm-extract";
 import type { Sql, SqlRow } from "../db";
@@ -22,6 +21,7 @@ vi.mock("../extract-v2", async (importOriginal) => {
     ...actual,
     extractCandidates: (title: string, summary: string) => {
       if (title.includes("POISON")) throw new Error("simulated extraction failure");
+      if (title.includes("WIKIHIT")) return [{ display: "HII", norm: "hii", typeHint: "organization", layer: "llm", wiki: "Huntington Ingalls Industries" }];
       return actual.extractCandidates(title, summary);
     },
   };
@@ -391,6 +391,33 @@ describe("processNewArticles resolution order and idempotency", () => {
       const payload = JSON.parse(candidatesUpsertCall.values[0] as string);
       expect(payload.some((p: { name_norm: string }) => p.name_norm === "kestrel basin")).toBe(false);
     }
+  });
+
+  it("resolves a new surface form by its LLM wiki title and stores it as an alias", async () => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
+      if (call.query.includes("FROM articles a")) return [{ ...headRow, title: "WIKIHIT wins Navy contract", summary: "" }];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) {
+        return [{ id: "70", canonical_name: "Huntington Ingalls Industries", type: "organization", aliases: [], wiki_title: "Huntington_Ingalls_Industries" }];
+      }
+      return [];
+    }));
+    await processNewArticles(sql);
+    expect(findCall(calls, "INSERT INTO article_entities")!.values[1]).toEqual([70]);
+    const aliasCall = findCall(calls, "array_append(entities.aliases");
+    expect(aliasCall!.values).toEqual([[70], ["HII"]]);
+    expect(findCall(calls, "INSERT INTO entity_candidates")).toBeUndefined();
+  });
+
+  it("writes no alias when the wiki title matches no stored entity", async () => {
+    const { sql, calls } = makeMockSql(withNoPendingBatch((call) => {
+      if (call.query.includes("FROM articles a")) return [{ ...headRow, title: "WIKIHIT wins Navy contract", summary: "" }];
+      if (call.query.includes("SELECT id, canonical_name, type, aliases")) {
+        return [{ id: "71", canonical_name: "Coca-Cola", type: "company", aliases: [], wiki_title: "Coca-Cola" }];
+      }
+      return [];
+    }));
+    await processNewArticles(sql);
+    expect(findCall(calls, "array_append(entities.aliases")).toBeUndefined();
   });
 
   it("counts one mention, not two, when an article's text matches two aliases of the same entity", async () => {
@@ -1102,6 +1129,7 @@ describe("countableMentions", () => {
   });
 });
 
+import { isNameLikeAlias } from "../extract-v2";
 describe("isNameLikeAlias", () => {
   it("drops all-lowercase Wikidata word forms, keeps names and uncased scripts", () => {
     expect(isNameLikeAlias("cola")).toBe(false);
