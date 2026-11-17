@@ -1,4 +1,4 @@
-import type { EmergingAnchor, EmergingItem, EmergingResponse } from "../emerging-types";
+import { anchorRank, firstAnchorRank, type EmergingAnchor, type EmergingItem, type EmergingResponse } from "../emerging-types";
 import type { Sql, SqlRow } from "./db";
 import { ValidationError, type EntityRole } from "./entity-admin";
 import { loadRoleMap } from "./graph";
@@ -31,7 +31,7 @@ function toStrings(value: unknown): string[] {
 /** Pure. Rows are (subject key, article id, anchor entity). Counts distinct
  * articles per (subject, anchor), keeps famous/anchor roles, top 3 by count. */
 export function rankAnchors(
-  links: { subject: string; articleId: string; anchorId: string; anchorName: string }[],
+  links: { subject: string; articleId: string; anchorId: string; anchorName: string; anchorType: string }[],
   roleById: Map<string, EntityRole>,
 ): Map<string, EmergingAnchor[]> {
   const articles = new Map<string, { anchor: EmergingAnchor; seen: Set<string> }>();
@@ -40,7 +40,7 @@ export function rankAnchors(
     if (role !== "famous" && role !== "anchor") continue;
     const pairKey = `${link.subject}|${link.anchorId}`;
     const entry = articles.get(pairKey) ?? {
-      anchor: { id: link.anchorId, name: link.anchorName, articleCount: 0 },
+      anchor: { id: link.anchorId, name: link.anchorName, type: link.anchorType, articleCount: 0 },
       seen: new Set<string>(),
     };
     entry.seen.add(link.articleId);
@@ -53,19 +53,18 @@ export function rankAnchors(
     bySubject.set(subject, [...(bySubject.get(subject) ?? []), entry.anchor]);
   }
   for (const [subject, anchors] of bySubject) {
-    anchors.sort((a, b) => b.articleCount - a.articleCount || a.name.localeCompare(b.name));
+    anchors.sort((a, b) => anchorRank(a.type) - anchorRank(b.type) || b.articleCount - a.articleCount || a.name.localeCompare(b.name));
     bySubject.set(subject, anchors.slice(0, MAX_ANCHORS));
   }
   return bySubject;
 }
 
-/** Pure. Anchored items first, then newest, then most mentioned; capped. */
+/** Pure. By first anchor rank (people/companies, other, places, none), then newest, then most mentioned; capped. */
 export function sortAndCap(items: EmergingItem[]): EmergingItem[] {
-  const anchored = (item: EmergingItem) => (item.anchors.length > 0 ? 1 : 0);
   return [...items]
     .sort(
       (a, b) =>
-        anchored(b) - anchored(a) ||
+        firstAnchorRank(a.anchors) - firstAnchorRank(b.anchors) ||
         b.firstSeenAt.localeCompare(a.firstSeenAt) ||
         b.mentions - a.mentions ||
         a.key.localeCompare(b.key),
@@ -97,6 +96,7 @@ export function assembleEmerging(
             articleId: String(link.emg_link_article),
             anchorId: String(link.id),
             anchorName: String(link.canonical_name),
+            anchorType: String(link.type),
           })),
       ),
     ),
@@ -108,6 +108,7 @@ export function assembleEmerging(
       articleId: String(link.emg_link_article),
       anchorId: String(link.id),
       anchorName: String(link.canonical_name),
+            anchorType: String(link.type),
     })),
     roleById,
   );

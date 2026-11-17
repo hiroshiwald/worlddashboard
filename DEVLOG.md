@@ -2807,3 +2807,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - Entity map Universe now one bubble per anchor from /api/emerging; labels use real bubble radius; Growing fastest skips merged; "New near known" panel.
 - Affected: src/components/entitymap/*, src/hooks/useEntityMap.ts, src/hooks/useEmerging.ts, src/lib/map-layout.ts (placeLabels).
 - Gotchas: topic/cluster grouping, scope, open/close, drag, island frames, contentBand deleted. filterGraph already dropped merged nodes, so the growingFastest guard is belt and braces. Trace now shows text only (no map highlight).
+
+## 2026-11-17 — Anchor ranking; publisher removed from Newsfeed headlines
+- What changed: `EmergingAnchor` gains `type`. `anchorRank`: person/company 0, other 1, country/region/city 2, no anchor 3. Applied to anchors per item, item order in `/api/emerging`, bubble order and the "New near known" list. Newsfeed headline text drops the " - Publisher" suffix (`stripPublisherSuffix`).
+- What it affected: `emerging-types.ts`, `emerging.ts`, `entitymap/universe.ts`, `newsfeed/FeedRow.tsx`, tests. Gate: tsc, 1226 tests, build pass.
+- Gotchas: Operator approved the push to `main`.

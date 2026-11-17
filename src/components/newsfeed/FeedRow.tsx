@@ -1,4 +1,5 @@
 "use client";
+import { stripPublisherSuffix } from "@/lib/candidate-match";
 
 import {
   rowEntities,
@@ -106,7 +107,7 @@ export default function FeedRow({ article, h }: { article: FeedArticle; h: RowHa
     <article className={`grid gap-x-5 gap-y-1.5 border-t border-l-[3px] px-4 py-3 md:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1.3fr)] ${divider} ${accent}`}>
       <div>
         <a href={article.link} target="_blank" rel="noopener noreferrer" className="text-[15px] font-semibold leading-snug hover:underline">
-          {article.title}
+          {stripPublisherSuffix(article.title)}
         </a>
         <WorldBox article={article} dark={h.dark} />
       </div>

@@ -29,7 +29,7 @@ describe("parseDays", () => {
 
 describe("rankAnchors", () => {
   const roles = new Map<string, EntityRole>([["1", "famous"], ["2", "anchor"], ["3", "satellite"], ["4", "famous"], ["5", "famous"]]);
-  const link = (anchorId: string, articleId: string) => ({ subject: "s", articleId, anchorId, anchorName: `A${anchorId}` });
+  const link = (anchorId: string, articleId: string, anchorType = "organization") => ({ subject: "s", articleId, anchorId, anchorName: `A${anchorId}`, anchorType });
 
   it("counts distinct articles, drops satellites, keeps top 3 desc", () => {
     const out = rankAnchors(
@@ -38,12 +38,20 @@ describe("rankAnchors", () => {
     ).get("s");
     expect(out?.map((a) => [a.id, a.articleCount])).toEqual([["5", 3], ["1", 2], ["2", 1]]);
   });
+
+  it("ranks people and companies before other types, and places last", () => {
+    const out = rankAnchors(
+      [link("1", "a", "country"), link("1", "b", "country"), link("1", "c", "country"), link("2", "a", "company"), link("4", "a", "government_body")],
+      roles,
+    ).get("s");
+    expect(out?.map((a) => a.id)).toEqual(["2", "4", "1"]);
+  });
 });
 
 describe("sortAndCap", () => {
-  const item = (key: string, anchors: number, firstSeenAt: string, mentions: number): EmergingItem => ({
+  const item = (key: string, anchors: number, firstSeenAt: string, mentions: number, anchorType = "organization"): EmergingItem => ({
     key, kind: "entity", name: key, type: "other", firstSeenAt, mentions, sampleTitles: [],
-    anchors: Array.from({ length: anchors }, (_, i) => ({ id: String(i), name: "x", articleCount: 1 })),
+    anchors: Array.from({ length: anchors }, (_, i) => ({ id: String(i), name: "x", type: anchorType, articleCount: 1 })),
   });
 
   it("orders anchored, then newest, then mentions", () => {
@@ -55,6 +63,14 @@ describe("sortAndCap", () => {
       item("anch-many", 1, "2026-11-12T00:00:00Z", 5),
     ]);
     expect(out.map((i) => i.key)).toEqual(["anch-many", "anch-few", "anch-old", "new-none", "old"]);
+  });
+
+  it("puts items near people and companies before items near places", () => {
+    const out = sortAndCap([
+      item("near-country", 1, "2026-11-17T00:00:00Z", 9, "country"),
+      item("near-person", 1, "2026-11-10T00:00:00Z", 1, "person"),
+    ]);
+    expect(out.map((i) => i.key)).toEqual(["near-person", "near-country"]);
   });
 
   it("caps at 200", () => {
@@ -83,7 +99,7 @@ describe("assembleEmerging", () => {
       NOW,
     );
     expect(res.items.map((i) => i.key)).toEqual(["cand:newco", "7"]);
-    expect(res.items[0].anchors).toEqual([{ id: "1", name: "Sam Altman", articleCount: 1 }]);
+    expect(res.items[0].anchors).toEqual([{ id: "1", name: "Sam Altman", type: "person", articleCount: 1 }]);
     expect(res.items[1].anchors[0].name).toBe("Sam Altman");
     expect(res.days).toBe(7);
   });

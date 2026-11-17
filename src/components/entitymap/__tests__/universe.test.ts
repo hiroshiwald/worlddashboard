@@ -2,18 +2,26 @@ import { describe, expect, it } from "vitest";
 import type { EmergingItem } from "@/lib/emerging-types";
 import { bubbleRadius, groupByAnchor, nearKnown, NO_ANCHOR_ID, NO_ANCHOR_LABEL, parseEmerging } from "../universe";
 
-function item(name: string, anchors: string[], mentions = 1): EmergingItem {
+function item(name: string, anchors: string[], mentions = 1, anchorType = "organization"): EmergingItem {
   return {
     key: `cand:${name}`, kind: "candidate", name, type: "person", firstSeenAt: "2026-11-10T00:00:00Z", mentions,
-    anchors: anchors.map((a) => ({ id: a, name: a.toUpperCase(), articleCount: 1 })), sampleTitles: [],
+    anchors: anchors.map((a) => ({ id: a, name: a.toUpperCase(), type: anchorType, articleCount: 1 })), sampleTitles: [],
   };
 }
 
 describe("groupByAnchor", () => {
-  it("groups by first anchor, biggest first, with unanchored items in one bubble", () => {
+  it("groups by first anchor, biggest first, with unanchored items in one bubble last", () => {
     const out = groupByAnchor([item("a", ["x", "y"]), item("b", ["y"]), item("c", ["y", "x"]), item("f", ["y"]), item("d", []), item("e", [])]);
-    expect(out.map((b) => [b.id, b.items.length])).toEqual([["y", 3], [NO_ANCHOR_ID, 2], ["x", 1]]);
+    expect(out.map((b) => [b.id, b.items.length])).toEqual([["y", 3], ["x", 1], [NO_ANCHOR_ID, 2]]);
     expect(out.find((b) => b.id === NO_ANCHOR_ID)?.label).toBe(NO_ANCHOR_LABEL);
+  });
+
+  it("puts people and companies first and places last, whatever their size", () => {
+    const out = groupByAnchor([
+      item("a", ["china"], 1, "country"), item("b", ["china"], 1, "country"), item("c", ["china"], 1, "country"),
+      item("d", ["altman"], 1, "person"), item("e", ["fed"], 1, "government_body"), item("f", ["fed"], 1, "government_body"),
+    ]);
+    expect(out.map((b) => b.id)).toEqual(["altman", "fed", "china"]);
   });
 
   it("returns nothing for no items", () => {
