@@ -2830,3 +2830,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: Universe labels always sit inside the bubble (`insideLabel`: 13 px down to 9 px, then ellipsis); outside labels removed. Bubble colour = anchor kind (person/company, other, place, none) with a legend; top 30 groups shown. `/api/emerging` drops candidate names that fail `isMatchableName` and trims a trailing dash.
 - What it affected: `MapSvg.tsx`, `pack.ts`, `emerging.ts`, tests. Gate: tsc, tests, build pass. Checked with Playwright on live `/api/emerging` data from the preview.
 - Gotchas: Translation (migration 010) must run in Neon BEFORE this branch reaches `main`: feed SQL reads `articles.title_en`. Helper tokens (Sonnet): translation 119k, map discovery 158k (over the 150k cap again; UI rewrites need smaller briefs).
+
+## 2026-11-17
+- Added one-off November LLM backfill: ingest tops its batch up to 400 topic-less window heads (backfill.ts, GET /api/backfill, backfill tally in ingest response).
+- Affects entity-ingest.ts submit/apply stages; reprocessed articles grow hourly/edge counts only for new article_entities links, candidates and relations skipped.
+- Gotcha: a head that keeps failing the LLM stays topic-less and is re-selected; delete backfill.ts and its call sites once remaining = 0.

@@ -7,6 +7,7 @@ import {
   rollupCandidate,
   dedupeMentions,
   chunkArticles,
+  countableMentions,
 } from "../entity-ingest";
 import { isLlmConfigured, submitBatch, pollBatch, fetchBatchResults } from "../llm-extract";
 import type { Sql, SqlRow } from "../db";
@@ -49,6 +50,7 @@ function makeMockSql(handler: (call: RecordedCall) => SqlRow[]) {
   const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const call: RecordedCall = { query: strings.join(" ? "), values };
     calls.push(call);
+    if (call.query.includes("remaining_heads")) return [{ remaining_heads: 0 }];
     return handler(call);
   }) as Sql;
   return { sql, calls };
@@ -111,8 +113,9 @@ describe("selectUnprocessedHeads (via processNewArticles)", () => {
       },
       entities: { autoAccepted: 0 },
       relations: { written: 0 },
+      backfill: { submitted: 0, remaining: 0 },
     });
-    expect(calls).toHaveLength(2); // llm_batches check, then the heads query
+    expect(calls).toHaveLength(3); // llm_batches check, heads query, backfill remaining count
   });
 });
 
@@ -963,5 +966,137 @@ describe("llm.errorSamples", () => {
 
     expect(stats.llm.failureReasons).toEqual({ results_http_500: 1, submit_http_400: 1 });
     expect(stats.llm.errorSamples).toEqual(["invalid_request_error: bad field"]);
+  });
+});
+
+describe("backfill: selection (one-off)", () => {
+  const headRow = { id: "1", title: "Fresh head.", summary: "", published_at: "2026-11-17T01:00:00Z", first_seen_at: "2026-11-17T01:00:00Z", source_name: "A" };
+  const backfillRows = [
+    { id: "10", title: "Old one.", summary: "", published_at: "2026-11-01T01:00:00Z", first_seen_at: "2026-11-01T01:00:00Z", source_name: "A", entities_processed_at: null },
+    { id: "11", title: "Old two.", summary: "", published_at: "2026-11-01T02:00:00Z", first_seen_at: "2026-11-01T02:00:00Z", source_name: "A", entities_processed_at: "2026-11-02T00:00:00Z" },
+  ];
+
+  function makeSql() {
+    return makeMockSql(withNoPendingBatch((call) => {
+      if (call.query.includes("FROM articles a")) return [headRow];
+      if (call.query.includes("FROM articles bf")) return backfillRows;
+      return [];
+    }));
+  }
+
+  beforeEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    vi.mocked(submitBatch).mockReset();
+  });
+
+  it("tops the batch up with topic-less window heads, oldest first, within the per-run cap", async () => {
+    vi.mocked(submitBatch).mockResolvedValue({ ok: true, batchId: "batch_bf" });
+    const { sql, calls } = makeSql();
+
+    const stats = await processNewArticles(sql);
+
+    const selectCall = findCall(calls, "FROM articles bf")!;
+    expect(selectCall.query).toContain("bf.topic IS NULL");
+    expect(selectCall.query).toContain("bf.dup_group_id IS NULL");
+    expect(selectCall.query).toContain("ORDER BY bf.first_seen_at ASC");
+    expect(selectCall.values).toContain("2026-11-01T00:00:00Z");
+    expect(selectCall.values).toContain("2026-11-17T00:00:00Z");
+    expect(selectCall.values).toContain(399); // 400 cap minus the 1 fresh head
+    expect(selectCall.values).toContainEqual([1]); // fresh head excluded
+    const chunks = vi.mocked(submitBatch).mock.calls[0][2];
+    expect(chunks.flat().map((a) => a.title)).toEqual(["Fresh head.", "Old one.", "Old two."]);
+    expect(findCall(calls, "INSERT INTO llm_batches")!.values[2]).toEqual([1, 10, 11]);
+    expect(stats.backfill).toEqual({ submitted: 2, remaining: 0 });
+    expect(stats.llm.batch.submittedArticles).toBe(3);
+  });
+
+  it("leaves backfill articles untouched when the submit fails (budget gate unchanged)", async () => {
+    vi.mocked(submitBatch).mockResolvedValue({ ok: false, reason: "budget_gate" });
+    const { sql, calls } = makeSql();
+
+    const stats = await processNewArticles(sql);
+
+    expect(stats.llm.failureReasons).toEqual({ budget_gate: 1 });
+    expect(stats.backfill.submitted).toBe(0);
+    expect(stats.articlesProcessed).toBe(1); // only the fresh head, heuristically
+    expect(findCall(calls, "INSERT INTO llm_batches")).toBeUndefined();
+  });
+
+  it("does not select backfill rows when the LLM is not configured", async () => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    const { sql, calls } = makeSql();
+    await processNewArticles(sql);
+    expect(findCall(calls, "ORDER BY bf.first_seen_at")).toBeUndefined();
+  });
+});
+
+describe("backfill: idempotent apply (one-off)", () => {
+  const reprocessedHead = {
+    id: "1", title: "Firstname Lastname met officials in Iran today.", summary: "",
+    published_at: "2026-11-02T09:00:00Z", first_seen_at: "2026-11-02T09:00:00Z", source_name: "Source A",
+    entities_processed_at: "2026-11-02T09:05:00Z",
+  };
+
+  function runEnded(articleEntitiesReturning: SqlRow[]) {
+    vi.mocked(isLlmConfigured).mockReturnValue(true);
+    vi.mocked(pollBatch).mockResolvedValue({ status: "ended", resultsUrl: "https://x/results" });
+    vi.mocked(fetchBatchResults).mockResolvedValue({
+      byChunk: new Map([[0, {
+        candidates: new Map([[0, [{ display: "Firstname Lastname", norm: "firstname lastname", typeHint: "person" as const, layer: "llm" as const, prominence: "known" as const }]]]),
+        relations: new Map(),
+        topics: new Map([[0, "Iran conflict"]]),
+        titlesEn: new Map([[0, "Iran talks"]]),
+      }]]),
+      chunkFailures: new Map(),
+      inputTokens: 1,
+      outputTokens: 1,
+    });
+    const { sql, calls } = makeMockSql((call) => {
+      if (call.query.includes("FROM llm_batches")) return [{ batch_id: "b", submitted_at: new Date().toISOString(), article_ids: ["1"] }];
+      if (call.query.includes("FROM articles a") && !call.query.includes("dup_group_id")) return [reprocessedHead];
+      if (call.query.includes("INSERT INTO entities")) return [{ id: "7", canonical_name: "Iran" }];
+      if (call.query.includes("INSERT INTO article_entities")) return articleEntitiesReturning;
+      return [];
+    });
+    return processNewArticles(sql).then(() => calls);
+  }
+
+  afterEach(() => {
+    vi.mocked(isLlmConfigured).mockReturnValue(false);
+    vi.mocked(pollBatch).mockReset();
+    vi.mocked(fetchBatchResults).mockReset();
+  });
+
+  it("writes topic and title_en but grows no counts when every link already existed", async () => {
+    const calls = await runEnded([]);
+
+    expect(findCall(calls, "UPDATE articles SET topic")!.values[1]).toEqual(["Iran conflict"]);
+    expect(findCall(calls, "INSERT INTO article_entities")!.query).toContain("RETURNING");
+    expect(findCall(calls, "INSERT INTO entity_mentions_hourly")).toBeUndefined();
+    expect(findCall(calls, "INSERT INTO entity_edges")).toBeUndefined();
+    expect(findCall(calls, "INSERT INTO entity_candidates")).toBeUndefined();
+  });
+
+  it("counts a mention whose link is newly created", async () => {
+    const calls = await runEnded([{ article_id: "1", entity_id: "7" }]);
+
+    expect(findCall(calls, "INSERT INTO entity_mentions_hourly")!.values[2]).toEqual([1]);
+    expect(findCall(calls, "INSERT INTO entity_candidates")).toBeUndefined();
+  });
+});
+
+describe("countableMentions", () => {
+  const mention = (articleId: number, entityId: number) => ({
+    articleId, entityId, effectiveAt: new Date("2026-11-02T09:00:00Z"), arrivalAt: new Date("2026-11-02T09:00:00Z"), sourceName: "A", sentiment: 0,
+  });
+
+  it("keeps normal articles unconditionally and reprocessed ones only for new links", () => {
+    const mentions = [mention(1, 5), mention(1, 6), mention(2, 5)];
+    const kept = countableMentions(mentions, new Set([1]), new Set(["1:6"]));
+    expect(kept).toEqual([mention(1, 6), mention(2, 5)]);
   });
 });

@@ -38,7 +38,7 @@ beforeEach(() => {
       batch: { submittedArticles: 0, retrievedArticles: 0, pendingAgeMinutes: null },
       failureReasons: {},
     },
-    entities: { autoAccepted: 0 }, relations: { written: 0 },
+    entities: { autoAccepted: 0 }, relations: { written: 0 }, backfill: { submitted: 0, remaining: 0 },
   });
   vi.mocked(getSettings).mockResolvedValue(FAKE_SETTINGS);
   vi.mocked(runDetectors).mockResolvedValue([]);

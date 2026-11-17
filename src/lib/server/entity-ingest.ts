@@ -16,6 +16,7 @@ import {
 } from "./llm-extract";
 import { getSettings } from "./settings";
 import { OTHER_TOPIC } from "../topic-membership";
+import { BACKFILL_FROM, BACKFILL_TO, BACKFILL_MAX_PER_RUN, selectBackfillRows, countBackfillRemaining } from "./backfill";
 
 const LOOKBACK_HOURS = 6;
 const MAX_CANDIDATE_SOURCES = 10;
@@ -59,6 +60,9 @@ export interface EntityIngestStats {
    * A subset of newEntities above, broken out for visibility. */
   entities: { autoAccepted: number };
   relations: { written: number };
+  /** One-off November catch-up (see backfill.ts): articles added to this
+   * run's batch, and window heads still without a topic. */
+  backfill: { submitted: number; remaining: number };
 }
 
 // ---- shared row/date parsing ----
@@ -84,6 +88,9 @@ interface HeadArticle {
   effectiveAt: Date;
   arrivalAt: Date;
   sourceName: string;
+  /** True for a backfilled article the heuristic fallback already processed
+   * (entities_processed_at set): its counts must not grow again. */
+  alreadyProcessed: boolean;
 }
 
 function parseHeadRow(row: SqlRow): HeadArticle {
@@ -94,6 +101,7 @@ function parseHeadRow(row: SqlRow): HeadArticle {
     effectiveAt: toDate(row.published_at ?? row.first_seen_at),
     arrivalAt: toDate(row.first_seen_at),
     sourceName: String(row.source_name),
+    alreadyProcessed: row.entities_processed_at != null,
   };
 }
 
@@ -124,10 +132,15 @@ async function loadHeadsByIds(sql: Sql, ids: number[]): Promise<Map<number, Head
   // entities_processed_at IS NULL is the exactly-once guard: an id whose
   // article was somehow already processed (or deleted) by the time a batch
   // resolves is silently absent here, so applyBatchResults below just skips it.
+  // Exception: backfill-window articles still lacking a topic (one-off, see
+  // backfill.ts) load even when processed; their counts are guarded in
+  // processNewArticles via countableMentions.
   const rows = await sql`
-    SELECT a.id, a.title, a.summary, a.published_at, a.first_seen_at, a.source_name
+    SELECT a.id, a.title, a.summary, a.published_at, a.first_seen_at, a.source_name, a.entities_processed_at
     FROM articles a
-    WHERE a.id = ANY(${ids}::bigint[]) AND a.entities_processed_at IS NULL
+    WHERE a.id = ANY(${ids}::bigint[])
+      AND (a.entities_processed_at IS NULL
+        OR (a.topic IS NULL AND a.first_seen_at >= ${BACKFILL_FROM}::timestamptz AND a.first_seen_at < ${BACKFILL_TO}::timestamptz))
   `;
   return new Map(rows.map(parseHeadRow).map((head) => [head.id, head] as const));
 }
@@ -198,6 +211,8 @@ interface PendingNewEntity {
 }
 
 interface CandidateSighting {
+  /** Source article; used only to drop reprocessed backfill articles' sightings. */
+  articleId?: number;
   norm: string;
   display: string;
   typeHint: TypeHint;
@@ -250,6 +265,7 @@ function classifyCandidate(
   return {
     kind: "candidate",
     sighting: {
+      articleId: article.id,
       norm: candidate.norm,
       display: candidate.display,
       typeHint: candidate.typeHint,
@@ -605,22 +621,31 @@ async function submitNewBatchStage(
   sql: Sql,
   excludeIds: number[],
   tally: (reason: string, sample?: string) => void,
-): Promise<{ headById: Map<number, HeadArticle>; candidatesByArticle: Map<number, Candidate[] | null>; submittedArticles: number }> {
+): Promise<{ headById: Map<number, HeadArticle>; candidatesByArticle: Map<number, Candidate[] | null>; submittedArticles: number; backfillSubmitted: number }> {
   const newHeads = await selectUnprocessedHeads(sql, excludeIds);
   const headById = new Map(newHeads.map((h) => [h.id, h] as const));
-  if (newHeads.length === 0) return { headById, candidatesByArticle: new Map(), submittedArticles: 0 };
-  if (!isLlmConfigured()) return { headById, candidatesByArticle: extractAllHeuristic(newHeads), submittedArticles: 0 };
+  if (!isLlmConfigured()) {
+    return { headById, candidatesByArticle: extractAllHeuristic(newHeads), submittedArticles: 0, backfillSubmitted: 0 };
+  }
+
+  // One-off backfill (backfill.ts) tops the batch up to its per-run cap.
+  const backfillRows = await selectBackfillRows(sql, BACKFILL_MAX_PER_RUN - newHeads.length, [...excludeIds, ...newHeads.map((h) => h.id)]);
+  const backfillHeads = backfillRows.map(parseHeadRow);
+  const batchHeads = [...newHeads, ...backfillHeads];
+  if (batchHeads.length === 0) return { headById, candidatesByArticle: new Map(), submittedArticles: 0, backfillSubmitted: 0 };
 
   const settings = await getSettings(sql);
-  const chunks = chunkArticles(newHeads, MAX_BATCH_SIZE).map((chunk) => chunk.map((a, j) => ({ index: j, title: a.title, summary: a.summary })));
+  const chunks = chunkArticles(batchHeads, MAX_BATCH_SIZE).map((chunk) => chunk.map((a, j) => ({ index: j, title: a.title, summary: a.summary })));
   const submitResult = await submitBatch(sql, settings.llm_monthly_budget_usd, chunks, await loadTopicLabels(sql));
   if (!submitResult.ok) {
     tally(submitResult.reason, submitResult.sample);
-    return { headById, candidatesByArticle: extractAllHeuristic(newHeads), submittedArticles: 0 };
+    // Backfill articles are NOT heuristic-processed on failure: they stay
+    // topic-less and a later run retries them.
+    return { headById, candidatesByArticle: extractAllHeuristic(newHeads), submittedArticles: 0, backfillSubmitted: 0 };
   }
 
-  await insertPendingBatch(sql, submitResult.batchId, newHeads.map((h) => h.id), new Date());
-  return { headById, candidatesByArticle: new Map(), submittedArticles: newHeads.length };
+  await insertPendingBatch(sql, submitResult.batchId, batchHeads.map((h) => h.id), new Date());
+  return { headById, candidatesByArticle: new Map(), submittedArticles: batchHeads.length, backfillSubmitted: backfillHeads.length };
 }
 
 // The LLM month-cost read is purely informational for the ingest response —
@@ -745,16 +770,30 @@ async function bumpEntityLastSeen(sql: Sql, mentions: ResolvedMention[]): Promis
 
 // ---- article_entities ----
 
-async function insertArticleEntities(sql: Sql, mentions: ResolvedMention[]): Promise<void> {
-  if (mentions.length === 0) return;
-  await sql`
+// Returns the "articleId:entityId" keys of links that did not exist before.
+async function insertArticleEntities(sql: Sql, mentions: ResolvedMention[]): Promise<Set<string>> {
+  if (mentions.length === 0) return new Set();
+  const rows = await sql`
     INSERT INTO article_entities (article_id, entity_id)
     SELECT * FROM UNNEST(
       ${mentions.map((m) => m.articleId)}::bigint[],
       ${mentions.map((m) => m.entityId)}::bigint[]
     )
     ON CONFLICT DO NOTHING
+    RETURNING article_id, entity_id
   `;
+  return new Set(rows.map((r) => `${r.article_id}:${r.entity_id}`));
+}
+
+// Backfill idempotency rule (one-off, see backfill.ts): an article the
+// heuristic fallback already processed (alreadyProcessed) counts toward
+// hourly mentions and edges ONLY for article-entity links that did not
+// already exist (ON CONFLICT DO NOTHING ... RETURNING above). Its candidate
+// sightings and relations carry no per-article link to dedupe against, so
+// they are dropped. topic/title_en are always written. Articles never
+// processed before count normally.
+export function countableMentions(mentions: ResolvedMention[], reprocessedIds: Set<number>, newLinks: Set<string>): ResolvedMention[] {
+  return mentions.filter((m) => !reprocessedIds.has(m.articleId) || newLinks.has(`${m.articleId}:${m.entityId}`));
 }
 
 // ---- entity_mentions_hourly rollup ----
@@ -1215,6 +1254,7 @@ function emptyEntityIngestStats(
     },
     entities: { autoAccepted: 0 },
     relations: { written: 0 },
+    backfill: { submitted: 0, remaining: 0 },
   };
 }
 
@@ -1230,29 +1270,34 @@ export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
 
   const pending = await resolvePendingBatchStage(sql, tally);
   const submitted = pending.stillPending
-    ? { headById: new Map<number, HeadArticle>(), candidatesByArticle: new Map<number, Candidate[] | null>(), submittedArticles: 0 }
+    ? { headById: new Map<number, HeadArticle>(), candidatesByArticle: new Map<number, Candidate[] | null>(), submittedArticles: 0, backfillSubmitted: 0 }
     : await submitNewBatchStage(sql, pending.excludeIds, tally);
 
   const headById = new Map([...pending.headById, ...submitted.headById]);
   const candidatesByArticle = new Map([...pending.candidatesByArticle, ...submitted.candidatesByArticle]);
   const batch = { ...pending.batch, submittedArticles: submitted.submittedArticles };
 
+  const backfill = { submitted: submitted.backfillSubmitted, remaining: await countBackfillRemaining(sql) };
   const heads = Array.from(candidatesByArticle.keys()).map((id) => headById.get(id)!);
-  if (heads.length === 0) return emptyEntityIngestStats(batch, failureReasons, Array.from(errorSamples));
+  if (heads.length === 0) return { ...emptyEntityIngestStats(batch, failureReasons, Array.from(errorSamples)), backfill };
 
   const registry = await loadEntityRegistry(sql);
   const classified = classifyAll(heads, candidatesByArticle, registry);
+  const reprocessedIds = new Set(heads.filter((h) => h.alreadyProcessed).map((h) => h.id));
+  const sightings = classified.candidateSightings.filter((s) => s.articleId === undefined || !reprocessedIds.has(s.articleId));
 
   const insertedEntities = await upsertNewEntities(sql, classified.newEntities);
   const newEntityMentions = resolveNewEntityMentions(classified.newEntities, insertedEntities);
   const allMentions = dedupeMentions([...classified.resolved, ...newEntityMentions]);
 
   await bumpEntityLastSeen(sql, allMentions);
-  await insertArticleEntities(sql, allMentions);
-  await upsertHourlyMentions(sql, rollupHourlyMentions(allMentions));
-  await upsertEntityEdges(sql, rollupEntityEdges(allMentions));
-  const candidatesTouched = await persistCandidates(sql, classified.candidateSightings);
-  const relationsWritten = await persistRelations(sql, registry, insertedEntities, heads, classified.processedArticleIds, pending.relationsByArticle);
+  const newLinks = await insertArticleEntities(sql, allMentions);
+  const counted = countableMentions(allMentions, reprocessedIds, newLinks);
+  await upsertHourlyMentions(sql, rollupHourlyMentions(counted));
+  await upsertEntityEdges(sql, rollupEntityEdges(counted));
+  const candidatesTouched = await persistCandidates(sql, sightings);
+  const relationIds = classified.processedArticleIds.filter((id) => !reprocessedIds.has(id));
+  const relationsWritten = await persistRelations(sql, registry, insertedEntities, heads, relationIds, pending.relationsByArticle);
   // Marking processed is deliberately the LAST WRITE of a run: a crash
   // between the aggregate writes above and this UPDATE leaves this batch's
   // articles unmarked, so they retry next run — additive rollups (mentions,
@@ -1276,5 +1321,6 @@ export async function processNewArticles(sql: Sql): Promise<EntityIngestStats> {
     },
     entities: { autoAccepted: autoAcceptedCount },
     relations: { written: relationsWritten },
+    backfill,
   };
 }
