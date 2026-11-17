@@ -128,3 +128,10 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
 - Open: duplicate rows still list separately in Entities (spec 6.7 wants one row per merge group). Map trace has no per-hop evidence. November LLM usage is 6 calls vs 129 in October; cause not checked. Off switch does not gate `/api/sources` or user-triggered Wikidata calls.
 - Operator decisions made 2026-11-17: hide old tabs except Network and Map; build share-of-mentions growth; budget cap $10; off switch; Ignore with a listable, reversible Ignored filter.
 - Rules learned: get data before choosing a fix (two growth guesses were wasted). Test mocks route SQL by substring; give new queries a unique alias. Helpers over 150k tokens: split the work smaller.
+
+### Update 2026-11-17 (later session), branch `claude/modest-mendel-vvxklr`
+
+- Done, not on `main`: keyless Esri map tiles; `GET /api/emerging` (new names next to famous/anchor entities); Entity map Universe now groups new names by anchor, with a "New near known" panel; Newsfeed matches tracked names and aliases at read time; extraction folds possessives, handles accented names, prompt asks for every named person and for broad 1 to 3 word topics.
+- Checked: tsc, 1223 tests, build. `/api/emerging` on the preview returned 200 anchored items. The map rendered with live data through route interception.
+- Not checked: Esri tiles in a real browser (the sandbox blocks the host). Newsfeed on live data.
+- Next: operator checks the preview, then pushes to `main`. Anchors are mostly countries; rank person and company anchors first if the operator wants a "near Sam Altman" view. Universe stats box still shows the old With/Without context table.

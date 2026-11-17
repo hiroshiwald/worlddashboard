@@ -55,7 +55,7 @@ function Bubbles({ dark, bubbles, state }: { dark: boolean; bubbles: AnchorBubbl
   const labels = placeLabels(items, [], W);
   const ink = dark ? "#e2e8f0" : "#1e293b";
   return (
-    <svg viewBox={`0 0 ${W} ${layout.height}`} className="w-full max-h-[calc(100vh-11rem)] select-none" role="group" aria-label="New names by known entity">
+    <svg viewBox={`0 0 ${W} ${layout.height}`} className="w-full select-none" role="group" aria-label="New names by known entity">
       {bubbles.map((b, i) => {
         const u = units[i];
         const { x, y } = layout.positions[u.key];
