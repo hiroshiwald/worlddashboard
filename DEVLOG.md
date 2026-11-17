@@ -2790,3 +2790,7 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: Tab bar shows Newsfeed, Entities, Entity map, Network, Map (Brief, Feeds, Developments hidden, code kept); default tab Newsfeed. Newsfeed rows get an Ignore button beside + Track (candidate: POST /api/candidates dismiss; entity: PATCH status dismissed); ignored names show struck through with an "Ignored" tag. Entities tab says Ignored/Ignore in filter, status cell, button titles, toast.
 - What it affected: `HeaderBar.tsx` tab list, `useDashboardTable.ts` default, `newsfeed/*`, `useNewsfeed.ts` (`dismissCandidate`), `applyCandidateTracked` became `applyCandidateStatus`, `entities/*`, `useEntitiesTab.ts`. Gate: tsc, tests, build pass; Playwright check passes.
 - Gotchas: Status filter is a select, not buttons. Candidate queue toast text in `useCandidateQueue.ts` still says "Dismissed" (out of scope). A candidate ignored in the feed becomes a `cand:` row until reload; the Newsfeed has no un-ignore (use Entities > Ignored > Track).
+
+## 2026-11-17
+- Feed now matches tracked entities (name + aliases) against title/summary at read time, merged with ingest links by id.
+- Affects src/lib/server/feed.ts loadFeed; reuses buildCandidateMatcher guards. No surname derivation: bare surname needs an alias.
