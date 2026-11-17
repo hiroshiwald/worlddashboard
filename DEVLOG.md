@@ -2794,3 +2794,6 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 ## 2026-11-17
 - Feed now matches tracked entities (name + aliases) against title/summary at read time, merged with ingest links by id.
 - Affects src/lib/server/feed.ts loadFeed; reuses buildCandidateMatcher guards. No surname derivation: bare surname needs an alias.
+- Entity extraction misses: possessive folding, Unicode person regex, broader LLM prompt and topic labels.
+- Affects extract-v2.ts (normalizeName, addCandidate, person regex) and llm-extract.ts (SYSTEM_PROMPT).
+- Gotcha: Orbán-style names are also caught by compromise, so tests assert on display only, not layer.

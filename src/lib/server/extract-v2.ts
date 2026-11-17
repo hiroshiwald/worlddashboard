@@ -28,8 +28,15 @@ export interface Candidate {
 
 const CORPORATE_SUFFIXES = new Set(["inc", "ltd", "llc", "corp", "plc", "ag", "gmbh"]);
 
-/** NFKD-fold diacritics, lowercase, collapse whitespace, strip one trailing
- * corporate suffix (optional period) so "Veltrax Industries Inc." and
+const POSSESSIVE = /['’]s$/i;
+
+/** "Vietnam's" -> "Vietnam". Names ending in a bare "s" (Paris) are untouched. */
+function stripPossessive(name: string): string {
+  return name.replace(POSSESSIVE, "");
+}
+
+/** NFKD-fold diacritics, lowercase, collapse whitespace, fold a trailing
+ * possessive, strip one trailing corporate suffix (optional period) so "Veltrax Industries Inc." and
  * "Veltrax Industries" resolve to the same candidate. */
 export function normalizeName(raw: string): string {
   const folded = raw
@@ -37,7 +44,8 @@ export function normalizeName(raw: string): string {
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(POSSESSIVE, "");
   if (!folded) return folded;
 
   const words = folded.split(" ");
@@ -85,6 +93,7 @@ export function addCandidate(
   roleContext?: string,
   prominence?: Prominence,
 ): void {
+  display = stripPossessive(display);
   const norm = normalizeName(display);
   if (!norm) return;
   const existing = map.get(norm);
@@ -166,7 +175,9 @@ function extractAcronymCandidates(text: string, map: Map<string, Candidate>): vo
 }
 
 function extractPersonRegexCandidates(text: string, map: Map<string, Candidate>): void {
-  const regex = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/g;
+  // Unicode-aware (Orbán, Zełenski); lookarounds replace the ASCII-only \b.
+  const word = "\\p{Lu}[\\p{Ll}\\p{M}]+";
+  const regex = new RegExp(`(?<![\\p{L}\\p{M}])(${word}(?:\\s+${word}){1,2})(?![\\p{L}\\p{M}])`, "gu");
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
     const candidate = match[1];
