@@ -181,3 +181,9 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
    - Optional guard: in the Wikidata fame lookup, accept a hit only if the name equals its label or an alias (the top search hit caused COLA -> Coca-Cola).
    - Optional one-off, NOT DONE (needs Neon): remove old article links from COLA articles to Coca-Cola (ids 284, 359). SQL: `DELETE FROM article_entities ae USING articles a WHERE ae.article_id = a.id AND ae.entity_id IN (284, 359) AND a.title ~ '\mCOLA\M' AND a.title !~* 'coca';`
 - Order: 3 first (small, ingest only), then 2 (UI; split helper briefs under 150k tokens: data/metrics module, then the view).
+
+### State 2026-11-17 (late)
+- On `main`: sigma Entity map with novelty filters (docs/NOVELTY-FILTER-SPEC.md), LLM Wikipedia titles, Wikidata name guard, full-dataset Newsfeed search.
+- Operator to run in Neon: `migrations/012_articles_search_trgm.sql` (search speed; code works without it, only slower).
+- Open: "The post" is a junk stored name (120 mentions) attached to many articles; HII is stored (2 mentions) but has no link to a known entity, so the map does not show it. COLA cleanup SQL above not run. DEVLOG.md is 270 KB and needs an archive split.
+- Next ideas from the novelty plan: source-count evidence floor (needs `/api/graph` change), Seen state (migration), path with evidence, saved filters with alerts (needs approval).
