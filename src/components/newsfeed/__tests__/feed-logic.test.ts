@@ -3,7 +3,7 @@ import {
   headline,
   parseFeedResponse,
   cursorOf,
-  worldNote,
+  hasTracked,
   matchesFilter,
   timeLabel,
   isStale,
@@ -57,9 +57,10 @@ describe("cursorOf", () => {
   });
 });
 
-describe("worldNote and rowEntities", () => {
-  it("splits tracked from untracked and ignores dismissed", () => {
-    expect(worldNote(article())).toEqual({ inWorld: ["Acme"], notTracked: ["Bolt", "Cyan"] });
+describe("hasTracked and rowEntities", () => {
+  it("hasTracked is true only when a tracked entity is named", () => {
+    expect(hasTracked(article())).toBe(true);
+    expect(hasTracked(article({ entities: [], candidates: [] }))).toBe(false);
   });
   it("orders tracked, untracked, dismissed", () => {
     expect(rowEntities(article()).map((r) => r.name)).toEqual(["Acme", "Bolt", "Cyan", "Zed"]);

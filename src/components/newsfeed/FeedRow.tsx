@@ -3,7 +3,7 @@ import { useIsAdmin } from "@/components/AdminContext";
 import {
   headline,
   rowEntities,
-  worldNote,
+  hasTracked,
   timeLabel,
   sourceHost,
   isContext,
@@ -28,21 +28,6 @@ function muted(dark: boolean): string {
 
 function dividerBorder(dark: boolean): string {
   return dark ? "border-slate-600" : "border-gray-300";
-}
-
-function WorldBox({ article, dark }: { article: FeedArticle; dark: boolean }) {
-  const note = worldNote(article);
-  const box = dark ? "border-slate-700" : "border-gray-200";
-  return (
-    <div className={`mt-2 rounded-md border px-2.5 py-1.5 text-xs space-y-0.5 ${box} ${muted(dark)}`}>
-      {note.inWorld.length > 0 ? (
-        <p>In your world: <b className="font-medium">{note.inWorld.join(", ")}</b></p>
-      ) : (
-        <p>Nothing you track is named here.</p>
-      )}
-      {note.notTracked.length > 0 && <p>Not tracked yet: <b className="font-medium">{note.notTracked.join(", ")}</b></p>}
-    </div>
-  );
 }
 
 function nameClasses(row: RowEntity, dark: boolean): string {
@@ -73,7 +58,9 @@ function EntityLine({ row, index, h }: { row: RowEntity; index: number; h: RowHa
           </span>
         )}
       </span>
-      {row.status === "tracked" && <span className="font-bold text-emerald-500" aria-label="Tracked">✓</span>}
+      {row.status === "tracked" && (
+        <span className="rounded-full border border-emerald-500 px-2 text-[11px] text-emerald-500">Tracking</span>
+      )}
       {row.status === "candidate" && isAdmin && (
         <span className="flex gap-1">
           <button
@@ -103,14 +90,14 @@ export default function FeedRow({ article, h }: { article: FeedArticle; h: RowHa
   const rows = rowEntities(article);
   const title = headline(article);
   const divider = h.dark ? "border-slate-700" : "border-gray-200";
+  const accent = hasTracked(article) ? "border-l-emerald-500" : "border-l-transparent";
   return (
-    <article className={`grid gap-x-5 gap-y-1.5 border-t px-4 py-3 md:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1.3fr)] ${divider}`}>
+    <article className={`grid gap-x-5 gap-y-1.5 border-t border-l-2 px-4 py-3 md:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1.3fr)] ${divider} ${accent}`}>
       <div>
         <a href={article.link} target="_blank" rel="noopener noreferrer" title={title.original ?? undefined} className="text-[15px] font-semibold leading-snug hover:underline">
           {title.text}
         </a>
         {title.original && <span className={`ml-2 text-[11px] ${muted(h.dark)}`}>Translated</span>}
-        <WorldBox article={article} dark={h.dark} />
       </div>
       <div className="text-sm">
         <p className="font-semibold">{article.sourceName}</p>

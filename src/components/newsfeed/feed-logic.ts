@@ -89,13 +89,9 @@ export function rowEntities(article: FeedArticle): RowEntity[] {
   return all.sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
 }
 
-/** The box under a headline: how the story touches the tracked world. */
-export function worldNote(article: FeedArticle): { inWorld: string[]; notTracked: string[] } {
-  const rows = rowEntities(article);
-  return {
-    inWorld: rows.filter((r) => r.status === "tracked").map((r) => r.name),
-    notTracked: rows.filter((r) => r.status === "candidate").map((r) => r.name),
-  };
+/** True when the article names at least one entity the operator tracks. */
+export function hasTracked(article: FeedArticle): boolean {
+  return rowEntities(article).some((r) => r.status === "tracked");
 }
 
 function isRecent(iso: string, now: Date): boolean {
@@ -104,9 +100,8 @@ function isRecent(iso: string, now: Date): boolean {
 
 export function matchesFilter(article: FeedArticle, filter: FeedFilter, now: Date): boolean {
   if (filter === "all") return true;
-  const note = worldNote(article);
-  if (filter === "tracked") return note.inWorld.length > 0;
-  if (filter === "untracked") return note.notTracked.length > 0;
+  if (filter === "tracked") return hasTracked(article);
+  if (filter === "untracked") return rowEntities(article).some((r) => r.status === "candidate");
   const entityIsNew = article.entities.some((e) => e.status !== "dismissed" && isRecent(e.firstSeenAt, now));
   return entityIsNew || article.candidates.some((c) => isRecent(c.firstSeenAt, now));
 }
