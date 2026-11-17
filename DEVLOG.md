@@ -2845,3 +2845,6 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 ## 2026-11-17
 - Newsfeed: removed blue left row accent; header search now filters Newsfeed rows (matchesSearch in feed-logic.ts, searchQuery plumbed DashboardTable -> TabContent -> NewsfeedTab).
 - Cause: searchQuery lived only in useDashboardTable and filtered the old items; NewsfeedTab never received it. Search covers loaded pages only.
+- Entity map Universe is now a force-directed graph (UniverseGraph.tsx, pure forcegraph.ts): whole graph plus new names in one viewport, sticky side panel.
+- Affected: useEntityMap (bubble/item replaced by `selected`; data is now all live nodes, filterGraph replaced by liveGraph), SidePanel, NameCard; deleted MapSvg, pack, groupByAnchor, bubbleRadius and tests.
+- Gotcha: react-force-graph mutates nodes/links, so it gets copies; link ends become objects after init (endId). Not visually driven in a browser.

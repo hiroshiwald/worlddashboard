@@ -6,7 +6,7 @@ import type { EmergingState } from "@/hooks/useEmerging";
 import {
   edgeBetween, growingFastest, isContext, isGrowing, isNewLink, neighboursOf, type MapData,
 } from "./model";
-import { BubbleDetail, NameCard } from "./NameCard";
+import { NameCard } from "./NameCard";
 import { nearKnown } from "./universe";
 import type { GraphNode } from "@/lib/server/graph";
 
@@ -28,22 +28,34 @@ export default function SidePanel({ dark, data, emerging, generatedAt, state }: 
   const muted = dark ? "text-slate-400" : "text-gray-500";
   const card = `rounded border p-3 ${dark ? "border-slate-700 bg-slate-800/50" : "border-gray-200 bg-white"}`;
   const subject = state.entityId;
+  const picked = pickedKind(data, emerging, state.selected);
   return (
-    <aside className="flex flex-col gap-3 text-sm" aria-label="Map details">
-      <Trace data={data} state={state} muted={muted} card={card} dark={dark} generatedAt={generatedAt} />
+    <aside className="flex flex-col gap-3 text-sm lg:sticky lg:top-3 lg:max-h-[calc(100vh-1.5rem)] lg:overflow-y-auto" aria-label="Map details">
       <div className={card} data-testid="detail">
         {subject !== null && <EntityDetail data={data} id={subject} state={state} muted={muted} />}
-        {subject === null && state.item !== null && <NameCard data={data} emerging={emerging} state={state} muted={muted} />}
-        {subject === null && state.item === null && state.bubble !== null && <BubbleDetail emerging={emerging} state={state} muted={muted} />}
-        {subject === null && state.bubble === null && (
+        {subject === null && picked === "name" && <NameCard data={data} emerging={emerging} state={state} muted={muted} />}
+        {subject === null && picked === "entity" && <EntityDetail data={data} id={state.selected!} state={state} muted={muted} />}
+        {subject === null && picked === "gone" && <p className={muted}>This node is no longer listed.</p>}
+        {subject === null && picked === "none" && (
           <>
             <NewNear emerging={emerging} state={state} muted={muted} />
             <Fastest data={data} state={state} muted={muted} />
           </>
         )}
       </div>
+      <Trace data={data} state={state} muted={muted} card={card} dark={dark} generatedAt={generatedAt} />
     </aside>
   );
+}
+
+type Picked = "none" | "name" | "entity" | "gone";
+
+/** What the clicked node is: a new name (has a card), a known entity, or neither any more. */
+function pickedKind(data: MapData, emerging: EmergingState, selected: string | null): Picked {
+  if (selected === null) return "none";
+  const items = emerging.load.status === "ready" ? emerging.load.data.items : [];
+  if (items.some((i) => i.key === selected)) return "name";
+  return data.byId.has(selected) ? "entity" : "gone";
 }
 
 function NewNear({ emerging, state, muted }: { emerging: EmergingState; state: EntityMapState; muted: string }) {
@@ -58,7 +70,7 @@ function NewNear({ emerging, state, muted }: { emerging: EmergingState; state: E
       <ol className="flex flex-col gap-1">
         {list.map((i) => (
           <li key={i.key}>
-            <button type="button" className="flex w-full justify-between gap-2 text-left hover:underline" onClick={() => state.openName(i.anchors[0].id, i.key)}>
+            <button type="button" className="flex w-full justify-between gap-2 text-left hover:underline" onClick={() => state.select(i.key)}>
               <span>{i.name}</span><span className={muted}>near {i.anchors[0].name}</span>
             </button>
           </li>
