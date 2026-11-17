@@ -102,7 +102,7 @@ function describePatch(before: EntityRowData, patch: EntityPatch): { message: st
   }
   if (patch.status === "dismissed") {
     return {
-      message: `${name} dismissed — no longer tracked; future mentions are not collected. It stays in the database: filter Status: Dismissed to re-track.`,
+      message: `${name} ignored — no longer tracked; future mentions are not collected. It stays in the database: filter Status: Ignored to re-track.`,
       undoPatch: { status: before.status },
     };
   }

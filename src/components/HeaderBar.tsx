@@ -112,14 +112,11 @@ function IngestBadge({
 }
 
 const tabs: { key: TabKey; label: string }[] = [
-  { key: "brief", label: "Brief" },
   { key: "newsfeed", label: "Newsfeed" },
-  { key: "feeds", label: "Feeds" },
-  { key: "network", label: "Network" },
-  { key: "map", label: "Map" },
-  { key: "developments", label: "Developments" },
   { key: "entities", label: "Entities" },
   { key: "entitymap", label: "Entity map" },
+  { key: "network", label: "Network" },
+  { key: "map", label: "Map" },
 ];
 
 function SearchInput({

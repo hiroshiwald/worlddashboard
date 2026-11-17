@@ -18,10 +18,15 @@ export interface RowHandlers {
   busy: string[];
   onSelect: (row: RowEntity) => void;
   onTrack: (row: RowEntity) => void;
+  onIgnore: (row: RowEntity) => void;
 }
 
 function muted(dark: boolean): string {
   return dark ? "text-slate-400" : "text-gray-500";
+}
+
+function dividerBorder(dark: boolean): string {
+  return dark ? "border-slate-600" : "border-gray-300";
 }
 
 function WorldBox({ article, dark }: { article: FeedArticle; dark: boolean }) {
@@ -68,15 +73,26 @@ function EntityLine({ row, index, h }: { row: RowEntity; index: number; h: RowHa
       </span>
       {row.status === "tracked" && <span className="font-bold text-emerald-500" aria-label="Tracked">✓</span>}
       {row.status === "candidate" && (
-        <button
-          type="button"
-          disabled={isBusy}
-          onClick={() => h.onTrack(row)}
-          className="rounded-full border border-blue-500 px-2 text-[11px] text-blue-500 hover:bg-blue-600 hover:text-white disabled:opacity-50"
-        >
-          {isBusy ? "…" : "+ Track"}
-        </button>
+        <span className="flex gap-1">
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => h.onTrack(row)}
+            className="rounded-full border border-blue-500 px-2 text-[11px] text-blue-500 hover:bg-blue-600 hover:text-white disabled:opacity-50"
+          >
+            {isBusy ? "…" : "+ Track"}
+          </button>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => h.onIgnore(row)}
+            className={`rounded-full border px-2 text-[11px] hover:underline disabled:opacity-50 ${dividerBorder(h.dark)} ${muted(h.dark)}`}
+          >
+            Ignore
+          </button>
+        </span>
       )}
+      {row.status === "dismissed" && <span className={`text-[11px] ${muted(h.dark)}`}>Ignored</span>}
     </li>
   );
 }

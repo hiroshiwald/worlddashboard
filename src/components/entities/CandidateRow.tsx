@@ -71,7 +71,7 @@ function ActionsCell({
       <button
         onClick={onAccept}
         disabled={busy}
-        title={`Tracks ${candidate.displayName} as ${rowType.replace(/_/g, " ")}. Reversible: dismiss it from the Tracked view afterward.`}
+        title={`Tracks ${candidate.displayName} as ${rowType.replace(/_/g, " ")}. Reversible: ignore it from the Tracked view afterward.`}
         className="text-xs px-3 py-1.5 rounded-lg font-medium bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40"
       >
         Accept as {rowType.replace(/_/g, " ")}
@@ -97,10 +97,10 @@ function ActionsCell({
       <button
         onClick={onDismiss}
         disabled={busy}
-        title={`Dismisses ${candidate.displayName} — it will not be suggested again. Reversible from Status: Dismissed in the Tracked view.`}
+        title={`Ignores ${candidate.displayName} — it will not be suggested again. Reversible from Status: Ignored in the Tracked view.`}
         className={`text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-40 ${dark ? "bg-slate-800 hover:bg-slate-700 text-slate-300" : "bg-gray-100 hover:bg-gray-200 text-gray-700"}`}
       >
-        Dismiss
+        Ignore
       </button>
     </div>
   );

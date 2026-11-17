@@ -110,6 +110,7 @@ export default function NewsfeedTab({ dark, onOpenMap }: NewsfeedTabProps) {
   };
   const dismiss = (row: RowEntity) => {
     if (row.entity !== null) void feed.setEntityStatus(row.entity, "dismissed");
+    if (row.candidate !== null) void feed.dismissCandidate(row.candidate);
   };
   const handlers: RowHandlers = {
     dark,
@@ -118,6 +119,7 @@ export default function NewsfeedTab({ dark, onOpenMap }: NewsfeedTabProps) {
     busy: feed.busy,
     onSelect: (row) => setSelectedKey(row.key),
     onTrack: track,
+    onIgnore: dismiss,
   };
 
   if (feed.dbUnconfigured) return <Message dark={dark}>Database not configured. Set DATABASE_URL and reload.</Message>;

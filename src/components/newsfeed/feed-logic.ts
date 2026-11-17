@@ -152,15 +152,19 @@ export function applyEntityStatus(items: FeedArticle[], change: StatusChange): F
   }));
 }
 
-/** Pure: moves an accepted candidate into `entities` as tracked, in every article. */
-export function applyCandidateTracked(items: FeedArticle[], candidate: FeedCandidate): FeedArticle[] {
+/** Pure: moves a candidate into `entities` with the given status, in every article. */
+export function applyCandidateStatus(
+  items: FeedArticle[],
+  candidate: FeedCandidate,
+  status: "tracked" | "dismissed",
+): FeedArticle[] {
   return items.map((article) => {
     if (!article.candidates.some((c) => c.nameNorm === candidate.nameNorm)) return article;
     const promoted: FeedEntity = {
       id: `cand:${candidate.nameNorm}`,
       name: candidate.name,
       type: candidate.typeHint,
-      status: "tracked",
+      status,
       role: "satellite",
       firstSeenAt: candidate.firstSeenAt,
     };
