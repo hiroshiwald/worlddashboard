@@ -154,3 +154,4 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
 - Next: fix force-graph centring (see DEVLOG "three layout attempts"), Playwright-check with live `/api/graph` and `/api/emerging`, then push to `main` (operator approved pushes for this work).
 - Waiting on operator: the "tracked" decision above (option 1: `followed` flag, recommended; option 2: stop auto-adding only).
 - Catch-up Nov 10 to 16 running via scheduled ingest; check `GET /api/backfill`. Nov 1 to 9 skipped.
+- DECIDED 2026-11-17: operator chose option 1. Add migration 011 `entities.followed BOOLEAN NOT NULL DEFAULT false` (operator runs it in Neon before the code reaches `main`). Only the operator's Track sets `followed = true`; Ignore/Stop tracking clears it. Every "tracked" / "In your world" / "Mentions a tracked entity" label and filter reads `followed`. `status = 'tracked'` stays as "known to the system". Existing rows start unfollowed; the operator re-marks them.
