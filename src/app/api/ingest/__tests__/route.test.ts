@@ -55,6 +55,7 @@ describe("POST /api/ingest stage attribution", () => {
     sweepRetention.mockReset();
     processNewArticles.mockReset();
     getSettings.mockReset();
+    getSettings.mockResolvedValue({ activity_paused: 0 });
     runDetectors.mockReset();
     persistSignals.mockReset();
     computeWarmupState.mockReset();

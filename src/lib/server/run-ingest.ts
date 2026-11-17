@@ -80,6 +80,14 @@ export async function runIngest(): Promise<IngestResult> {
   const counts: Record<string, unknown> = {};
 
   try {
+    // Operator off switch. Checked first so a paused run makes no feed fetch,
+    // no LLM submit/poll and no Wikipedia call. Every caller (/api/ingest,
+    // /api/tick) goes through here. A failed read aborts the run (fail closed).
+    const settings = await runStage("check-paused", () => getSettings(getSql()));
+    if (settings.activity_paused === 1) {
+      return { status: 200, body: { paused: true, since: settings.activity_paused_since } };
+    }
+
     const { items, feedsAttempted, feedsSucceeded } = await runStage("fetch-feeds", () =>
       fetchAllFeeds(loadSources(), ingestCache),
     );

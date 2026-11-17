@@ -2,6 +2,7 @@
 
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
+import PauseActivityButton from "@/components/PauseActivityButton";
 
 type TabKey = "brief" | "newsfeed" | "feeds" | "network" | "map" | "developments" | "entities" | "entitymap";
 
@@ -243,6 +244,8 @@ export default function HeaderBar({
               </option>
             ))}
           </select>
+
+          <PauseActivityButton btnClass={t.btnBg} />
 
           <IngestBadge mode={mode} lastIngestAt={lastIngestAt} fetchedAt={fetchedAt} dark={dark} />
 
