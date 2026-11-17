@@ -2863,3 +2863,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: `soft-merge.ts` folds country prefixes (US, U.S., USA, United States; UK, U.K.) so variants group (`foldCountry`, `sharesFoldedName`). Newsfeed applies merge groups per article (`mergeArticleRows`, followed if any member is followed) and links stored candidates to an article when its raw title is in `sample_titles` (`buildTitleIndex`).
 - What it affected: `soft-merge.ts`, `feed.ts`, tests. Graph and entity facts use the same groups. Gate: tsc, 1262 tests, build pass. On live graph names: 11 groups, all correct (U.S./US/USA/United States, UK, UN, US Army, US Navy, US Treasury, US Senate, AI, HIV).
 - Gotchas: Neon showed "Lionfish UUV" (1 mention) and "HII" (2) were extracted; the read-time matcher missed them ("UUVs" plural; single words under 4 chars). COLA/Coca-Cola is suspected to come from the Wikidata top search hit plus copied aliases; not confirmed. Proposed next: LLM returns a Wikipedia title per entity. Helper tokens (Sonnet): feed 95k, soft-merge 83k.
+
+## 2026-11-17 — COLA no longer resolves to Coca-Cola
+- What changed: ingest name index skips all-lowercase aliases (`isNameLikeAlias` in `entity-ingest.ts`).
+- What it affected: entity resolution at ingest only. Old article links to Coca-Cola stay.
+- Gotchas: Neon showed Coca-Cola (284) and Coke (359) carry Wikidata aliases "cola" and "kola"; the index keys names in lowercase, so "COLA" matched.

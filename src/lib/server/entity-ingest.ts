@@ -160,6 +160,10 @@ interface EntityRecord {
   type: TypeHint;
 }
 
+export function isNameLikeAlias(alias: string): boolean {
+  return /\p{Lu}/u.test(alias) || !/\p{Ll}/u.test(alias);
+}
+
 function buildRegistryIndex(rows: SqlRow[]): Map<string, EntityRecord> {
   const index = new Map<string, EntityRecord>();
   for (const row of rows) {
@@ -168,7 +172,11 @@ function buildRegistryIndex(rows: SqlRow[]): Map<string, EntityRecord> {
       canonicalName: String(row.canonical_name),
       type: String(row.type) as TypeHint,
     };
-    const names = [record.canonicalName, ...toStringArray(row.aliases)];
+    // An all-lowercase alias is a generic word form from Wikidata ("cola" on
+    // Coca-Cola), not a name. Keyed in lowercase, it made every "COLA"
+    // (cost-of-living adjustment) resolve to Coca-Cola.
+    const aliases = toStringArray(row.aliases).filter(isNameLikeAlias);
+    const names = [record.canonicalName, ...aliases];
     for (const name of names) {
       const key = normalizeName(name);
       if (key && !index.has(key)) index.set(key, record);

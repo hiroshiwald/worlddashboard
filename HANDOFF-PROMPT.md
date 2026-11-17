@@ -160,3 +160,8 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
 - `main` = force-graph centring fix (strength 0.2, checked on live data).
 - Branch `claude/modest-mendel-vvxklr` is ahead of `main` with the `followed` flag (migration 011). Push to `main` only after the operator confirms 011 ran in Neon. feed.ts and graph.ts throw without the column.
 - Open: core labels overlap at strength 0.2. Old Entities and Network tabs still read status.
+
+### State 2026-11-17 (late night), branch `claude/modest-mendel-vvxklr`
+- `main` = force-graph centring + `followed` flag (migration 011 run by operator).
+- Branch ahead of `main`, waiting on operator approval to push: duplicate-name merge (soft-merge country fold, feed applies merges), Newsfeed links stored candidates via `sample_titles` (Lionfish UUV, HII), COLA fix (`isNameLikeAlias`).
+- Proposed next, not started: (1) LLM returns a Wikipedia title per entity (merge at arrival, acronym expansion, disambiguation). (2) Replace the Entity map engine with sigma.js + graphology (WebGL, label density grid, ForceAtlas2 worker, Louvain communities); one view, no switch to the old EntityLevel SVG on click.

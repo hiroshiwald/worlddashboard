@@ -8,6 +8,7 @@ import {
   dedupeMentions,
   chunkArticles,
   countableMentions,
+  isNameLikeAlias,
 } from "../entity-ingest";
 import { isLlmConfigured, submitBatch, pollBatch, fetchBatchResults } from "../llm-extract";
 import type { Sql, SqlRow } from "../db";
@@ -1098,5 +1099,15 @@ describe("countableMentions", () => {
     const mentions = [mention(1, 5), mention(1, 6), mention(2, 5)];
     const kept = countableMentions(mentions, new Set([1]), new Set(["1:6"]));
     expect(kept).toEqual([mention(1, 6), mention(2, 5)]);
+  });
+});
+
+describe("isNameLikeAlias", () => {
+  it("drops all-lowercase Wikidata word forms, keeps names and uncased scripts", () => {
+    expect(isNameLikeAlias("cola")).toBe(false);
+    expect(isNameLikeAlias("kola")).toBe(false);
+    expect(isNameLikeAlias("Coca cola")).toBe(true);
+    expect(isNameLikeAlias("COLA")).toBe(true);
+    expect(isNameLikeAlias("קוקה קולה")).toBe(true);
   });
 });
