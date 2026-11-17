@@ -16,7 +16,7 @@ import {
 } from "./llm-extract";
 import { getSettings } from "./settings";
 import { OTHER_TOPIC } from "../topic-membership";
-import { BACKFILL_FROM, BACKFILL_TO, BACKFILL_MAX_PER_RUN, selectBackfillRows, countBackfillRemaining } from "./backfill";
+import { BACKFILL_FROM, BACKFILL_TO, BACKFILL_MAX_PER_RUN, selectBackfillRows, countBackfillRemaining, markBackfillAttempted } from "./backfill";
 
 const LOOKBACK_HOURS = 6;
 const MAX_CANDIDATE_SOURCES = 10;
@@ -556,6 +556,7 @@ async function resolveEndedBatch(sql: Sql, pending: PendingBatch, resultsUrl: st
   const results = await fetchBatchResults(resultsUrl);
   if ("reason" in results) {
     tally(results.reason, results.sample);
+    await markBackfillAttempted(sql, pending.articleIds);
     return resolveWithHeuristicFallback(sql, pending);
   }
 
@@ -567,6 +568,7 @@ async function resolveEndedBatch(sql: Sql, pending: PendingBatch, resultsUrl: st
   const titleEnByArticle = new Map<number, string>();
   const llmUsed = applyBatchResults(idsPerChunk, headById, results, candidatesByArticle, relationsByArticle, topicByArticle, titleEnByArticle, tally);
   await writeArticleTopics(sql, topicByArticle, titleEnByArticle);
+  await markBackfillAttempted(sql, pending.articleIds);
 
   await recordBatchUsage(sql, currentUtcMonth(new Date()), results.inputTokens, results.outputTokens);
   await deletePendingBatch(sql, pending.batchId);

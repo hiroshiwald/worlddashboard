@@ -1,4 +1,5 @@
 import type { Sql, SqlRow } from "./db";
+import { OTHER_TOPIC } from "../topic-membership";
 import { estimateCostUsd, MAX_BATCH_SIZE } from "./llm-extract";
 
 // ONE-OFF: November catch-up so articles first seen in this window get the
@@ -53,4 +54,19 @@ export async function countBackfillRemaining(sql: Sql): Promise<number> {
 export async function getBackfillStatus(sql: Sql): Promise<{ remaining: number; estimatedUsd: number }> {
   const remaining = await countBackfillRemaining(sql);
   return { remaining, estimatedUsd: estimateBackfillUsd(remaining) };
+}
+
+/** Stops a backfill article from being re-sent forever: once its batch has
+ * resolved (results applied or failed), a window article the model gave no
+ * topic gets "Other", so selectBackfillRows skips it. Articles outside the
+ * window are untouched. */
+export async function markBackfillAttempted(sql: Sql, articleIds: number[]): Promise<void> {
+  if (articleIds.length === 0) return;
+  await sql`
+    UPDATE articles bfm SET topic = ${OTHER_TOPIC}
+    WHERE bfm.id = ANY(${articleIds}::bigint[])
+      AND bfm.topic IS NULL
+      AND bfm.first_seen_at >= ${BACKFILL_FROM}::timestamptz
+      AND bfm.first_seen_at < ${BACKFILL_TO}::timestamptz
+  `;
 }

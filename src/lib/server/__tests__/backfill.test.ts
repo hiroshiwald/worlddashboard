@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { estimateBackfillUsd, getBackfillStatus, BACKFILL_MAX_PER_RUN } from "../backfill";
+import { estimateBackfillUsd, getBackfillStatus, markBackfillAttempted, BACKFILL_MAX_PER_RUN } from "../backfill";
 import type { Sql, SqlRow } from "../db";
 
 describe("estimateBackfillUsd", () => {
@@ -30,5 +30,30 @@ describe("getBackfillStatus", () => {
 describe("BACKFILL_MAX_PER_RUN", () => {
   it("is a whole number of 25-article chunks", () => {
     expect(BACKFILL_MAX_PER_RUN).toBe(400);
+  });
+});
+
+describe("markBackfillAttempted", () => {
+  function recorder() {
+    const calls: { text: string; values: unknown[] }[] = [];
+    const sql = ((strings: TemplateStringsArray, ...values: unknown[]) => {
+      calls.push({ text: strings.join("?"), values });
+      return Promise.resolve([] as SqlRow[]);
+    }) as unknown as Sql;
+    return { sql, calls };
+  }
+
+  it("does nothing for no articles", async () => {
+    const { sql, calls } = recorder();
+    await markBackfillAttempted(sql, []);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("sets Other only on window articles still lacking a topic", async () => {
+    const { sql, calls } = recorder();
+    await markBackfillAttempted(sql, [1, 2]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].text).toContain("topic IS NULL");
+    expect(calls[0].values).toEqual(["Other", [1, 2], "2026-11-01T00:00:00Z", "2026-11-17T00:00:00Z"]);
   });
 });
