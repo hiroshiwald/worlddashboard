@@ -53,10 +53,14 @@ export interface FeedParams {
   limit: number;
   before: Cursor | null;
   after: Cursor | null;
+  /** Trimmed search text, 2..MAX_QUERY_LEN chars; null when not searching. */
+  q: string | null;
 }
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
+const MIN_QUERY_LEN = 2;
+const MAX_QUERY_LEN = 100;
 const ENTITY_STATUSES = new Set(["candidate", "tracked", "dismissed"]);
 // Candidates seen up to this long before the page's oldest article can match it.
 const CANDIDATE_PAD_MS = 3 * 24 * 60 * 60 * 1000;
@@ -87,6 +91,21 @@ function parseLimit(raw: string | null): number {
   return limit;
 }
 
+function parseQuery(raw: string | null): string | null {
+  if (raw === null) return null;
+  const q = raw.trim();
+  if (q.length < MIN_QUERY_LEN || q.length > MAX_QUERY_LEN) {
+    throw new FeedParamError(`q must be ${MIN_QUERY_LEN} to ${MAX_QUERY_LEN} characters`);
+  }
+  return q;
+}
+
+/** Escapes LIKE wildcards so user text matches literally (backslash is
+ * Postgres' default LIKE escape), then wraps it for substring matching. */
+export function toLikePattern(q: string): string {
+  return `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+}
+
 export function parseFeedParams(params: URLSearchParams): FeedParams {
   const limit = parseLimit(params.get("limit"));
   const beforeRaw = params.get("before");
@@ -94,10 +113,13 @@ export function parseFeedParams(params: URLSearchParams): FeedParams {
   if (beforeRaw !== null && afterRaw !== null) {
     throw new FeedParamError("before and after cannot be combined");
   }
+  const q = parseQuery(params.get("q"));
+  if (q !== null && afterRaw !== null) throw new FeedParamError("q cannot be combined with after");
   return {
     limit,
     before: beforeRaw === null ? null : decodeCursor(beforeRaw),
     after: afterRaw === null ? null : decodeCursor(afterRaw),
+    q,
   };
 }
 
@@ -252,8 +274,29 @@ export function groupEntitiesByArticle(
   return grouped;
 }
 
+/** Search page, newest first, optional `before` cursor. Case-insensitive
+ * substring (ILIKE) on title, title_en, summary and the names/aliases of
+ * linked entities. ILIKE rather than full text: names and partial words must
+ * match literally, with no stemming or stop words. */
+async function searchArticlePage(sql: Sql, q: string, params: FeedParams): Promise<SqlRow[]> {
+  const pattern = toLikePattern(q);
+  const seenAt = params.before ? params.before.firstSeenAt : null;
+  const id = params.before ? params.before.id : null;
+  return sql`SELECT a.id, a.title, a.link, a.source_name, a.source_category, a.first_seen_at, a.published_at, a.title_en, a.summary
+    FROM articles a
+    WHERE (a.title ILIKE ${pattern} OR a.title_en ILIKE ${pattern} OR a.summary ILIKE ${pattern}
+      OR EXISTS (
+        SELECT 1 FROM article_entities ae JOIN entities e ON e.id = ae.entity_id
+        WHERE ae.article_id = a.id
+          AND (e.canonical_name ILIKE ${pattern} OR EXISTS (SELECT 1 FROM unnest(e.aliases) alias WHERE alias ILIKE ${pattern}))
+      ))
+      AND (${seenAt}::timestamptz IS NULL OR (a.first_seen_at, a.id) < (${seenAt}::timestamptz, ${id}::bigint))
+    ORDER BY a.first_seen_at DESC, a.id DESC LIMIT ${params.limit + 1}`;
+}
+
 /** Fetches limit+1 rows so the caller can tell whether another page exists. */
 async function loadArticlePage(sql: Sql, params: FeedParams): Promise<SqlRow[]> {
+  if (params.q !== null) return searchArticlePage(sql, params.q, params);
   const fetchCount = params.limit + 1;
   if (params.before) {
     const { firstSeenAt, id } = params.before;

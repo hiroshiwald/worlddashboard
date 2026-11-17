@@ -1,7 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   encodeCursor,
   decodeCursor,
+  loadFeed,
+  toLikePattern,
   parseFeedParams,
   toFeedArticle,
   toFeedEntity,
@@ -50,7 +52,7 @@ describe("cursor", () => {
 
 describe("parseFeedParams", () => {
   it("defaults to limit 50 and no cursors", () => {
-    expect(parse("")).toEqual({ limit: 50, before: null, after: null });
+    expect(parse("")).toEqual({ limit: 50, before: null, after: null, q: null });
   });
 
   it("accepts limit bounds", () => {
@@ -149,7 +151,7 @@ describe("row shaping", () => {
 
 describe("paginate", () => {
   const rows: SqlRow[] = [3, 2, 1].map((id) => ({ id, first_seen_at: new Date(ISO) }));
-  const base: FeedParams = { limit: 2, before: null, after: null };
+  const base: FeedParams = { limit: 2, before: null, after: null, q: null };
 
   it("trims the probe row and emits a cursor at the last kept row", () => {
     const { pageRows, nextCursor } = paginate(rows, base);
@@ -286,5 +288,45 @@ describe("mergeArticleRows", () => {
 
   it("leaves unmerged rows alone", () => {
     expect(mergeArticleRows([other], [other, navy1])).toEqual([other]);
+  });
+});
+
+describe("search param q", () => {
+  it("trims and accepts 2..100 chars", () => {
+    expect(parse("q=%20%20ab%20").q).toBe("ab");
+    expect(parse(`q=${"x".repeat(100)}`).q).toHaveLength(100);
+  });
+
+  it.each(["", "a", "%20%20a%20", "%20%20%20", "x".repeat(101)])("rejects q=%s", (value) => {
+    expect(() => parse(`q=${value}`)).toThrow(FeedParamError);
+  });
+
+  it("rejects q with after", () => {
+    const cursor = encodeCursor({ firstSeenAt: ISO, id: "7" });
+    expect(() => parse(`q=ab&after=${cursor}`)).toThrow(FeedParamError);
+  });
+
+  it("escapes LIKE wildcards and backslashes", () => {
+    expect(toLikePattern("50%_a\\b")).toBe("%50\\%\\_a\\\\b%");
+  });
+});
+
+describe("loadFeed with q", () => {
+  const row = { id: "1", title: "T", link: "l", source_name: "s", source_category: "c", first_seen_at: ISO, published_at: null, title_en: null, summary: null };
+
+  it("runs one parameterized search query and keeps the paging cursor", async () => {
+    const calls: { text: string; values: unknown[] }[] = [];
+    const sql = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      calls.push({ text: strings.join("?"), values });
+      return /FROM articles a/.test(strings.join("")) ? [row, { ...row, id: "0" }] : [];
+    });
+    const result = await loadFeed(sql, { limit: 1, before: null, after: null, q: "50%" });
+    const search = calls.find((c) => c.text.includes("FROM articles a")) as { text: string; values: unknown[] };
+    expect(search.text).toContain("ILIKE");
+    expect(search.values).toContain("%50\\%%");
+    expect(search.values).toContain(2);
+    expect(search.text).not.toContain("50");
+    expect(result.items).toHaveLength(1);
+    expect(result.nextCursor).not.toBeNull();
   });
 });

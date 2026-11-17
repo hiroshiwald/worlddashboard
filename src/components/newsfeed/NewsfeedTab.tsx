@@ -9,7 +9,6 @@ import {
   FILTER_LABELS,
   countByFilter,
   matchesFilter,
-  matchesSearch,
   rowEntities,
   isStale,
   formatAgo,
@@ -97,14 +96,13 @@ function FilterBar({ filter, counts, onFilter, paused, onPause, dark }: BarProps
 }
 
 export default function NewsfeedTab({ dark, searchQuery, onOpenMap }: NewsfeedTabProps) {
-  const feed = useNewsfeed();
+  const feed = useNewsfeed(searchQuery);
   const now = useNow();
   const [filter, setFilter] = useState<FeedFilter>("all");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-  const searched = useMemo(() => feed.items.filter((a) => matchesSearch(a, searchQuery)), [feed.items, searchQuery]);
-  const counts = useMemo(() => countByFilter(searched, now), [searched, now]);
-  const visible = useMemo(() => searched.filter((a) => matchesFilter(a, filter, now)), [searched, filter, now]);
+  const counts = useMemo(() => countByFilter(feed.items, now), [feed.items, now]);
+  const visible = useMemo(() => feed.items.filter((a) => matchesFilter(a, filter, now)), [feed.items, filter, now]);
   const selected = findRow(feed.items, selectedKey);
 
   const track = (row: RowEntity) => {
@@ -126,7 +124,7 @@ export default function NewsfeedTab({ dark, searchQuery, onOpenMap }: NewsfeedTa
   };
 
   if (feed.dbUnconfigured) return <Message dark={dark}>Database not configured. Set DATABASE_URL and reload.</Message>;
-  if (feed.loading && feed.items.length === 0) return <Message dark={dark}>Loading the feed…</Message>;
+  if (feed.loading && feed.items.length === 0 && !feed.searchActive) return <Message dark={dark}>Loading the feed…</Message>;
   if (feed.error !== null && feed.items.length === 0) {
     return (
       <Message dark={dark}>
@@ -150,9 +148,11 @@ export default function NewsfeedTab({ dark, searchQuery, onOpenMap }: NewsfeedTa
         </button>
       )}
       <div className={`overflow-hidden rounded-xl border ${dark ? "border-slate-700" : "border-gray-200"}`}>
-        {feed.items.length === 0 && <Message dark={dark}>No articles yet. The next ingest will fill this in.</Message>}
-        {feed.items.length > 0 && visible.length === 0 && <Message dark={dark}>Nothing in the loaded articles matches this search or filter.</Message>}
-        {visible.map((article) => (
+        {feed.searching && <Message dark={dark}>Searching all articles...</Message>}
+        {!feed.searching && feed.items.length === 0 && feed.searchActive && <Message dark={dark}>No articles match</Message>}
+        {!feed.searching && feed.items.length === 0 && !feed.searchActive && <Message dark={dark}>No articles yet. The next ingest will fill this in.</Message>}
+        {!feed.searching && feed.items.length > 0 && visible.length === 0 && <Message dark={dark}>Nothing in the loaded articles matches this filter.</Message>}
+        {!feed.searching && visible.map((article) => (
           <FeedRow key={article.id} article={article} h={handlers} />
         ))}
       </div>

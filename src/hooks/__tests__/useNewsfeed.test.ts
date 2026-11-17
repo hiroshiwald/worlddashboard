@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
-import { useNewsfeed } from "../useNewsfeed";
+import { useNewsfeed, normalizeQuery } from "../useNewsfeed";
 
 const candidate = { nameNorm: "cyan", name: "Cyan", typeHint: "company", firstSeenAt: "2026-11-16T08:00:00.000Z", mentionCount: 3 };
 const item = (id: string, over: object = {}) => ({
@@ -101,5 +101,38 @@ describe("useNewsfeed", () => {
     act(() => result.current.showPending());
     expect(result.current.items.map((a) => a.id)).toEqual(["2", "1"]);
     expect(result.current.pendingCount).toBe(0);
+  });
+
+  it("normalizes search text to the server's 2..100 range", () => {
+    expect(normalizeQuery("  ab ")).toBe("ab");
+    expect(normalizeQuery(" a ")).toBeNull();
+    expect(normalizeQuery("x".repeat(101))).toBeNull();
+  });
+
+  it("debounces, searches the server with q, and pages with q", async () => {
+    const fetchFn = stubFetch((url) => {
+      if (!url.startsWith("/api/feed")) return { body: { entities: [] } };
+      const hit = url.includes("before=") ? "2" : "1";
+      return { body: { items: [item(hit)], nextCursor: hit === "1" ? "c" : null, lastIngestAt: null } };
+    });
+    const feedCalls = () => fetchFn.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith("/api/feed"));
+    const { result, rerender } = renderHook(({ q }) => useNewsfeed(q), { initialProps: { q: "" } });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    rerender({ q: "iran" });
+    expect(result.current.searching).toBe(true);
+    expect(feedCalls().some((u) => u.includes("q=iran"))).toBe(false);
+    await waitFor(() => expect(feedCalls().some((u) => u.includes("q=iran"))).toBe(true));
+    await waitFor(() => expect(result.current.searching).toBe(false));
+    await act(async () => { await result.current.loadMore(); });
+    expect(feedCalls().some((u) => u.includes("before=c") && u.includes("q=iran"))).toBe(true);
+    expect(result.current.items).toHaveLength(2);
+  });
+
+  it("shows no search state for a one-character query and does not send q", async () => {
+    const fetchFn = stubFetch(() => ({ body: { items: [], nextCursor: null, lastIngestAt: null, entities: [] } }));
+    const { result } = renderHook(() => useNewsfeed("a"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.searchActive).toBe(false);
+    expect(fetchFn.mock.calls.every((c) => !String(c[0]).includes("q="))).toBe(true);
   });
 });

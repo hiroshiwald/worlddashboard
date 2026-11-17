@@ -111,24 +111,6 @@ export function matchesFilter(article: FeedArticle, filter: FeedFilter, now: Dat
   return entityIsNew || article.candidates.some((c) => isRecent(c.firstSeenAt, now));
 }
 
-function fold(text: string): string {
-  return text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
-}
-
-/** Case- and accent-insensitive match on headline (original and English), source, entity and candidate names. Blank query matches all. */
-export function matchesSearch(article: FeedArticle, query: string): boolean {
-  const needle = fold(query.trim());
-  if (needle === "") return true;
-  const fields = [
-    article.title,
-    article.titleEn ?? "",
-    article.sourceName,
-    ...article.entities.map((e) => e.name),
-    ...article.candidates.map((c) => c.name),
-  ];
-  return fields.some((field) => fold(field).includes(needle));
-}
-
 export function countByFilter(items: FeedArticle[], now: Date): Record<FeedFilter, number> {
   const filters = Object.keys(FILTER_LABELS) as FeedFilter[];
   const counts = { all: 0, tracked: 0, untracked: 0, new: 0 };

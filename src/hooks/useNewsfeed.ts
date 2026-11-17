@@ -16,6 +16,9 @@ const PAGE_LIMIT = 50;
 const POLL_LIMIT = 100;
 const POLL_MS = 60_000;
 const GROWTH_LIMIT = 200;
+const SEARCH_DEBOUNCE_MS = 300;
+const MIN_QUERY_LEN = 2;
+const MAX_QUERY_LEN = 100;
 
 class DatabaseNotConfiguredError extends Error {}
 
@@ -57,8 +60,32 @@ export async function sendJson(method: string, url: string, body: unknown): Prom
   throw new Error(message);
 }
 
-function feedUrl(params: Record<string, string>): string {
-  return `/api/feed?${new URLSearchParams({ limit: String(PAGE_LIMIT), ...params })}`;
+function feedUrl(params: Record<string, string>, q: string | null): string {
+  const search = new URLSearchParams({ limit: String(PAGE_LIMIT), ...params });
+  if (q !== null) search.set("q", q);
+  return `/api/feed?${search}`;
+}
+
+/** Trimmed search text the server accepts, else null (too short or too long: show the plain feed). */
+export function normalizeQuery(raw: string): string | null {
+  const q = raw.trim();
+  if (q.length < MIN_QUERY_LEN || q.length > MAX_QUERY_LEN) return null;
+  return q;
+}
+
+/** `typed` follows the input at once; `q` follows it after a pause, and clears at once. */
+function useDebouncedQuery(raw: string): { typed: string | null; q: string | null } {
+  const typed = normalizeQuery(raw);
+  const [q, setQ] = useState<string | null>(typed);
+  useEffect(() => {
+    if (typed === null) {
+      setQ(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => setQ(typed), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [typed]);
+  return { typed, q };
 }
 
 function parseGrowth(raw: unknown): Record<string, EntityGrowth> {
@@ -111,7 +138,7 @@ interface Pages {
   setLastIngestAt: (iso: string | null) => void;
 }
 
-function usePages(): Pages {
+function usePages(q: string | null): Pages {
   const [items, setItems] = useState<FeedArticle[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [lastIngestAt, setLastIngestAt] = useState<string | null>(null);
@@ -120,11 +147,16 @@ function usePages(): Pages {
   const [error, setError] = useState<string | null>(null);
   const [dbUnconfigured, setDbUnconfigured] = useState(false);
 
+  // Each reload bumps this; a response for an older query or page is dropped.
+  const generation = useRef(0);
+
   const reload = useCallback(async () => {
+    const mine = ++generation.current;
     setLoading(true);
     setError(null);
     try {
-      const page = parseFeedResponse(await getJson(feedUrl({})));
+      const page = parseFeedResponse(await getJson(feedUrl({}, q)));
+      if (mine !== generation.current) return;
       setItems(page.items);
       setNextCursor(page.nextCursor);
       setLastIngestAt(page.lastIngestAt);
@@ -133,15 +165,17 @@ function usePages(): Pages {
       if (err instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
       else setError(err instanceof Error ? err.message : "Failed to load the feed");
     } finally {
-      setLoading(false);
+      if (mine === generation.current) setLoading(false);
     }
-  }, []);
+  }, [q]);
 
   const loadMore = useCallback(async () => {
     if (nextCursor === null) return;
+    const mine = generation.current;
     setLoadingMore(true);
     try {
-      const page = parseFeedResponse(await getJson(feedUrl({ before: nextCursor })));
+      const page = parseFeedResponse(await getJson(feedUrl({ before: nextCursor }, q)));
+      if (mine !== generation.current) return;
       setItems((prev) => [...prev, ...page.items.filter((a) => !prev.some((p) => p.id === a.id))]);
       setNextCursor(page.nextCursor);
     } catch (err) {
@@ -149,7 +183,7 @@ function usePages(): Pages {
     } finally {
       setLoadingMore(false);
     }
-  }, [nextCursor]);
+  }, [nextCursor, q]);
 
   useEffect(() => {
     void reload();
@@ -160,7 +194,7 @@ function usePages(): Pages {
 
 /** Polls ?after=<newest> every 60 s while visible and not paused. Held
  * articles wait in `pending` until showPending; the list never moves on its own. */
-function usePolling(pages: Pages) {
+function usePolling(pages: Pages, searching: boolean) {
   const [pending, setPending] = useState<FeedArticle[]>([]);
   const [paused, setPaused] = useState(false);
   const [pollError, setPollError] = useState(false);
@@ -170,9 +204,9 @@ function usePolling(pages: Pages) {
 
   const pollOnce = useCallback(async () => {
     const newest = latest.current.pending[0] ?? latest.current.items[0];
-    if (newest === undefined) return;
+    if (newest === undefined || searching) return;
     try {
-      const page = parseFeedResponse(await getJson(feedUrl({ after: cursorOf(newest), limit: String(POLL_LIMIT) })));
+      const page = parseFeedResponse(await getJson(feedUrl({ after: cursorOf(newest), limit: String(POLL_LIMIT) }, null)));
       setPending((prev) => mergeNewer(prev, page.items));
       setLastIngestAt(page.lastIngestAt);
       setPollError(false);
@@ -180,7 +214,7 @@ function usePolling(pages: Pages) {
       console.warn("newsfeed: poll failed", err);
       setPollError(true);
     }
-  }, [setLastIngestAt]);
+  }, [setLastIngestAt, searching]);
 
   useEffect(() => {
     if (paused) return undefined;
@@ -247,14 +281,18 @@ function useActions(pages: Pages, reloadGrowth: () => Promise<void>) {
   return { busy, actionError, setEntityStatus, trackCandidate, dismissCandidate };
 }
 
-export function useNewsfeed() {
-  const pages = usePages();
+/** `searchText` is the raw header input; the server searches all stored articles. */
+export function useNewsfeed(searchText = "") {
+  const { typed, q } = useDebouncedQuery(searchText);
+  const pages = usePages(q);
   const { growth, growthUnavailable, reloadGrowth } = useGrowth();
-  const polling = usePolling(pages);
+  const polling = usePolling(pages, q !== null);
   const actions = useActions(pages, reloadGrowth);
   return {
     items: pages.items,
     loading: pages.loading,
+    searchActive: typed !== null,
+    searching: typed !== null && (typed !== q || pages.loading),
     loadingMore: pages.loadingMore,
     error: pages.error,
     dbUnconfigured: pages.dbUnconfigured,

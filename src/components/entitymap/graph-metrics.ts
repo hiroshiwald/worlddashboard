@@ -76,6 +76,8 @@ function addNodes(graph: Graph, nodes: GraphNode[]): void {
       type: n.type,
       followed: n.followed,
       state: n.state,
+      role: n.role,
+      status: n.status,
       mentions: n.mentions14d,
     });
   }
@@ -96,6 +98,8 @@ function addEdges(graph: Graph, edges: GraphEdge[], now: Date): void {
       weight,
       isNew: isNewEdge(e, now),
       firstSeenAt: e.firstSeenAt,
+      lastSeenAt: e.lastSeenAt,
+      articleCount: e.articleCount,
     });
   }
 }
