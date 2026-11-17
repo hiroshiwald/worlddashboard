@@ -3,13 +3,14 @@ import { SESSION_COOKIE, isAdminToken } from "@/lib/server/session";
 
 export const config = { matcher: "/api/:path*" };
 
-const GUARDED_POST = new Set(["/api/activity", "/api/candidates", "/api/candidates/bulk", "/api/signals"]);
-const ENTITY_PATH = /^\/api\/entities\/[^/]+$/;
+// Demo mode (2026-11-17, operator): only pause/resume needs admin. To restore the
+// full guard, add back "/api/candidates", "/api/candidates/bulk", "/api/signals"
+// and PATCH /api/entities/<id> (see git history).
+const GUARDED_POST = new Set(["/api/activity"]);
 
 export function isGuarded(method: string, pathname: string): boolean {
   const path = pathname.length > 1 ? pathname.replace(/\/$/, "") : pathname;
   if (method === "POST") return GUARDED_POST.has(path);
-  if (method === "PATCH") return ENTITY_PATH.test(path);
   return false;
 }
 

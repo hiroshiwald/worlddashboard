@@ -168,3 +168,8 @@ Older entries (2026-08-20 to 2026-11-16): DEVLOG-ARCHIVE.md. Do not read it at s
 - What changed: removed WorldBox and `worldNote`; tracked names now carry a "Tracking" pill (replacing the ✓, already listed first) and rows with a tracked entity get a left emerald accent. New `hasTracked` drives the accent and the "Mentions a tracked entity" filter.
 - What it affected: FeedRow.tsx, feed-logic.ts and its test. "Not tracked yet" duplicated the entity column, so nothing replaces it.
 - Gotchas: DESIGN.md defines no colour tokens; reused emerald, already the tracked colour.
+
+## 2026-11-17 — Demo mode: admin actions open to all, pause button hidden
+- What changed: middleware guards only `POST /api/activity`. `AdminProvider value={true}` shows Track/Ignore, entity edits and signal actions to everyone. Header no longer renders the pause button or the Admin login control.
+- What it affected: `middleware.ts`, `DashboardTable.tsx`, `HeaderBar.tsx`, `middleware.test.ts`.
+- Gotchas: to restore the login guard, revert this commit. Login routes, session code and `AdminAuthControl`/`PauseActivityButton` files are kept. Pause via API still needs the admin cookie (503 until `ADMIN_PASSWORD` and `SESSION_SECRET` are set).

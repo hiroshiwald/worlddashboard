@@ -3,8 +3,6 @@
 import { ThemeClasses } from "@/lib/theme";
 import { timeAgo } from "@/lib/date-utils";
 import type { SessionState } from "@/hooks/useSession";
-import PauseActivityButton from "./PauseActivityButton";
-import AdminAuthControl from "./AdminAuthControl";
 
 type TabKey = "brief" | "newsfeed" | "feeds" | "network" | "map" | "developments" | "entities" | "entitymap";
 
@@ -246,8 +244,6 @@ export default function HeaderBar({
             ))}
           </select>
 
-          {session.role === "admin" && <PauseActivityButton btnClass={t.btnBg} />}
-          <AdminAuthControl session={session} btnClass={t.btnBg} />
 
           <IngestBadge mode={mode} lastIngestAt={lastIngestAt} fetchedAt={fetchedAt} dark={dark} />
 

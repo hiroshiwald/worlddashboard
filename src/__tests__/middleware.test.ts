@@ -14,10 +14,6 @@ function req(method: string, path: string, cookie?: string): NextRequest {
 describe("isGuarded", () => {
   it.each([
     ["POST", "/api/activity"],
-    ["POST", "/api/candidates"],
-    ["POST", "/api/candidates/bulk"],
-    ["POST", "/api/signals"],
-    ["PATCH", "/api/entities/12"],
     ["POST", "/api/activity/"],
   ])("guards %s %s", (method, path) => {
     expect(isGuarded(method, path)).toBe(true);
@@ -25,6 +21,10 @@ describe("isGuarded", () => {
 
   it.each([
     ["GET", "/api/activity"],
+    ["POST", "/api/candidates"],
+    ["POST", "/api/candidates/bulk"],
+    ["POST", "/api/signals"],
+    ["PATCH", "/api/entities/12"],
     ["GET", "/api/entities/12"],
     ["GET", "/api/feed"],
     ["PATCH", "/api/signals"],
@@ -63,19 +63,19 @@ describe("middleware", () => {
   });
 
   it("returns 401 with no cookie", async () => {
-    const res = await middleware(req("PATCH", "/api/entities/5"));
+    const res = await middleware(req("POST", "/api/activity"));
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Admin login required" });
   });
 
   it("returns 401 with a bad cookie", async () => {
-    const res = await middleware(req("POST", "/api/signals", "admin.1.bad"));
+    const res = await middleware(req("POST", "/api/activity", "admin.1.bad"));
     expect(res.status).toBe(401);
   });
 
   it("returns 401 with an expired cookie", async () => {
     const expired = await signSession(SECRET, Date.now() - 1000);
-    const res = await middleware(req("POST", "/api/candidates", expired));
+    const res = await middleware(req("POST", "/api/activity", expired));
     expect(res.status).toBe(401);
   });
 

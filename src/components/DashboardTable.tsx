@@ -31,8 +31,9 @@ export default function DashboardTable() {
   const itemsDependentTab = isItemsDependentTab(activeTab);
   const session = useSession();
 
+  // Demo mode: controls open to all. Restore: value={session.role === "admin"}.
   return (
-    <AdminProvider value={session.role === "admin"}>
+    <AdminProvider value={true}>
     <div className={`h-screen flex flex-col ${t.bg} transition-colors duration-200 ${dark ? "dark-scrollbar" : ""}`}>
       <HeaderBar
         dark={dark} toggleTheme={toggleTheme} searchQuery={searchQuery}
