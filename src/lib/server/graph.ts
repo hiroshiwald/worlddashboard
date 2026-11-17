@@ -267,7 +267,7 @@ async function loadTopicMembership(sql: Sql, ids: string[], since: string): Prom
   return entityTopics([...byArticle.values()]);
 }
 
-async function loadRoleMap(sql: Sql, rows: SqlRow[]): Promise<Map<string, EntityRole>> {
+export async function loadRoleMap(sql: Sql, rows: SqlRow[]): Promise<Map<string, EntityRole>> {
   const inputs = rows.map((row) => ({
     id: Number(row.id),
     canonicalName: String(row.canonical_name),

@@ -2797,3 +2797,5 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - Entity extraction misses: possessive folding, Unicode person regex, broader LLM prompt and topic labels.
 - Affects extract-v2.ts (normalizeName, addCandidate, person regex) and llm-extract.ts (SYSTEM_PROMPT).
 - Gotcha: Orbán-style names are also caught by compromise, so tests assert on display only, not layer.
+- Added GET /api/emerging (src/lib/server/emerging.ts, route, tests); exported loadRoleMap from graph.ts.
+- Candidate anchors use exact sample_titles = articles.title match (ingest stores raw titles), no read-time matcher needed.
