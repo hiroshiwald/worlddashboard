@@ -1,6 +1,7 @@
 import type { Sql, SqlRow } from "./db";
 import { attachEntityRoles, type EntityRole } from "./entity-admin";
 import { getLastIngestAt } from "./tick";
+import { buildMergeGroups, type MergeEntity } from "../soft-merge";
 import { buildCandidateMatcher, foldText, publisherSuffix, stripPublisherSuffix, type CandidateMatcher } from "../candidate-match";
 
 export class FeedParamError extends Error {}
@@ -166,16 +167,43 @@ function publisherNames(row: SqlRow): Set<string> {
   return names;
 }
 
+type MatchableCandidate = FeedCandidate & { displayName: string };
+
+/** Pure. Raw article title -> candidates that list it in sample_titles. Links
+ * names the text matcher misses ("Lionfish UUVs" vs "Lionfish UUV", "HII"). */
+export function buildTitleIndex(candidateRows: SqlRow[]): Map<string, MatchableCandidate[]> {
+  const index = new Map<string, MatchableCandidate[]>();
+  for (const row of candidateRows) {
+    if (!Array.isArray(row.sample_titles)) continue;
+    const candidate = toFeedCandidate(row);
+    for (const title of row.sample_titles as unknown[]) {
+      if (typeof title !== "string") continue;
+      const list = index.get(title) ?? [];
+      list.push(candidate);
+      index.set(title, list);
+    }
+  }
+  return index;
+}
+
 /** Pure. Candidates whose name is in the title (publisher suffix removed) or
- * summary, minus names already linked as entities and the source's own name. */
+ * summary, or who list the article's raw title in sample_titles, minus names
+ * already linked as entities and the source's own name. One per nameNorm. */
 export function matchArticleCandidates(
   row: SqlRow,
   entities: FeedEntity[],
-  matcher: CandidateMatcher<FeedCandidate & { displayName: string }>,
+  matcher: CandidateMatcher<MatchableCandidate>,
+  titleIndex: Map<string, MatchableCandidate[]> = new Map(),
 ): FeedCandidate[] {
   const exclude = publisherNames(row);
   for (const entity of entities) exclude.add(foldText(entity.name));
-  return matcher.match(articleText(row), exclude).map(({ displayName: _unused, ...candidate }) => candidate);
+  const byNorm = new Map<string, MatchableCandidate>();
+  const linked = titleIndex.get(String(row.title)) ?? [];
+  for (const candidate of [...matcher.match(articleText(row), exclude), ...linked]) {
+    if (exclude.has(foldText(candidate.displayName))) continue;
+    if (!byNorm.has(candidate.nameNorm)) byNorm.set(candidate.nameNorm, candidate);
+  }
+  return [...byNorm.values()].map(({ displayName: _unused, ...candidate }) => candidate);
 }
 
 /** One matchable name form (canonical name or alias) of a tracked entity. */
@@ -252,14 +280,14 @@ async function loadArticlePage(sql: Sql, params: FeedParams): Promise<SqlRow[]> 
 async function loadArticleEntities(sql: Sql, articleIds: string[]): Promise<SqlRow[]> {
   if (articleIds.length === 0) return [];
   return sql`SELECT ae.article_id, e.id AS entity_id, e.canonical_name, e.type, e.status, e.followed,
-      e.aliases, e.fame, e.first_seen_at AS entity_first_seen_at
+      e.aliases, e.fame, e.wiki_title, e.first_seen_at AS entity_first_seen_at
     FROM article_entities ae JOIN entities e ON e.id = ae.entity_id
     WHERE ae.article_id = ANY(${articleIds}::bigint[])
     ORDER BY ae.article_id, e.id`;
 }
 
 async function loadTrackedEntities(sql: Sql): Promise<SqlRow[]> {
-  return sql`SELECT tn.id AS entity_id, tn.canonical_name, tn.type, tn.status, tn.followed, tn.aliases, tn.fame,
+  return sql`SELECT tn.id AS entity_id, tn.canonical_name, tn.type, tn.status, tn.followed, tn.aliases, tn.fame, tn.wiki_title,
       tn.first_seen_at AS entity_first_seen_at
     FROM entities tn WHERE tn.status = 'tracked'`;
 }
@@ -269,7 +297,7 @@ async function loadCandidates(sql: Sql, pageRows: SqlRow[]): Promise<SqlRow[]> {
   let oldest = Infinity;
   for (const row of pageRows) oldest = Math.min(oldest, new Date(toIso(row.first_seen_at)).getTime());
   const since = new Date(oldest - CANDIDATE_PAD_MS).toISOString();
-  return sql`SELECT name_norm, display_name, type_hint, first_seen_at, mention_count
+  return sql`SELECT name_norm, display_name, type_hint, first_seen_at, mention_count, sample_titles
     FROM entity_candidates WHERE last_seen_at >= ${since}::timestamptz
     ORDER BY mention_count DESC, name_norm LIMIT ${MAX_CANDIDATES}`;
 }
@@ -300,28 +328,58 @@ export function paginate(
   return { pageRows, nextCursor: encodeCursor({ firstSeenAt: toIso(last.first_seen_at), id: String(last.id) }) };
 }
 
+/** Pure. Merge-group input for one entity row; no mention count is loaded. */
+function toMergeEntity(row: SqlRow): MergeEntity {
+  return {
+    id: String(row.entity_id),
+    name: String(row.canonical_name),
+    type: String(row.type),
+    aliases: Array.isArray(row.aliases) ? (row.aliases as string[]) : [],
+    wikiTitle: row.wiki_title == null ? null : String(row.wiki_title),
+    mentions: 0,
+  };
+}
+
+/** Pure. Replaces each article-entity row by its merge group's canonical row
+ * (from allRows) and dedupes per article. The shown row is followed if any
+ * member of its group is followed. */
+export function mergeArticleRows(articleRows: SqlRow[], allRows: SqlRow[]): SqlRow[] {
+  const rowById = new Map(allRows.map((row) => [String(row.entity_id), row]));
+  const groups = buildMergeGroups([...rowById.values()].map(toMergeEntity));
+  const shownById = new Map<string, SqlRow>();
+  for (const group of groups) {
+    const canonical = rowById.get(group.canonicalId) as SqlRow;
+    const followed = group.memberIds.some((id) => rowById.get(id)?.followed === true);
+    const shown = { ...canonical, followed: followed || canonical.followed };
+    for (const id of group.memberIds) shownById.set(id, shown);
+  }
+  const seen = new Set<string>();
+  const merged: SqlRow[] = [];
+  for (const row of articleRows) {
+    const shown = shownById.get(String(row.entity_id)) ?? row;
+    const key = `${String(row.article_id)}|${String(shown.entity_id)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ ...shown, article_id: row.article_id });
+  }
+  return merged;
+}
+
 /** Per article: ingest-linked entities, plus tracked entities named in the
- * text that ingest did not link (deduped by id). Roles are classified once. */
+ * text that ingest did not link, merged by group and deduped. Roles are
+ * classified once, on the entities shown. */
 async function buildArticleEntities(sql: Sql, pageRows: SqlRow[]): Promise<Map<string, FeedEntity[]>> {
   const [linkedRows, trackedRows] = await Promise.all([
     loadArticleEntities(sql, pageRows.map((r) => String(r.id))),
     loadTrackedEntities(sql),
   ]);
   const trackedMatcher = buildTrackedMatcher(trackedRows);
-  const extraByArticle = new Map(pageRows.map((row) => [String(row.id), matchTrackedEntities(row, trackedMatcher)]));
-  const allRows = [...linkedRows, ...[...extraByArticle.values()].flat()];
-  const roleById = await loadRoles(sql, allRows);
-  const byArticle = groupEntitiesByArticle(linkedRows, roleById);
-  for (const [articleId, extraRows] of extraByArticle) {
-    const entities = byArticle.get(articleId) ?? [];
-    const seen = new Set(entities.map((e) => e.id));
-    for (const extra of extraRows) {
-      if (seen.has(String(extra.entity_id))) continue;
-      entities.push(toFeedEntity(extra, roleById.get(String(extra.entity_id)) ?? "satellite"));
-    }
-    byArticle.set(articleId, entities);
-  }
-  return byArticle;
+  const extraRows = pageRows.flatMap((row) =>
+    matchTrackedEntities(row, trackedMatcher).map((entity) => ({ ...entity, article_id: row.id })),
+  );
+  const shownRows = mergeArticleRows([...linkedRows, ...extraRows], [...linkedRows, ...trackedRows]);
+  const roleById = await loadRoles(sql, shownRows);
+  return groupEntitiesByArticle(shownRows, roleById);
 }
 
 export async function loadFeed(sql: Sql, params: FeedParams): Promise<FeedResponse> {
@@ -329,9 +387,10 @@ export async function loadFeed(sql: Sql, params: FeedParams): Promise<FeedRespon
   const { pageRows, nextCursor } = paginate(rows, params);
   const [byArticle, candidateRows] = await Promise.all([buildArticleEntities(sql, pageRows), loadCandidates(sql, pageRows)]);
   const matcher = buildCandidateMatcher(candidateRows.map(toFeedCandidate));
+  const titleIndex = buildTitleIndex(candidateRows);
   const items = pageRows.map((row) => {
     const entities = byArticle.get(String(row.id)) ?? [];
-    return toFeedArticle(row, entities, matchArticleCandidates(row, entities, matcher));
+    return toFeedArticle(row, entities, matchArticleCandidates(row, entities, matcher, titleIndex));
   });
   return {
     items,

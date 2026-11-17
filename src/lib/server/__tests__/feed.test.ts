@@ -9,6 +9,8 @@ import {
   paginate,
   toFeedCandidate,
   matchArticleCandidates,
+  buildTitleIndex,
+  mergeArticleRows,
   buildTrackedMatcher,
   matchTrackedEntities,
   FeedParamError,
@@ -224,5 +226,65 @@ describe("tracked entity matching", () => {
 
   it("matches in the summary", () => {
     expect(ids("Ethics concerns", [entityRow("1", "Merkley")], { summary: "Sen. Merkley said" })).toEqual(["1"]);
+  });
+});
+
+describe("candidate sample_titles links", () => {
+  const cand = (norm: string, name: string, titles: unknown) => ({
+    name_norm: norm, display_name: name, type_hint: "organization", first_seen_at: ISO, mention_count: 2, sample_titles: titles,
+  });
+  const run = (title: string, rows: SqlRow[], extra: SqlRow = {}, entities: never[] = []) =>
+    matchArticleCandidates(
+      { title, summary: null, source_name: "AP", ...extra },
+      entities,
+      buildCandidateMatcher(rows.map(toFeedCandidate)),
+      buildTitleIndex(rows),
+    ).map((c) => c.nameNorm);
+
+  it("links a plural and a short name through the raw title", () => {
+    const rows = [cand("lionfish uuv", "Lionfish UUV", ["Navy buys Lionfish UUVs"]), cand("hii", "HII", ["HII wins contract"])];
+    expect(run("Navy buys Lionfish UUVs", rows)).toEqual(["lionfish uuv"]);
+    expect(run("HII wins contract", rows)).toEqual(["hii"]);
+  });
+
+  it("dedupes a name found by text and by title", () => {
+    expect(run("Okonjo speaks", [cand("okonjo", "Okonjo", ["Okonjo speaks"])])).toEqual(["okonjo"]);
+  });
+
+  it("keeps the publisher exclusion and ignores non-array sample_titles", () => {
+    expect(run("Wire story", [cand("ap", "AP", ["Wire story"])])).toEqual([]);
+    expect(run("Wire story", [cand("hii", "HII", null)])).toEqual([]);
+  });
+
+  it("skips a name already linked as an entity", () => {
+    const linked = [{ id: "3", name: "HII", type: "organization", status: "tracked", role: "satellite", firstSeenAt: ISO }] as never[];
+    expect(run("HII wins contract", [cand("hii", "HII", ["HII wins contract"])], {}, linked)).toEqual([]);
+  });
+});
+
+describe("mergeArticleRows", () => {
+  const row = (id: string, name: string, aliases: string[], followed: boolean, article = "9") => ({
+    article_id: article, entity_id: id, canonical_name: name, type: "organization", status: "tracked",
+    followed, aliases, wiki_title: null, entity_first_seen_at: ISO,
+  });
+  const navy1 = row("1", "U.S. Navy", ["US Navy"], false);
+  const navy2 = row("2", "US Navy", ["United States Navy"], true);
+  const navy3 = row("3", "United States Navy", [], false);
+  const other = row("4", "Fictional Corp", [], false);
+
+  it("shows one canonical entity per article and follows if any member is followed", () => {
+    const merged = mergeArticleRows([navy1, navy3, other], [navy1, navy2, navy3, other]);
+    expect(merged.map((r) => r.entity_id)).toEqual(["1", "4"]);
+    expect(merged[0].followed).toBe(true);
+    expect(merged[1].followed).toBe(false);
+  });
+
+  it("dedupes per article only", () => {
+    const merged = mergeArticleRows([navy1, { ...navy3, article_id: "10" }], [navy1, navy3]);
+    expect(merged.map((r) => r.article_id)).toEqual(["9", "10"]);
+  });
+
+  it("leaves unmerged rows alone", () => {
+    expect(mergeArticleRows([other], [other, navy1])).toEqual([other]);
   });
 });
