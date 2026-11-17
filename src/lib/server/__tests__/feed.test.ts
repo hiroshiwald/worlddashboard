@@ -9,6 +9,8 @@ import {
   paginate,
   toFeedCandidate,
   matchArticleCandidates,
+  buildTrackedMatcher,
+  matchTrackedEntities,
   FeedParamError,
   type FeedParams,
 } from "../feed";
@@ -176,5 +178,35 @@ describe("candidate matching", () => {
   it("handles a null summary", () => {
     const matcher = buildCandidateMatcher([toFeedCandidate(candidateRow)]);
     expect(matchArticleCandidates({ title: "No names here", summary: null }, [], matcher)).toEqual([]);
+  });
+});
+
+describe("tracked entity matching", () => {
+  const entityRow = (id: string, name: string, aliases: string[] = []) => ({
+    entity_id: id, canonical_name: name, type: "person", status: "tracked", aliases, fame: "famous", entity_first_seen_at: ISO,
+  });
+  const ids = (title: string, rows: SqlRow[], extra: SqlRow = {}) =>
+    matchTrackedEntities({ title, summary: null, source_name: "AP", ...extra }, buildTrackedMatcher(rows)).map((r) => r.entity_id);
+
+  it("matches a single-word tracked name with a possessive", () => {
+    expect(ids("Sen. Warren raises concerns over Trump's aide", [entityRow("1", "Trump")])).toEqual(["1"]);
+  });
+
+  it("matches a bare surname only through an alias, not from the full name", () => {
+    expect(ids("Trump aide bets", [entityRow("1", "Donald Trump")])).toEqual([]);
+    expect(ids("Trump aide bets", [entityRow("1", "Donald Trump", ["Trump"])])).toEqual(["1"]);
+  });
+
+  it("dedupes one entity matched by name and alias", () => {
+    expect(ids("Donald Trump said Trump will go", [entityRow("1", "Donald Trump", ["Trump"])])).toEqual(["1"]);
+  });
+
+  it("requires own capitals for one-word names and ignores the publisher suffix", () => {
+    expect(ids("Middle east talks", [entityRow("1", "East")])).toEqual([]);
+    expect(ids("Talks resume - Reuters", [entityRow("1", "Reuters")])).toEqual([]);
+  });
+
+  it("matches in the summary", () => {
+    expect(ids("Ethics concerns", [entityRow("1", "Merkley")], { summary: "Sen. Merkley said" })).toEqual(["1"]);
   });
 });
