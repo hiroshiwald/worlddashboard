@@ -2812,3 +2812,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: `EmergingAnchor` gains `type`. `anchorRank`: person/company 0, other 1, country/region/city 2, no anchor 3. Applied to anchors per item, item order in `/api/emerging`, bubble order and the "New near known" list. Newsfeed headline text drops the " - Publisher" suffix (`stripPublisherSuffix`).
 - What it affected: `emerging-types.ts`, `emerging.ts`, `entitymap/universe.ts`, `newsfeed/FeedRow.tsx`, tests. Gate: tsc, 1226 tests, build pass.
 - Gotchas: Operator approved the push to `main`.
+
+## 2026-11-17 — Cause of the November LLM gap found
+- What changed: Nothing in code. GitHub "Hourly ingest" had no runs between 2026-10-31 (run 1998) and 2026-11-17 (run 1999, started by hand). Workflow state is active again (updated 2026-11-17 00:59 UTC).
+- What it affected: November ingest ran only from the daily Vercel cron and page ticks, so few batches were submitted (6 calls). Run 1999: 74 of 106 feeds OK, LLM used on 15 articles, month cost $0.66, no failure reasons.
+- Gotchas: Articles first seen while the job was off are older than the 6-hour lookback and never get entities, topics or translations. A backfill would need a separate one-off job. 32 of 106 feeds fail; not checked.
