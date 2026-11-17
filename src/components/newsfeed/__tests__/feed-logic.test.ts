@@ -5,6 +5,7 @@ import {
   cursorOf,
   worldNote,
   matchesFilter,
+  matchesSearch,
   timeLabel,
   isStale,
   applyEntityStatus,
@@ -131,5 +132,22 @@ describe("headline", () => {
 
   it("strips the publisher suffix when there is no translation", () => {
     expect(headline(article({ title: "Iran attacks - Wire", titleEn: null }))).toEqual({ text: "Iran attacks", original: null });
+  });
+});
+
+describe("matchesSearch", () => {
+  it("matches everything for a blank query", () => {
+    expect(matchesSearch(article(), "   ")).toBe(true);
+  });
+  it("matches headline, translated headline, source, entity and candidate names", () => {
+    const a = article({ title: "Orig Titel", titleEn: "English Headline", sourceName: "Reuters" });
+    for (const q of ["titel", "headline", "reuters", "acme", "cyan"]) expect(matchesSearch(a, q)).toBe(true);
+  });
+  it("ignores case and accents in both directions", () => {
+    expect(matchesSearch(article({ title: "Café ouvert" }), "CAFE")).toBe(true);
+    expect(matchesSearch(article({ title: "Cafe open" }), "café")).toBe(true);
+  });
+  it("rejects a query found nowhere", () => {
+    expect(matchesSearch(article(), "zzzz")).toBe(false);
   });
 });
