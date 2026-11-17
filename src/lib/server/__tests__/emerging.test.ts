@@ -48,6 +48,19 @@ describe("rankAnchors", () => {
   });
 });
 
+describe("assembleEmerging name hygiene", () => {
+  it("drops names with HTML codes and trims a trailing dash", () => {
+    const cand = (name_norm: string, display_name: string) => ({
+      name_norm, display_name, type_hint: "person", first_seen_at: "2026-11-16T00:00:00Z", mention_count: 1, sample_titles: [], contexts: [],
+    });
+    const res = assembleEmerging(
+      { candidateRows: [cand("a", "James Bond&nbsp;&nbsp;BILD"), cand("b", "Daniel Craig -")], candidateLinkRows: [], entityRows: [], entityLinkRows: [], titleLinkRows: [] },
+      new Map(), 7, new Date("2026-11-17T00:00:00Z"),
+    );
+    expect(res.items.map((i) => i.name)).toEqual(["Daniel Craig"]);
+  });
+});
+
 describe("sortAndCap", () => {
   const item = (key: string, anchors: number, firstSeenAt: string, mentions: number, anchorType = "organization"): EmergingItem => ({
     key, kind: "entity", name: key, type: "other", firstSeenAt, mentions, sampleTitles: [], links: [], context: null,

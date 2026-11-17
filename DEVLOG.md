@@ -2825,3 +2825,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - Replaced the force/grid layout with packCircles (entitymap/pack.ts); added context and links to /api/emerging; new NameCard with Track/Ignore via the Newsfeed calls.
 - Affected: entitymap tab, useEmerging, map-layout.ts (layoutMap deleted), stats table and countStats removed.
 - Gotcha: candidate headline links come from a separate title query, since the anchor join drops articles with no tracked neighbour.
+
+## 2026-11-17 — Entity map polish; emerging name hygiene (orchestrator)
+- What changed: Universe labels always sit inside the bubble (`insideLabel`: 13 px down to 9 px, then ellipsis); outside labels removed. Bubble colour = anchor kind (person/company, other, place, none) with a legend; top 30 groups shown. `/api/emerging` drops candidate names that fail `isMatchableName` and trims a trailing dash.
+- What it affected: `MapSvg.tsx`, `pack.ts`, `emerging.ts`, tests. Gate: tsc, tests, build pass. Checked with Playwright on live `/api/emerging` data from the preview.
+- Gotchas: Translation (migration 010) must run in Neon BEFORE this branch reaches `main`: feed SQL reads `articles.title_en`. Helper tokens (Sonnet): translation 119k, map discovery 158k (over the 150k cap again; UI rewrites need smaller briefs).

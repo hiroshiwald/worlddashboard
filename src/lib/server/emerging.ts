@@ -1,4 +1,5 @@
 import { anchorRank, firstAnchorRank, type EmergingAnchor, type EmergingItem, type EmergingResponse } from "../emerging-types";
+import { isMatchableName } from "../candidate-match";
 import type { Sql, SqlRow } from "./db";
 import { ValidationError, type EntityRole } from "./entity-admin";
 import { loadRoleMap } from "./graph";
@@ -121,12 +122,15 @@ export function assembleEmerging(
   const urlByTitle = new Map(input.titleLinkRows.map((row) => [String(row.emg_url_title), String(row.emg_url)]));
   const items: EmergingItem[] = [];
   for (const cand of input.candidateRows) {
+    // Same name hygiene as the Newsfeed: no HTML codes, no lowercase-only or one-letter names.
+    const name = String(cand.display_name).replace(/[\s\-–—|:]+$/u, "");
+    if (!isMatchableName(name)) continue;
     const key = `cand:${String(cand.name_norm)}`;
     const titles = toStrings(cand.sample_titles).slice(0, MAX_SAMPLE_TITLES);
     items.push({
       key,
       kind: "candidate",
-      name: String(cand.display_name),
+      name,
       type: String(cand.type_hint),
       firstSeenAt: toIso(cand.first_seen_at),
       mentions: Number(cand.mention_count),
