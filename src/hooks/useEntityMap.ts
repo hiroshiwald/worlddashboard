@@ -5,10 +5,8 @@ import type { MapFocus } from "@/hooks/useDashboardTable";
 import type { GraphResponse } from "@/lib/server/graph";
 import {
   buildMapData, filterGraph, parseGraph, traceConnection,
-  type MapData, type Sel, type TraceResult,
+  type MapData, type TraceResult,
 } from "@/components/entitymap/model";
-
-export interface Offset { dx: number; dy: number }
 
 export type GraphLoad =
   | { status: "loading" }
@@ -58,14 +56,8 @@ function focusEntityId(focus: MapFocus): string[] {
 
 export function useEntityMap(focus: MapFocus) {
   const [load, setLoad] = useState<GraphLoad>({ status: "loading" });
-  const [open, setOpen] = useState<string[]>([]);
-  const [scope, setScope] = useState<string[]>([]);
   const [entityId, setEntityId] = useState<string | null>(null);
-  const [sel, setSel] = useState<Sel | null>(null);
-  const [off, setOff] = useState<Record<string, Offset>>({});
-  // Context entities link nearly everything into one tangle on live data, so the
-  // readable view is the default. The switch still shows them.
-  const [anchors, setAnchors] = useState(false);
+  const [bubble, setBubble] = useState<string | null>(null); // selected Universe bubble (anchor id)
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -82,27 +74,24 @@ export function useEntityMap(focus: MapFocus) {
   const data: MapData | null = useMemo(() => {
     if (load.status !== "ready") return null;
     const { nodes, edges } = filterGraph(load.graph.nodes, load.graph.edges, forced === "" ? [] : [forced]);
-    return buildMapData(nodes, edges, load.graph.clusters);
+    return buildMapData(nodes, edges);
   }, [load, forced]);
 
   useEffect(() => {
     if (data === null || focus === null) return;
     if (focus.kind === "entity" && data.byId.has(focus.id)) setEntityId(focus.id);
-    if (focus.kind === "topic" && data.groups.some((g) => g.id === focus.id)) setScope([focus.id]);
-    setSel(null);
+    setBubble(null);
   }, [data, focus]);
 
   const trace: TraceResult = useMemo(
     () => (data === null ? { kind: "none" } : traceConnection(data, from, to)),
     [data, from, to],
   );
-  const pathIds = useMemo(() => (trace.kind === "path" ? trace.path : []), [trace]);
 
   const up = useCallback(() => {
     if (entityId !== null) setEntityId(null);
-    else if (scope.length > 0) setScope([]);
-    else setSel(null);
-  }, [entityId, scope]);
+    else setBubble(null);
+  }, [entityId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -112,21 +101,9 @@ export function useEntityMap(focus: MapFocus) {
     return () => window.removeEventListener("keydown", onKey);
   }, [up]);
 
-  const openGroup = useCallback((id: string) => setOpen((o) => (o.includes(id) ? o : [...o, id])), []);
-  const closeGroup = useCallback((id: string) => setOpen((o) => o.filter((x) => x !== id)), []);
-  const openAll = useCallback(() => {
-    if (data !== null) setOpen(data.groups.map((g) => g.id));
-  }, [data]);
-  const goEntity = useCallback((id: string) => { setEntityId(id); setSel(null); }, []);
-  const goScope = useCallback((ids: string[]) => { setEntityId(null); setScope(ids); setSel(null); }, []);
-  const moveBy = useCallback((key: string, o: Offset) => setOff((p) => ({ ...p, [key]: o })), []);
+  const goEntity = useCallback((id: string) => { setEntityId(id); setBubble(null); }, []);
 
-  return {
-    load, reload, data, open, scope, entityId, sel, off, anchors, from, to, trace, pathIds,
-    setSel, setAnchors, setFrom, setTo, openGroup, closeGroup, openAll, goEntity, goScope, up, moveBy,
-    closeAll: () => setOpen([]),
-    resetLayout: () => setOff({}),
-  };
+  return { load, reload, data, entityId, bubble, from, to, trace, setBubble, setFrom, setTo, goEntity, up };
 }
 
 export type EntityMapState = ReturnType<typeof useEntityMap>;

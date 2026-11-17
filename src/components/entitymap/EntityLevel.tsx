@@ -2,10 +2,11 @@
 
 import { placeLabels, type LabelItem } from "@/lib/map-layout";
 import type { EntityMapState } from "@/hooks/useEntityMap";
-import { CONTEXT_ID, layoutEntity, type MapData } from "./model";
-import { groupColor, labelText } from "./MapSvg";
+import { CONTEXT_ID, labelText, layoutEntity, type MapData } from "./model";
 
 const W = 900;
+const CONTEXT_GREY = "#64748b";
+const LINKED_BLUE = "#2563eb";
 
 interface Props {
   dark: boolean;
@@ -14,7 +15,7 @@ interface Props {
   state: EntityMapState;
 }
 
-/** Entity level: the entity in the middle, its groups as bubbles, linked entities inside the bubbles. */
+/** Entity level: the entity in the middle, context and linked entities in two bubbles. */
 export default function EntityLevel({ dark, data, id, state }: Props) {
   const lay = layoutEntity(data, id, W);
   const center = data.byId.get(id)!;
@@ -32,18 +33,14 @@ export default function EntityLevel({ dark, data, id, state }: Props) {
   return (
     <svg viewBox={`0 0 ${W} ${lay.height}`} className="w-full select-none" role="group" aria-label={`Entity level: ${center.name}`}>
       {lay.bubbles.map((b) => {
-        const color = b.gid === CONTEXT_ID ? "#64748b" : groupColor(data, b.gid);
-        const open = b.gid !== CONTEXT_ID;
+        const color = b.gid === CONTEXT_ID ? CONTEXT_GREY : LINKED_BLUE;
         return (
           <g key={b.gid}>
             {b.members.map((m) => (
               <line key={m.id} x1={lay.center.x} y1={lay.center.y} x2={m.x} y2={m.y} stroke={color} strokeOpacity={0.4} />
             ))}
             <circle cx={b.x} cy={b.y} r={b.r} fill={color} fillOpacity={0.1} stroke={color} strokeOpacity={0.6}
-              data-testid={`bubble-${b.gid}`} role={open ? "button" : undefined} tabIndex={open ? 0 : undefined}
-              aria-label={`${b.label}, open this group`} style={{ cursor: open ? "pointer" : "default" }}
-              onClick={open ? () => state.goScope([b.gid]) : undefined}
-              onKeyDown={open ? (e) => e.key === "Enter" && state.goScope([b.gid]) : undefined} />
+              data-testid={`bubble-${b.gid}`} />
             <text x={b.x} y={b.y - b.r - 6} textAnchor="middle" fontSize={12} fontWeight={600} fill={color} pointerEvents="none">
               {b.label}{b.more > 0 ? ` (+${b.more} more)` : ""}
             </text>
@@ -52,7 +49,7 @@ export default function EntityLevel({ dark, data, id, state }: Props) {
       })}
       {lay.bubbles.flatMap((b) => b.members).map((m) => {
         const n = data.byId.get(m.id)!;
-        const color = n.role === "anchor" ? "#0f172a" : groupColor(data, data.groupOf.get(m.id) ?? "");
+        const color = n.role === "anchor" ? "#0f172a" : LINKED_BLUE;
         return (
           <g key={m.id} data-testid={`member-${m.id}`} role="button" tabIndex={0} aria-label={`Go to ${n.name}`}
             style={{ cursor: "pointer" }} onClick={() => state.goEntity(m.id)}
