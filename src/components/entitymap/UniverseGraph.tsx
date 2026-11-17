@@ -48,7 +48,7 @@ export default function UniverseGraph({ dark, universe, selected, onSelect }: Pr
     if (!g) return;
     g.d3Force("charge")?.strength(-60);
     g.d3Force("link")?.distance(40);
-    g.d3Force("centring", centringForce(0.08));
+    g.d3Force("centring", centringForce(0.2));
   }, [graphData]);
   const lit = useMemo(() => {
     if (selected === null) return null;
