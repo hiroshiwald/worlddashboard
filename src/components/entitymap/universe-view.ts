@@ -17,30 +17,32 @@ export interface LegendEntry {
   size: number;
 }
 
-export function communityColor(community: number): string {
-  return PALETTE[community % PALETTE.length];
-}
+/** Colour for nodes outside the legend's communities. */
+export const OTHER_COLOR = "#94a3b8";
 
-/** Largest communities first, at most LEGEND_MAX, labelled with their top-3 names. */
+/** Largest communities first, at most LEGEND_MAX, labelled with their top-3 names. Colour by rank. */
 export function legend(result: CommunityResult): LegendEntry[] {
   const sizes = new Map<number, number>();
   for (const c of result.byNode.values()) sizes.set(c, (sizes.get(c) ?? 0) + 1);
   return [...sizes]
-    .map(([community, size]) => ({
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, LEGEND_MAX)
+    .map(([community, size], rank) => ({
       community,
-      color: communityColor(community),
+      color: PALETTE[rank],
       label: result.labels.get(community) ?? "",
       size,
-    }))
-    .sort((a, b) => b.size - a.size || a.community - b.community)
-    .slice(0, LEGEND_MAX);
+    }));
 }
 
 /** Sets colour and a random start position per node. sigma reads `type` as a program name, so it is removed. */
-export function paintGraph(graph: Graph, result: CommunityResult, random: () => number): void {
+export function paintGraph(graph: Graph, result: CommunityResult, entries: LegendEntry[], random: () => number): void {
+  const colors = new Map(entries.map((e) => [e.community, e.color]));
   graph.forEachNode((id) => {
+    const community = result.byNode.get(id);
+    const color = community === undefined ? undefined : colors.get(community);
     graph.mergeNodeAttributes(id, {
-      color: communityColor(result.byNode.get(id) ?? 0),
+      color: color ?? OTHER_COLOR,
       x: random() * 100,
       y: random() * 100,
     });

@@ -1,6 +1,6 @@
 import Graph from "graphology";
 import { describe, expect, it } from "vitest";
-import { PALETTE, communityColor, edgeHidden, legend, litSet, nodeLook, paintGraph } from "../universe-view";
+import { OTHER_COLOR, PALETTE, edgeHidden, legend, litSet, nodeLook, paintGraph } from "../universe-view";
 
 function pair(): Graph {
   const g = new Graph({ type: "undirected" });
@@ -26,17 +26,13 @@ describe("legend", () => {
   });
 });
 
-describe("communityColor", () => {
-  it("wraps around the palette", () => {
-    expect(communityColor(PALETTE.length)).toBe(PALETTE[0]);
-  });
-});
-
 describe("paintGraph", () => {
-  it("colours nodes, seeds positions and drops the type attribute", () => {
+  it("colours legend communities by rank, others grey, seeds positions and drops the type attribute", () => {
     const g = pair();
-    paintGraph(g, { byNode: new Map([["a", 1], ["b", 1], ["c", 2]]), labels: new Map() }, () => 0.5);
-    expect(g.getNodeAttribute("c", "color")).toBe(communityColor(2));
+    const result = { byNode: new Map([["a", 1], ["b", 1], ["c", 2]]), labels: new Map() };
+    paintGraph(g, result, legend(result).slice(0, 1), () => 0.5);
+    expect(g.getNodeAttribute("a", "color")).toBe(PALETTE[0]);
+    expect(g.getNodeAttribute("c", "color")).toBe(OTHER_COLOR);
     expect(g.getNodeAttribute("a", "x")).toBe(50);
     expect(g.hasNodeAttribute("a", "type")).toBe(false);
   });

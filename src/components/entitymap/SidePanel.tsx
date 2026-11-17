@@ -128,6 +128,11 @@ function EntityDetail({ data, id, state, muted }: { data: MapData; id: string; s
   );
 }
 
+/** Betweenness is a 0..1 share of shortest paths; shown as a percentage. */
+function share(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 function Brokers({ graph, generatedAt, state, muted }: { graph: Graph; generatedAt: string; state: EntityMapState; muted: string }) {
   const list = useMemo(() => brokers(graph, new Date(generatedAt)).filter((b) => b.now > b.before), [graph, generatedAt]);
   return (
@@ -138,7 +143,7 @@ function Brokers({ graph, generatedAt, state, muted }: { graph: Graph; generated
         {list.map((b) => (
           <li key={b.id}>
             <button type="button" className="flex w-full justify-between gap-2 text-left hover:underline" onClick={() => state.select(b.id)}>
-              <span>{b.name}</span><span className={`tabular-nums ${muted}`}>{Math.round(b.before)} to {Math.round(b.now)}</span>
+              <span>{b.name}</span><span className={`tabular-nums ${muted}`}>{share(b.before)} to {share(b.now)}</span>
             </button>
           </li>
         ))}

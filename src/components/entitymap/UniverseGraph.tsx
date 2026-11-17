@@ -12,7 +12,7 @@ const LAYOUT_MS = 4000;
 const TEXT_DARK = "#e2e8f0";
 const TEXT_LIGHT = "#1e293b";
 const EDGE_DARK = "#33415566";
-const EDGE_LIGHT = "#cbd5e1aa";
+const EDGE_LIGHT = "#94a3b866";
 
 interface Props {
   dark: boolean;
@@ -25,8 +25,9 @@ interface Props {
 function usePaintedGraph(graph: Graph) {
   return useMemo(() => {
     const result = communities(graph);
-    paintGraph(graph, result, Math.random);
-    return legend(result);
+    const entries = legend(result);
+    paintGraph(graph, result, entries, Math.random);
+    return entries;
   }, [graph]);
 }
 
@@ -35,31 +36,46 @@ interface View {
   selected: string | null;
 }
 
+interface ViewState extends View {
+  lit: Set<string> | null;
+}
+
+// Label density grid: at the default zoom only the biggest node per cell gets a
+// label; zooming in shrinks the cells in graph space, so more names appear.
+// Strong gravity keeps small disconnected pieces next to the core.
+const SIGMA_SETTINGS = {
+  labelDensity: 1,
+  labelGridCellSize: 100,
+  labelRenderedSizeThreshold: 0,
+  labelColor: { attribute: "labelColor" },
+  zIndex: true,
+};
+
 /**
  * sigma and the FA2 worker live and die with the graph. Layout runs a few seconds, then stops.
  * Reducers read `view` (a ref local to this hook) so selection and theme changes need only a refresh.
  */
 function useSigma(graph: Graph, view: View, onSelect: Props["onSelect"]) {
   const box = useRef<HTMLDivElement>(null);
-  const viewRef = useRef(view);
-  viewRef.current = view;
+  const viewRef = useRef<ViewState>({ ...view, lit: null });
+  viewRef.current = { ...view, lit: litSet(graph, view.selected) };
   const sigma = useRef<Sigma | null>(null);
   useEffect(() => {
     if (box.current === null) return;
     const s = new Sigma(graph, box.current, {
-      settings: { labelDensity: 0.5, labelGridCellSize: 90, labelRenderedSizeThreshold: 8 },
+      ...SIGMA_SETTINGS,
       nodeReducer: (id, d) => {
-        const { dark, selected } = viewRef.current;
-        return nodeLook(id, d.color, d.label ?? "", litSet(graph, selected), selected, dark ? TEXT_DARK : TEXT_LIGHT);
+        const { dark, selected, lit } = viewRef.current;
+        return { ...d, ...nodeLook(id, d.color, d.label ?? "", lit, selected, dark ? TEXT_DARK : TEXT_LIGHT) };
       },
-      edgeReducer: (edge) => {
-        const { dark, selected } = viewRef.current;
+      edgeReducer: (edge, d) => {
+        const { dark, selected, lit } = viewRef.current;
         const [source, target] = graph.extremities(edge);
-        const hidden = edgeHidden(selected, litSet(graph, selected), source, target);
-        return { color: dark ? EDGE_DARK : EDGE_LIGHT, visibility: hidden ? "hidden" : "visible" };
+        return { ...d, color: dark ? EDGE_DARK : EDGE_LIGHT, hidden: edgeHidden(selected, lit, source, target) };
       },
     });
-    const layout = new FA2Layout(graph, { settings: { ...forceAtlas2.inferSettings(graph), edgeWeightInfluence: 0 } });
+    const settings = { ...forceAtlas2.inferSettings(graph), strongGravityMode: true, gravity: 1, edgeWeightInfluence: 0 };
+    const layout = new FA2Layout(graph, { settings });
     layout.start();
     const stop = window.setTimeout(() => layout.stop(), LAYOUT_MS);
     s.on("clickNode", ({ node }) => onSelect(node));
