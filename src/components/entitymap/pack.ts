@@ -15,7 +15,6 @@ export interface PackedCircles {
 const GAP = 6;
 const PAD = 28;
 const MAX_SCALE = 2;
-const LABEL_CHAR_W = 6.6;
 
 function isFree(c: Circle, placed: Circle[]): boolean {
   return placed.every((p) => Math.hypot(p.x - c.x, p.y - c.y) >= p.r + c.r + GAP - 1e-6);
@@ -75,7 +74,16 @@ export function packCircles(input: Array<{ key: string; r: number }>, width: num
   return { circles, height: (maxY - minY) * scale + 2 * PAD };
 }
 
-/** True when `text` fits across a circle of radius r at the Universe label size. */
-export function labelFits(text: string, r: number): boolean {
-  return text.length * LABEL_CHAR_W <= 2 * r * 0.85;
+const LABEL_MAX_PX = 13;
+const LABEL_MIN_PX = 9;
+const CHAR_W_PER_PX = 0.58; // average glyph width as a share of font size
+
+/** Label inside a circle of radius r: the largest size from 13 down to 9 px that
+ * fits; below 9 px the text is cut with an ellipsis. Labels never leave the bubble. */
+export function insideLabel(text: string, r: number): { text: string; size: number } {
+  const room = 2 * r * 0.82;
+  const size = Math.min(LABEL_MAX_PX, room / (Math.max(text.length, 1) * CHAR_W_PER_PX));
+  if (size >= LABEL_MIN_PX) return { text, size: Math.floor(size) };
+  const chars = Math.max(1, Math.floor(room / (LABEL_MIN_PX * CHAR_W_PER_PX)) - 1);
+  return { text: `${text.slice(0, chars).trimEnd()}…`, size: LABEL_MIN_PX };
 }

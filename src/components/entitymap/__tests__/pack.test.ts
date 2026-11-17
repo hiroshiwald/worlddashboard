@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { labelFits, packCircles } from "../pack";
+import { insideLabel, packCircles } from "../pack";
 
 const radii = [30, 55, 22, 40, 22, 22, 35, 28, 60, 25, 25, 31].map((r, i) => ({ key: `k${i}`, r }));
 
@@ -46,9 +46,20 @@ describe("packCircles", () => {
   });
 });
 
-describe("labelFits", () => {
-  it("fits short names in big bubbles only", () => {
-    expect(labelFits("Altman", 50)).toBe(true);
-    expect(labelFits("Federal Reserve Board", 30)).toBe(false);
+describe("insideLabel", () => {
+  it("keeps a short name whole at up to 13 px", () => {
+    expect(insideLabel("Altman", 50)).toEqual({ text: "Altman", size: 13 });
+  });
+  it("shrinks a longer name to fit", () => {
+    const out = insideLabel("Federal Reserve", 55);
+    expect(out.text).toBe("Federal Reserve");
+    expect(out.size).toBeGreaterThanOrEqual(9);
+    expect(out.size).toBeLessThan(13);
+  });
+  it("cuts with an ellipsis below 9 px", () => {
+    const out = insideLabel("Federal Reserve Board of Governors", 25);
+    expect(out.size).toBe(9);
+    expect(out.text.endsWith("…")).toBe(true);
+    expect(out.text.length * 9 * 0.58).toBeLessThanOrEqual(2 * 25 * 0.82 + 9);
   });
 });
