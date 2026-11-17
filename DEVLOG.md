@@ -158,3 +158,8 @@ Older entries (2026-08-20 to 2026-11-16): DEVLOG-ARCHIVE.md. Do not read it at s
 - What it affected: new articles from Bellingcat, Naval News, The Intercept, Atlantic Council, Zero Hedge, Foreign Policy. The existing candidate "The post" (120 mentions) stays until the operator clicks Ignore on it (that adds a dismissed entity, so it never comes back).
 - HII: no entity has wiki_title "Huntington Ingalls Industries" (not tracked, not dismissed), so merge at arrival has no target. HII stays a 2-mention candidate under the 3-source / 2-day queue threshold. Fix options: operator tracks Huntington Ingalls Industries, or pool candidates by LLM wiki title (proposal, not built).
 - Login: Playwright on live feed: general 0 Track/Ignore buttons, admin 362. Helper tokens: server ~102k (Sonnet), UI ~131k (Sonnet), Playwright check ~101k (Haiku), "The post" data fetch ~88k (Haiku).
+
+## 2026-11-17 — Newsfeed: drop the "In your world" box
+- What changed: removed WorldBox and `worldNote`; tracked names now carry a "Tracking" pill (replacing the ✓, already listed first) and rows with a tracked entity get a left emerald accent. New `hasTracked` drives the accent and the "Mentions a tracked entity" filter.
+- What it affected: FeedRow.tsx, feed-logic.ts and its test. "Not tracked yet" duplicated the entity column, so nothing replaces it.
+- Gotchas: DESIGN.md defines no colour tokens; reused emerald, already the tracked colour.
