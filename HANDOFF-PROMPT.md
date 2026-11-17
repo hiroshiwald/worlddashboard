@@ -120,7 +120,7 @@ When a phase ends, say in plain English: what changed, what you checked, what yo
 
 ## Progress log
 
-Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026-11-17:
+Read DEVLOG.md (2026-11-17 entries) and, for 2026-11-16, DEVLOG-ARCHIVE.md by grep. State on 2026-11-17:
 
 - `main` = `20ba496` (Phase 4 tabs, topics code, merged growth). Migration 009 is applied (operator ran it in Neon). Ingest GitHub workflow re-enabled by the operator.
 - Work branch `claude/laughing-wozniak-gkhavi` is ahead of `main` with: growth scaled to collection volume, Newsfeed matching fixes, the activity off switch (`/api/activity`, header button, `activity_paused` setting, ingest job treats paused as success), hidden tabs (Brief, Feeds, Developments; code kept), Newsfeed Ignore, Entities "Ignored" wording.
