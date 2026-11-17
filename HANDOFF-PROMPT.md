@@ -165,3 +165,19 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
 - `main` = force-graph centring + `followed` flag (migration 011 run by operator).
 - Branch ahead of `main`, waiting on operator approval to push: duplicate-name merge (soft-merge country fold, feed applies merges), Newsfeed links stored candidates via `sample_titles` (Lionfish UUV, HII), COLA fix (`isNameLikeAlias`).
 - Proposed next, not started: (1) LLM returns a Wikipedia title per entity (merge at arrival, acronym expansion, disambiguation). (2) Replace the Entity map engine with sigma.js + graphology (WebGL, label density grid, ForceAtlas2 worker, Louvain communities); one view, no switch to the old EntityLevel SVG on click.
+
+### Approved plan 2026-11-17 (operator said yes to all three)
+1. DONE: merge, Lionfish/HII and COLA fixes pushed to `main` (a76bab1).
+2. TODO: new Entity map engine. Replace `UniverseGraph.tsx` (react-force-graph-2d) with sigma.js + graphology. One view only: clicking a node highlights it and its neighbours and opens the side panel; delete the switch to the old `EntityLevel` SVG view.
+   - Labels by zoom: sigma's label density grid (labelDensity, labelGridCellSize, labelRenderedSizeThreshold). Zooming in must show more names.
+   - Layout: graphology-layout-forceatlas2 in a web worker. Communities: graphology-communities-louvain; colour by community; label each community by its top 3 entities.
+   - Edge weight: lift/PMI = observed co-mentions / expected from each entity's mention count. Hide hub entities (countries, top-degree nodes) by default with a toggle.
+   - Brokers: betweenness centrality (graphology-metrics); list the top new brokers in the side panel.
+   - Change over time: new edges this week and centrality jumps vs usual.
+   - New dependencies (sigma, graphology, graphology-layout-forceatlas2, graphology-communities-louvain, graphology-metrics) are approved; reason: the installed library has no label density control, communities or centrality.
+   - Data: `/api/graph` (1,632 nodes, 5,196 edges on 2026-11-17) and `/api/emerging`. Check with Playwright and live data fetched via the Vercel MCP tool `web_fetch_vercel_url` (curl to the site is blocked); route-intercept the APIs in `next dev`.
+   - Push to `main` after the live check (approved).
+3. TODO: LLM returns a Wikipedia title per entity. Add an optional `wiki` field to the entity object in `SYSTEM_PROMPT` (`llm-extract.ts`): the exact English Wikipedia title, omitted when the entity has no article, the term is generic (COLA = cost-of-living adjustment) or the model is unsure. Expand company acronyms (HII = Huntington Ingalls Industries). At ingest, resolve a candidate whose `wiki` equals an existing entity's `wiki_title` to that entity and store the surface form as an alias (merge at arrival). Validate the field at the parse boundary. Never trust it for fame; fame stays on Wikidata.
+   - Optional guard: in the Wikidata fame lookup, accept a hit only if the name equals its label or an alias (the top search hit caused COLA -> Coca-Cola).
+   - Optional one-off: remove old article links from COLA articles to Coca-Cola (ids 284, 359).
+- Order: 3 first (small, ingest only), then 2 (UI; split helper briefs under 150k tokens: data/metrics module, then the view).
