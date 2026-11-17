@@ -183,8 +183,10 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
 - Order: 3 first (small, ingest only), then 2 (UI; split helper briefs under 150k tokens: data/metrics module, then the view).
 
 ### State 2026-11-17 (late)
+- `main` = 7cae022 (code); this branch `claude/modest-mendel-vvxklr` adds only this handoff note.
 - On `main`: sigma Entity map with novelty filters (docs/NOVELTY-FILTER-SPEC.md), LLM Wikipedia titles, Wikidata name guard, full-dataset Newsfeed search.
 - Operator to run in Neon: `migrations/012_articles_search_trgm.sql` (search speed; code works without it, only slower).
 - Open: "The post" is a junk stored name (120 mentions) attached to many articles; HII is stored (2 mentions) but has no link to a known entity, so the map does not show it. COLA cleanup SQL above not run. DEVLOG.md is 270 KB and needs an archive split.
+- Header: "Pause all activity" removed (on `main`).
 - Next ideas from the novelty plan: source-count evidence floor (needs `/api/graph` change), Seen state (migration), path with evidence, saved filters with alerts (needs approval).
 - Operator request 2026-11-17: add a login with two roles, admin and general use. Admin-only controls go behind it: pause/resume activity (button removed from the header 2026-11-17; `POST /api/activity` still accepts anyone, restore the button from git history `src/components/PauseActivityButton.tsx`), Track/Ignore, entity admin. Not designed yet.
