@@ -19,6 +19,19 @@ function normalizeName(name: string): string {
   return name.replace(/\./g, "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+// Folds country abbreviations so "US Navy" and "United States Navy" compare equal.
+// Used for name/alias comparison only, never for Wikipedia titles.
+function foldCountry(name: string): string {
+  const normalized = normalizeName(name);
+  if (normalized === "us" || normalized === "usa" || normalized === "u s") {
+    return "united states";
+  }
+  if (normalized === "uk") {
+    return "united kingdom";
+  }
+  return normalized.replace(/^(?:us|u s) /, "united states ").replace(/^uk /, "united kingdom ");
+}
+
 function stripNumbers(name: string): string {
   const withoutDigits = name.replace(/\d/g, "");
   const withoutNumerals = withoutDigits.replace(ROMAN_NUMERAL, "");
@@ -67,11 +80,15 @@ function assertUniqueIds(entities: MergeEntity[]): void {
 }
 
 export function sharesNameOrAlias(a: MergeEntity, b: MergeEntity): boolean {
-  const aName = normalizeName(a.name);
-  const bName = normalizeName(b.name);
-  const aAliases = a.aliases.map((alias) => normalizeName(alias));
-  const bAliases = b.aliases.map((alias) => normalizeName(alias));
+  const aName = foldCountry(a.name);
+  const bName = foldCountry(b.name);
+  const aAliases = a.aliases.map((alias) => foldCountry(alias));
+  const bAliases = b.aliases.map((alias) => foldCountry(alias));
   return aAliases.includes(bName) || bAliases.includes(aName);
+}
+
+function sharesFoldedName(a: MergeEntity, b: MergeEntity): boolean {
+  return foldCountry(a.name) === foldCountry(b.name);
 }
 
 export function sharesWikiTitle(a: MergeEntity, b: MergeEntity): boolean {
@@ -86,7 +103,7 @@ function canJoin(a: MergeEntity, b: MergeEntity): boolean {
   if (a.type !== b.type) {
     return false;
   }
-  const linked = sharesNameOrAlias(a, b) || sharesWikiTitle(a, b);
+  const linked = sharesFoldedName(a, b) || sharesNameOrAlias(a, b) || sharesWikiTitle(a, b);
   return linked && !namesDifferOnlyByNumber(a.name, b.name);
 }
 

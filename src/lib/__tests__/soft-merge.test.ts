@@ -16,6 +16,50 @@ function makeEntity(overrides: Partial<MergeEntity> & { id: string }): MergeEnti
   };
 }
 
+describe("buildMergeGroups country folding", () => {
+  const group = (names: string[]) =>
+    buildMergeGroups(names.map((name, i) => makeEntity({ id: `e${i}`, name, type: "org" })));
+
+  it("groups U.S. Navy, US Navy and United States Navy", () => {
+    const groups = group(["U.S. Navy", "US Navy", "United States Navy"]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].memberIds).toHaveLength(3);
+  });
+
+  it("groups US Steel with United States Steel", () => {
+    expect(group(["US Steel", "United States Steel"])).toHaveLength(1);
+  });
+
+  it("groups US/USA/U.S. with United States", () => {
+    expect(group(["US", "USA", "U.S.", "United States"])[0].memberIds).toHaveLength(4);
+  });
+
+  it("does not group USA Today with United States", () => {
+    expect(group(["USA Today", "United States"])).toEqual([]);
+  });
+
+  it("leaves Usher unchanged", () => {
+    expect(group(["Usher", "United States her"])).toEqual([]);
+  });
+
+  it("groups UK variants", () => {
+    expect(group(["UK Parliament", "United Kingdom Parliament"])).toHaveLength(1);
+    expect(group(["UK", "United Kingdom"])).toHaveLength(1);
+  });
+
+  it("does not use the fold for Wikipedia titles", () => {
+    const groups = buildMergeGroups([
+      makeEntity({ id: "a", name: "A", wikiTitle: "US Navy" }),
+      makeEntity({ id: "b", name: "B", wikiTitle: "United States Navy" }),
+    ]);
+    expect(groups).toEqual([]);
+  });
+
+  it("still separates names differing only by number", () => {
+    expect(group(["US Fleet 2", "United States Fleet 3"])).toEqual([]);
+  });
+});
+
 describe("buildMergeGroups", () => {
   it("returns no groups for empty input", () => {
     expect(buildMergeGroups([])).toEqual([]);
