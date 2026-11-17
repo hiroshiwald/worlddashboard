@@ -23,6 +23,37 @@ describe("normalizeName", () => {
   });
 });
 
+describe("possessives", () => {
+  it("normalizeName folds straight and curly 's but keeps names ending in s", () => {
+    expect(normalizeName("Vietnam's")).toBe("vietnam");
+    expect(normalizeName("Vietnam’s")).toBe("vietnam");
+    expect(normalizeName("Paris")).toBe("paris");
+    expect(normalizeName("Reuters")).toBe("reuters");
+  });
+
+  it("addCandidate strips the possessive from the display name", () => {
+    const map = new Map<string, Candidate>();
+    addCandidate(map, "Vietnam’s", "country", "llm");
+    addCandidate(map, "Paris", "city", "llm");
+    expect(map.get("vietnam")?.display).toBe("Vietnam");
+    expect(map.get("paris")?.display).toBe("Paris");
+  });
+});
+
+describe("person regex Unicode", () => {
+  it("matches accented and Polish-letter names", () => {
+    const names = extractCandidates("Viktor Orbán meets Wołodymyr Zełenski", "")
+      .map((c) => c.display);
+    expect(names).toContain("Viktor Orbán");
+    expect(names).toContain("Wołodymyr Zełenski");
+  });
+
+  it("matches a name after punctuation and with a possessive", () => {
+    const names = extractCandidates("Orbán, Peter Hoffmann’s ally", "").map((c) => c.display);
+    expect(names).toContain("Peter Hoffmann");
+  });
+});
+
 describe("extractCandidates", () => {
   it("dictionary layer returns the canonical name", () => {
     const candidates = extractCandidates("Russia launches new policy", "");

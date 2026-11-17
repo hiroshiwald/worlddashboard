@@ -169,6 +169,19 @@ describe("submitBatch: request shape", () => {
     expect(without).not.toContain("Existing topic labels");
   });
 
+  it("prompt asks for all entity classes, surname-after-title, non-English, and broad 1-3 word topics", async () => {
+    const fetchMock = mockFetchOnce(jsonResponse(200, { id: "batch_1", processing_status: "in_progress" }));
+    const { sql } = emptyUsageSql();
+    await submitBatch(sql, 5, [[article(0)]], ["AI"]);
+    const system = JSON.parse(fetchMock.mock.calls[0][1].body).requests[0].params.system as string;
+    expect(system).toContain("every named person, company, startup, product and organization");
+    expect(system).toContain("Sen. Warren, Merkley");
+    expect(system).toContain("non-English");
+    expect(system).toContain("broad, reusable theme of 1 to 3 words");
+    expect(system).toContain('"Other"');
+    expect(system).toContain("Prefer reusing one exactly");
+  });
+
   it("posts one request per chunk to the batches endpoint with the pinned model and required headers", async () => {
     const fetchMock = mockFetchOnce(jsonResponse(200, { id: "batch_1", processing_status: "in_progress" }));
     const { sql } = emptyUsageSql();
