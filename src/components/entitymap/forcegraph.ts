@@ -24,8 +24,8 @@ export interface Universe {
 }
 
 export function nodeRadius(mentions: number, isNew: boolean): number {
-  const base = isNew ? 4 : 2;
-  return base + Math.min(10, Math.sqrt(Math.max(0, mentions)) * 0.8);
+  const base = isNew ? 5 : 3;
+  return base + Math.min(12, Math.sqrt(Math.max(0, mentions)) * 1.2);
 }
 
 function knownNode(n: GraphNode, isNew: boolean): UniNode {
@@ -43,10 +43,26 @@ function linkKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+const TOP_KNOWN = 40;
+
+/** Pure. The known entities worth drawing: every anchor of a new name, every
+ * graph entity that is itself new, and the 40 busiest. The full graph (1,600+
+ * nodes) is one unreadable knot. */
+export function universeNodes(graphNodes: GraphNode[], names: EmergingItem[]): GraphNode[] {
+  const keep = new Set<string>();
+  for (const item of names) {
+    keep.add(item.key);
+    for (const a of item.anchors) keep.add(a.id);
+  }
+  const busiest = [...graphNodes].sort((a, b) => b.mentions14d - a.mentions14d).slice(0, TOP_KNOWN);
+  for (const n of busiest) keep.add(n.id);
+  return graphNodes.filter((n) => keep.has(n.id));
+}
+
 /** Merge the graph and the emerging names. A name that is already a graph entity is marked new, not duplicated. */
 export function buildUniverse(graphNodes: GraphNode[], edges: GraphEdge[], names: EmergingItem[]): Universe {
   const newIds = new Set(names.map((i) => i.key));
-  const nodes = graphNodes.map((n) => knownNode(n, newIds.has(n.id)));
+  const nodes = universeNodes(graphNodes, names).map((n) => knownNode(n, newIds.has(n.id)));
   const ids = new Set(nodes.map((n) => n.id));
   for (const item of names) {
     if (ids.has(item.key)) continue;
@@ -67,7 +83,22 @@ export function buildUniverse(graphNodes: GraphNode[], edges: GraphEdge[], names
     neighbours.get(a)!.add(b);
     neighbours.get(b)!.add(a);
   }
-  return { nodes, links, neighbours };
+  // Unlinked nodes drift to the edge and make zoom-to-fit shrink the core; leave them out.
+  const linked = nodes.filter((n) => (neighbours.get(n.id)?.size ?? 0) > 0);
+  for (const n of nodes) if ((neighbours.get(n.id)?.size ?? 0) === 0) neighbours.delete(n.id);
+  return { nodes: pickLabelled(linked), links, neighbours };
+}
+
+const LABELLED_NEW = 12;
+const LABELLED_KNOWN = 10;
+
+/** Pure. At the overview only the biggest names carry a label: the top 12 new
+ * names and the top 10 known entities by size. Others show on hover or selection. */
+export function pickLabelled(nodes: UniNode[]): UniNode[] {
+  const top = (isNew: boolean, n: number) =>
+    new Set(nodes.filter((x) => x.isNew === isNew).sort((a, b) => b.radius - a.radius || a.name.localeCompare(b.name)).slice(0, n).map((x) => x.id));
+  const keep = new Set([...top(true, LABELLED_NEW), ...top(false, LABELLED_KNOWN)]);
+  return nodes.map((x) => ({ ...x, labelled: keep.has(x.id) }));
 }
 
 /** Which labels to draw: the always-labelled, the hovered, the selected and its neighbours. */

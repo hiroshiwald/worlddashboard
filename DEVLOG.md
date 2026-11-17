@@ -2848,3 +2848,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - Entity map Universe is now a force-directed graph (UniverseGraph.tsx, pure forcegraph.ts): whole graph plus new names in one viewport, sticky side panel.
 - Affected: useEntityMap (bubble/item replaced by `selected`; data is now all live nodes, filterGraph replaced by liveGraph), SidePanel, NameCard; deleted MapSvg, pack, groupByAnchor, bubbleRadius and tests.
 - Gotcha: react-force-graph mutates nodes/links, so it gets copies; link ends become objects after init (endId). Not visually driven in a browser.
+
+## 2026-11-17 — Entity map force graph: three layout attempts, stopped
+- What changed: Universe is a react-force-graph-2d view (helper). Orchestrator: labels only for the top 12 new names and top 10 known entities (`pickLabelled`), bigger nodes, charge -60 / link distance 40, unlinked nodes dropped, known nodes limited to anchors of new names plus the 40 busiest (`universeNodes`).
+- What it affected: `forcegraph.ts`, `UniverseGraph.tsx`, tests. Gate passes. Not pushed to `main`.
+- Gotchas: Small disconnected pieces (a new name and one anchor) drift far from the core, so zoomToFit shrinks the core to a small knot. Next step with new information: add centring forces (forceX/forceY from d3-force, already installed under react-force-graph; declaring it in package.json is a stated dependency change) or lay out each component separately. Stopped after 3 attempts per CLAUDE.md. Helper committed a node_modules symlink; removed and `/node_modules` added to .gitignore.

@@ -42,6 +42,13 @@ export default function UniverseGraph({ dark, universe, selected, onSelect }: Pr
     () => ({ nodes: universe.nodes.map((n) => ({ ...n })), links: universe.links.map((l) => ({ ...l })) }),
     [universe],
   );
+  // Spread the dense core: stronger repulsion, longer links.
+  useEffect(() => {
+    const g = graphRef.current;
+    if (!g) return;
+    g.d3Force("charge")?.strength(-60);
+    g.d3Force("link")?.distance(40);
+  }, [graphData]);
   const lit = useMemo(() => {
     if (selected === null) return null;
     return new Set([selected, ...(universe.neighbours.get(selected) ?? [])]);
@@ -104,6 +111,7 @@ export default function UniverseGraph({ dark, universe, selected, onSelect }: Pr
         onBackgroundClick={() => onSelect(null)}
         cooldownTicks={150}
         onEngineStop={() => graphRef.current?.zoomToFit(400, 40)}
+        d3VelocityDecay={0.3}
       />
     </div>
   );

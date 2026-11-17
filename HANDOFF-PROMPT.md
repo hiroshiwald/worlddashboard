@@ -148,3 +148,9 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
 - Fact: ingest creates every new dictionary hit and every LLM "famous" name with `status = 'tracked'` (`classifyCandidate`, `entity-ingest.ts` ~:259-263). So 1,625 "tracked" rows are mostly system-added. Robert Pattinson was added this way. No column records which rows the operator chose.
 - Proposed fix (needs operator yes + migration 011): `entities.followed BOOLEAN NOT NULL DEFAULT false`. Only the operator's Track sets it. UI "tracked"/"In your world" reads `followed`; status 'tracked' stays as "known to the system" so growth, graph and map keep working.
 - In flight at handoff: helper building Entity map single-view force graph (react-force-graph-2d, as in NetworkTab); helper removing the Newsfeed blue left border and fixing header search for the Newsfeed. Merge each to the branch, run tsc/tests/build, Playwright check, then push to `main` (operator approved pushes for this work).
+
+### State at end of session 2026-11-17 (late)
+- `main` = Newsfeed search fix and border removal (live). Branch `claude/modest-mendel-vvxklr` is ahead of `main` with the Entity map force graph (not live). Production still shows the packed-bubble map.
+- Next: fix force-graph centring (see DEVLOG "three layout attempts"), Playwright-check with live `/api/graph` and `/api/emerging`, then push to `main` (operator approved pushes for this work).
+- Waiting on operator: the "tracked" decision above (option 1: `followed` flag, recommended; option 2: stop auto-adding only).
+- Catch-up Nov 10 to 16 running via scheduled ingest; check `GET /api/backfill`. Nov 1 to 9 skipped.
