@@ -14,7 +14,8 @@ export interface AnchorBubble {
 /** Throws unless `raw` has the GET /api/emerging shape this tab reads. */
 export function parseEmerging(raw: unknown): EmergingResponse {
   const r = raw as Partial<EmergingResponse> | null;
-  if (!r || !Array.isArray(r.items) || typeof r.generatedAt !== "string") {
+  const wellFormed = (i: Partial<EmergingItem>) => Array.isArray(i.sampleTitles) && Array.isArray(i.links) && Array.isArray(i.anchors);
+  if (!r || !Array.isArray(r.items) || typeof r.generatedAt !== "string" || !r.items.every(wellFormed)) {
     throw new Error("Unexpected response from /api/emerging");
   }
   return r as EmergingResponse;
@@ -44,4 +45,23 @@ export function nearKnown(items: EmergingItem[], limit: number = 10): EmergingIt
 
 export function bubbleRadius(count: number): number {
   return 20 + Math.min(40, Math.sqrt(count) * 5);
+}
+
+export type NameAction = "track" | "ignore";
+
+export interface NameRequest {
+  method: "POST" | "PATCH";
+  url: string;
+  body: Record<string, string>;
+}
+
+/** The Newsfeed's own calls: POST /api/candidates for a candidate, PATCH /api/entities/:id for an entity. */
+export function nameRequest(item: EmergingItem, action: NameAction): NameRequest {
+  if (item.kind === "entity") {
+    const status = action === "track" ? "tracked" : "dismissed";
+    return { method: "PATCH", url: `/api/entities/${encodeURIComponent(item.key)}`, body: { status } };
+  }
+  const nameNorm = item.key.replace(/^cand:/, "");
+  if (action === "track") return { method: "POST", url: "/api/candidates", body: { nameNorm, action: "accept", type: item.type } };
+  return { method: "POST", url: "/api/candidates", body: { nameNorm, action: "dismiss" } };
 }

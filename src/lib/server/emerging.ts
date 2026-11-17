@@ -77,6 +77,12 @@ export interface EmergingInput {
   candidateLinkRows: SqlRow[]; // emg_link_title, emg_link_article, anchor columns
   entityRows: SqlRow[]; // emg_ent_* columns
   entityLinkRows: SqlRow[]; // emg_ent_id, emg_link_article, anchor columns
+  titleLinkRows: SqlRow[]; // emg_url_title, emg_url: one article link per candidate sample title
+}
+
+/** Pure. One link per title, "" when the title has no stored article. */
+function linksFor(titles: string[], urlByTitle: Map<string, string>): string[] {
+  return titles.map((title) => urlByTitle.get(title) ?? "");
 }
 
 /** Pure. roleById must cover entityRows and every anchor id in the link rows. */
@@ -108,13 +114,15 @@ export function assembleEmerging(
       articleId: String(link.emg_link_article),
       anchorId: String(link.id),
       anchorName: String(link.canonical_name),
-            anchorType: String(link.type),
+      anchorType: String(link.type),
     })),
     roleById,
   );
+  const urlByTitle = new Map(input.titleLinkRows.map((row) => [String(row.emg_url_title), String(row.emg_url)]));
   const items: EmergingItem[] = [];
   for (const cand of input.candidateRows) {
     const key = `cand:${String(cand.name_norm)}`;
+    const titles = toStrings(cand.sample_titles).slice(0, MAX_SAMPLE_TITLES);
     items.push({
       key,
       kind: "candidate",
@@ -123,7 +131,9 @@ export function assembleEmerging(
       firstSeenAt: toIso(cand.first_seen_at),
       mentions: Number(cand.mention_count),
       anchors: candidateAnchors.get(key) ?? [],
-      sampleTitles: toStrings(cand.sample_titles).slice(0, MAX_SAMPLE_TITLES),
+      sampleTitles: titles,
+      links: linksFor(titles, urlByTitle),
+      context: toStrings(cand.contexts)[0] ?? null,
     });
   }
   for (const ent of input.entityRows) {
@@ -138,6 +148,8 @@ export function assembleEmerging(
       mentions: Number(ent.emg_mentions),
       anchors: entityAnchors.get(key) ?? [],
       sampleTitles: toStrings(ent.emg_titles).slice(0, MAX_SAMPLE_TITLES),
+      links: toStrings(ent.emg_links).slice(0, MAX_SAMPLE_TITLES),
+      context: null,
     });
   }
   return { items: sortAndCap(items), days, generatedAt: now.toISOString() };
@@ -147,7 +159,7 @@ export function assembleEmerging(
 // (entity-ingest rollupCandidate), so an exact title match finds those articles.
 async function loadCandidates(sql: Sql, since: string): Promise<SqlRow[]> {
   return sql`
-    SELECT name_norm, display_name, type_hint, first_seen_at, mention_count, sample_titles
+    SELECT name_norm, display_name, type_hint, first_seen_at, mention_count, sample_titles, contexts
     FROM entity_candidates c
     WHERE first_seen_at >= ${since}::timestamptz
       AND NOT EXISTS (
@@ -169,6 +181,15 @@ async function loadCandidateLinks(sql: Sql, titles: string[], since: string): Pr
       AND COALESCE(a.published_at, a.first_seen_at) >= ${since}::timestamptz`;
 }
 
+async function loadTitleLinks(sql: Sql, titles: string[]): Promise<SqlRow[]> {
+  if (titles.length === 0) return [];
+  return sql`
+    SELECT DISTINCT ON (title) title AS emg_url_title, link AS emg_url
+    FROM articles
+    WHERE title = ANY(${titles}::text[])
+    ORDER BY title, first_seen_at DESC`;
+}
+
 async function loadEntities(sql: Sql, since: string): Promise<SqlRow[]> {
   return sql`
     SELECT e.id, e.canonical_name, e.type, e.aliases, e.fame, e.first_seen_at,
@@ -176,7 +197,11 @@ async function loadEntities(sql: Sql, since: string): Promise<SqlRow[]> {
       ARRAY(
         SELECT s.title FROM article_entities sae JOIN articles s ON s.id = sae.article_id
         WHERE sae.entity_id = e.id ORDER BY s.first_seen_at DESC LIMIT ${MAX_SAMPLE_TITLES}
-      ) AS emg_titles
+      ) AS emg_titles,
+      ARRAY(
+        SELECT s.link FROM article_entities sae JOIN articles s ON s.id = sae.article_id
+        WHERE sae.entity_id = e.id ORDER BY s.first_seen_at DESC LIMIT ${MAX_SAMPLE_TITLES}
+      ) AS emg_links
     FROM entities e
     WHERE e.first_seen_at >= ${since}::timestamptz AND e.status <> 'dismissed'
     ORDER BY e.first_seen_at DESC
@@ -203,8 +228,9 @@ export async function loadEmerging(sql: Sql, days: number, now: Date): Promise<E
   const candidateRows = await loadCandidates(sql, since);
   const titles = [...new Set(candidateRows.flatMap((row) => toStrings(row.sample_titles)))];
   const candidateLinkRows = await loadCandidateLinks(sql, titles, since);
+  const titleLinkRows = await loadTitleLinks(sql, titles);
   const entityRows = await loadEntities(sql, since);
   const entityLinkRows = await loadEntityLinks(sql, entityRows.map((row) => String(row.id)));
   const roleById = await loadRoleMap(sql, uniqueById([...entityRows, ...candidateLinkRows, ...entityLinkRows]));
-  return assembleEmerging({ candidateRows, candidateLinkRows, entityRows, entityLinkRows }, roleById, days, now);
+  return assembleEmerging({ candidateRows, candidateLinkRows, entityRows, entityLinkRows, titleLinkRows }, roleById, days, now);
 }

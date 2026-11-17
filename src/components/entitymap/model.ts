@@ -1,7 +1,7 @@
 // Pure model for the Entity map: filtering, trace, entity-level layout.
 import type { GraphEdge, GraphNode, GraphResponse } from "@/lib/server/graph";
 import { ratioText } from "@/lib/entity-growth";
-import { buildAdjacency, connectedGroups, shortestPath, type Adjacency } from "@/lib/entity-paths";
+import { buildAdjacency, shortestPath, type Adjacency } from "@/lib/entity-paths";
 import type { Point } from "@/lib/map-layout";
 
 export const MAP_CAP = 300;
@@ -72,27 +72,6 @@ export function filterGraph(
 /** The shown graph as lookup tables. */
 export function buildMapData(nodes: GraphNode[], edges: GraphEdge[]): MapData {
   return { nodes, edges, byId: new Map(nodes.map((n) => [n.id, n])), adj: buildAdjacency(edges) };
-}
-
-export interface CountPair {
-  entities: number;
-  links: number;
-  islands: number;
-  isolated: number;
-}
-
-/** Entity, link, island and unconnected counts over the shown graph, with or without context entities. */
-export function countStats(data: MapData, withContext: boolean): CountPair {
-  const nodes = withContext ? data.nodes : data.nodes.filter((n) => !isContext(n));
-  const ids = new Set(nodes.map((n) => n.id));
-  const edges = data.edges.filter((e) => ids.has(e.a) && ids.has(e.b));
-  const found = connectedGroups(buildAdjacency(edges), [...ids]);
-  return {
-    entities: nodes.length,
-    links: edges.length,
-    islands: found.filter((g) => g.length > 1).length,
-    isolated: found.filter((g) => g.length === 1).length,
-  };
 }
 
 export function growingFastest(data: MapData, limit: number = 8): GraphNode[] {

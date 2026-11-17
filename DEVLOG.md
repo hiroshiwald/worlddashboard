@@ -2812,3 +2812,8 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: `EmergingAnchor` gains `type`. `anchorRank`: person/company 0, other 1, country/region/city 2, no anchor 3. Applied to anchors per item, item order in `/api/emerging`, bubble order and the "New near known" list. Newsfeed headline text drops the " - Publisher" suffix (`stripPublisherSuffix`).
 - What it affected: `emerging-types.ts`, `emerging.ts`, `entitymap/universe.ts`, `newsfeed/FeedRow.tsx`, tests. Gate: tsc, 1226 tests, build pass.
 - Gotchas: Operator approved the push to `main`.
+
+## 2026-11-17 Universe: packed bubbles, name card, Track/Ignore
+- Replaced the force/grid layout with packCircles (entitymap/pack.ts); added context and links to /api/emerging; new NameCard with Track/Ignore via the Newsfeed calls.
+- Affected: entitymap tab, useEmerging, map-layout.ts (layoutMap deleted), stats table and countStats removed.
+- Gotcha: candidate headline links come from a separate title query, since the anchor join drops articles with no tracked neighbour.

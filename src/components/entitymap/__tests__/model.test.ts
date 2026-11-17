@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GraphEdge, GraphNode } from "@/lib/server/graph";
 import {
-  buildMapData, countStats, filterGraph, growingFastest, layoutEntity, parseGraph, traceConnection,
+  buildMapData, filterGraph, growingFastest, layoutEntity, parseGraph, traceConnection,
 } from "../model";
 
 function node(id: string, over: Partial<GraphNode> = {}): GraphNode {
@@ -32,20 +32,6 @@ describe("filterGraph", () => {
     const nodes = [node("1", { mergedInto: "2" }), node("2"), node("3")];
     const out = filterGraph(nodes, [edge("1", "2"), edge("2", "3")], ["2"]);
     expect(out.nodes.map((n) => n.id).sort()).toEqual(["2", "3"]);
-  });
-});
-
-describe("buildMapData", () => {
-  const nodes = [
-    node("1", { state: "Rising" }), node("2"), node("3", { state: "New" }), node("4"), node("5"),
-    node("c", { role: "anchor" }),
-  ];
-  const edges = [edge("1", "2", 3), edge("3", "4", 1), edge("3", "5", 1), edge("c", "1", 2)];
-
-  it("counts with and without context", () => {
-    const data = buildMapData(nodes, edges);
-    expect(countStats(data, true)).toMatchObject({ entities: 6, links: 4, islands: 2 });
-    expect(countStats(data, false)).toMatchObject({ entities: 5, links: 3, islands: 2 });
   });
 });
 

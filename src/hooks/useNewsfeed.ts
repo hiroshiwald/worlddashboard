@@ -42,7 +42,7 @@ async function getJson(url: string): Promise<unknown> {
   return res.json();
 }
 
-async function sendJson(method: string, url: string, body: unknown): Promise<void> {
+export async function sendJson(method: string, url: string, body: unknown): Promise<void> {
   const res = await fetch(url, {
     method,
     headers: { "Content-Type": "application/json" },
