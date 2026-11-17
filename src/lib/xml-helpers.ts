@@ -15,6 +15,17 @@ export function stripHtml(html: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+// WordPress feeds end each summary with "The post <title> appeared first on
+// <site>." Entity extraction read "The post" as a name (120 junk mentions).
+const FOOTER_TAIL = /\b(appeared first on|first appeared on)\b/u;
+
+export function stripFeedFooter(text: string): string {
+  const start = text.lastIndexOf("The post ");
+  if (start === -1) return text;
+  if (!FOOTER_TAIL.test(text.slice(start))) return text;
+  return text.slice(0, start).trim();
+}
+
 export function extractTag(xml: string, tag: string): string {
   // Try CDATA first
   const cdataRe = new RegExp(

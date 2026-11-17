@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripHtml, extractTag, extractAttr } from "../xml-helpers";
+import { stripHtml, extractTag, extractAttr, stripFeedFooter } from "../xml-helpers";
 
 describe("stripHtml", () => {
   it("removes HTML tags", () => {
@@ -90,5 +90,20 @@ describe("extractAttr", () => {
         "href"
       )
     ).toBe("https://example.com");
+  });
+});
+
+describe("stripFeedFooter", () => {
+  it("removes the WordPress footer", () => {
+    expect(stripFeedFooter("HII won a deal. The post AUKUS: HII Awarded Contract appeared first on Naval News.")).toBe("HII won a deal.");
+  });
+  it("removes the 'first appeared on' variant", () => {
+    expect(stripFeedFooter("Body. The post Title first appeared on Bellingcat.")).toBe("Body.");
+  });
+  it("keeps 'The post' in body text when no footer follows", () => {
+    expect(stripFeedFooter("The post office closed.")).toBe("The post office closed.");
+  });
+  it("keeps earlier body text that starts with 'The post'", () => {
+    expect(stripFeedFooter("The post office closed. The post X appeared first on Y.")).toBe("The post office closed.");
   });
 });

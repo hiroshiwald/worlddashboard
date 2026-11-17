@@ -1,5 +1,5 @@
 import { FeedItem, FeedDiagnostic, FeedErrorType, SourceMeta } from "./types";
-import { stripHtml, extractTag, extractAttr } from "./xml-helpers";
+import { stripHtml, stripFeedFooter, extractTag, extractAttr } from "./xml-helpers";
 import { isAdContent, isFinancialAd } from "./ad-filter";
 import { extractImageUrl, getSourceImageUrl } from "./image-extractor";
 
@@ -87,7 +87,7 @@ export function parseRssItems(xml: string, source: SourceMeta): FeedItem[] {
         published: isDateBounded
           ? published!.toISOString()
           : new Date().toISOString(),
-        summary: stripHtml(description).slice(0, 1000),
+        summary: stripFeedFooter(stripHtml(description)).slice(0, 1000),
         sourceName: source.name,
         sourceCategory: source.category,
         sourceTier: source.tier,
@@ -156,7 +156,7 @@ export function parseAtomEntries(xml: string, source: SourceMeta): FeedItem[] {
         published: isDateBounded
           ? published!.toISOString()
           : new Date().toISOString(),
-        summary: stripHtml(summary).slice(0, 1000),
+        summary: stripFeedFooter(stripHtml(summary)).slice(0, 1000),
         sourceName: source.name,
         sourceCategory: source.category,
         sourceTier: source.tier,
