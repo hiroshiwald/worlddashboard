@@ -78,3 +78,8 @@ export function edgeHidden(selected: string | null, lit: Set<string> | null, sou
   if (lit === null) return false;
   return source !== selected && target !== selected;
 }
+
+/** New names carry a suffix so they read as new without a node program. */
+export function newNameLabel(label: string, status: unknown): string {
+  return status === "candidate" ? `${label} (new)` : label;
+}

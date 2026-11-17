@@ -5,8 +5,9 @@ import type Graph from "graphology";
 import FA2Layout from "graphology-layout-forceatlas2/worker";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import Sigma from "sigma";
-import { communities } from "./graph-metrics";
-import { edgeHidden, legend, litSet, nodeLook, paintGraph } from "./universe-view";
+import type { CommunityResult } from "./graph-metrics";
+import { edgeHidden, legend, litSet, newNameLabel, nodeLook, paintGraph } from "./universe-view";
+import { hiddenAt } from "./replay";
 
 const LAYOUT_MS = 4000;
 const TEXT_DARK = "#e2e8f0";
@@ -17,23 +18,31 @@ const EDGE_LIGHT = "#94a3b866";
 interface Props {
   dark: boolean;
   graph: Graph;
+  communities: CommunityResult;
+  /** Node id to first-seen ms; nodes first seen after replayAt are hidden. */
+  firstSeen: Map<string, number>;
+  replayAt: number | null;
   selected: string | null;
   onSelect: (id: string | null) => void;
 }
 
 /** Colours and positions a graph once; the result is the same object, painted. */
-function usePaintedGraph(graph: Graph) {
+function usePaintedGraph(graph: Graph, all: CommunityResult) {
   return useMemo(() => {
-    const result = communities(graph);
+    // The view's communities cover the unfiltered graph; the legend counts only nodes still shown.
+    const byNode = new Map([...all.byNode].filter(([id]) => graph.hasNode(id)));
+    const result = { byNode, labels: all.labels };
     const entries = legend(result);
     paintGraph(graph, result, entries, Math.random);
     return entries;
-  }, [graph]);
+  }, [graph, all]);
 }
 
 interface View {
   dark: boolean;
   selected: string | null;
+  firstSeen: Map<string, number>;
+  replayAt: number | null;
 }
 
 interface ViewState extends View {
@@ -65,13 +74,16 @@ function useSigma(graph: Graph, view: View, onSelect: Props["onSelect"]) {
     const s = new Sigma(graph, box.current, {
       ...SIGMA_SETTINGS,
       nodeReducer: (id, d) => {
-        const { dark, selected, lit } = viewRef.current;
-        return { ...d, ...nodeLook(id, d.color, d.label ?? "", lit, selected, dark ? TEXT_DARK : TEXT_LIGHT) };
+        const { dark, selected, lit, firstSeen, replayAt } = viewRef.current;
+        const label = newNameLabel(d.label ?? "", d.status);
+        const look = nodeLook(id, d.color, label, lit, selected, dark ? TEXT_DARK : TEXT_LIGHT);
+        return { ...d, ...look, hidden: hiddenAt(firstSeen.get(id) ?? Number.NEGATIVE_INFINITY, replayAt) };
       },
       edgeReducer: (edge, d) => {
-        const { dark, selected, lit } = viewRef.current;
+        const { dark, selected, lit, replayAt } = viewRef.current;
         const [source, target] = graph.extremities(edge);
-        return { ...d, color: dark ? EDGE_DARK : EDGE_LIGHT, hidden: edgeHidden(selected, lit, source, target) };
+        const late = hiddenAt(Date.parse(graph.getEdgeAttribute(edge, "firstSeenAt")), replayAt);
+        return { ...d, color: dark ? EDGE_DARK : EDGE_LIGHT, hidden: late || edgeHidden(selected, lit, source, target) };
       },
     });
     const settings = { ...forceAtlas2.inferSettings(graph), strongGravityMode: true, gravity: 1, edgeWeightInfluence: 0 };
@@ -90,14 +102,14 @@ function useSigma(graph: Graph, view: View, onSelect: Props["onSelect"]) {
   }, [graph, onSelect]);
   useEffect(() => {
     sigma.current?.refresh();
-  }, [view.dark, view.selected]);
+  }, [view.dark, view.selected, view.replayAt]);
   return box;
 }
 
 /** The whole universe in one sigma view. Click a node to light it and its neighbours. */
-export default function UniverseGraph({ dark, graph, selected, onSelect }: Props) {
-  const entries = usePaintedGraph(graph);
-  const box = useSigma(graph, { dark, selected }, onSelect);
+export default function UniverseGraph({ dark, graph, communities, firstSeen, replayAt, selected, onSelect }: Props) {
+  const entries = usePaintedGraph(graph, communities);
+  const box = useSigma(graph, { dark, selected, firstSeen, replayAt }, onSelect);
   return (
     <div>
       <ul className="flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 text-xs" data-testid="universe-legend">

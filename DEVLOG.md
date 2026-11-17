@@ -2893,3 +2893,13 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: `/api/feed` takes `q` (trim, 2..100 chars else 400; not combinable with `after`). `searchArticlePage` in `feed.ts` matches title, title_en, summary and linked entity names/aliases with ILIKE (wildcards escaped by `toLikePattern`), same ordering and `before` cursor. `useNewsfeed(searchText)` debounces 300 ms, refetches page 1 with q, pages with q, pauses polling while searching. Client-only `matchesSearch` and `fold` removed.
 - What it affected: `feed.ts`, `useNewsfeed.ts`, `NewsfeedTab.tsx`, `feed-logic.ts`, their tests.
 - Gotchas: source name is no longer searched (spec lists title/summary/entities only). Candidate names are no longer searched either. ILIKE '%x%' cannot use a btree; scans articles newest first and stops at LIMIT, so rare terms scan the whole table (pg_trgm GIN index proposed: migrations/012_articles_search_trgm.sql, not created).
+
+## 2026-11-17
+- Novelty View: toolbar controls, replay (sigma reducers), "(new)" label suffix, "why" line in detail panel.
+- Affects EntityMapTab, UniverseGraph, SidePanel, universe-view.ts, new replay.ts and useReplay.ts.
+- Gotcha: new names are marked by label suffix (no node program installed); legend counts only nodes in the filtered subgraph.
+
+## 2026-11-17 — Entity map novelty filters; full-dataset Newsfeed search (orchestrator)
+- What changed: Entity map toolbar: Novelty (top N by surprise score, default 100), Window 7/14/30 days, Hide famous, Near my tracked (1 or 2 hops), Replay by day. New names from `/api/emerging` are nodes linked to their anchors, labelled "(new)", with a "why" line in the detail panel. `/api/graph` window is 30 days. Newsfeed search sends `q` to the server (ILIKE over title, title_en, summary, entity names and aliases). Spec: docs/NOVELTY-FILTER-SPEC.md.
+- What it affected: `entitymap/novelty.ts`, `replay.ts`, `EntityMapTab.tsx`, `UniverseGraph.tsx`, `SidePanel.tsx`, `useEmerging.ts`, `useReplay.ts`, `graph.ts`, `feed.ts`, `useNewsfeed.ts`, `NewsfeedTab.tsx`. Gate: tsc, 1309 tests, build pass. Live data: default view 103 nodes with 18 new names; Hide famous shows Lionfish UUV linked to U.S. Navy.
+- Gotchas: No entity is followed yet, so Near my tracked is disabled with a hint. Hide famous keeps famous anchors of shown new names as context. A new name whose anchors are all hidden is dropped from the map (it stays in the side panel). Search uses leading-wildcard ILIKE (no btree index); proposed migration 012 (pg_trgm GIN) not created. Not on `main` yet. Helper tokens (Sonnet): novelty 94k, search 112k, view 98k.

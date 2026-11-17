@@ -19,6 +19,7 @@ interface Props {
   emerging: EmergingState;
   generatedAt: string;
   graph: Graph;
+  reasons: Map<string, string>;
   state: EntityMapState;
 }
 
@@ -28,13 +29,15 @@ function growthText(n: GraphNode): string {
   return n.state;
 }
 
-export default function SidePanel({ dark, data, emerging, generatedAt, graph, state }: Props) {
+export default function SidePanel({ dark, data, emerging, generatedAt, graph, reasons, state }: Props) {
   const muted = dark ? "text-slate-400" : "text-gray-500";
   const card = `rounded border p-3 ${dark ? "border-slate-700 bg-slate-800/50" : "border-gray-200 bg-white"}`;
   const picked = pickedKind(data, emerging, state.selected);
+  const why = state.selected === null ? undefined : reasons.get(state.selected);
   return (
     <aside className="flex flex-col gap-3 text-sm lg:sticky lg:top-3 lg:max-h-[calc(100vh-1.5rem)] lg:overflow-y-auto" aria-label="Map details">
       <div className={card} data-testid="detail">
+        {why !== undefined && <p className={`mb-2 ${muted}`} data-testid="why">{why}</p>}
         {picked === "name" && <NameCard emerging={emerging} state={state} muted={muted} />}
         {picked === "entity" && <EntityDetail data={data} id={state.selected!} state={state} muted={muted} />}
         {picked === "gone" && <p className={muted}>This node is no longer listed.</p>}
