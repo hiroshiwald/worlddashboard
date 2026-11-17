@@ -66,6 +66,7 @@ interface TabContentProps {
   items: FeedItem[];
   filteredItems: FeedItem[];
   dark: boolean;
+  searchQuery: string;
   onEntityClick: (name: string) => void;
   onEntitySelect: (id: number) => void;
   onCandidatesChanged: (count: number) => void;
@@ -73,7 +74,7 @@ interface TabContentProps {
   onOpenMap: (focus: MapFocus) => void;
 }
 
-export default function TabContent({ activeTab, items, filteredItems, dark, onEntityClick, onEntitySelect, onCandidatesChanged, mapFocus, onOpenMap }: TabContentProps) {
+export default function TabContent({ activeTab, items, filteredItems, dark, searchQuery, onEntityClick, onEntitySelect, onCandidatesChanged, mapFocus, onOpenMap }: TabContentProps) {
   if (activeTab === "feeds") return null;
   // Brief, Developments, and Entities are DB-backed, independent of the
   // live feed items array, so they aren't gated behind items.length like
@@ -84,7 +85,7 @@ export default function TabContent({ activeTab, items, filteredItems, dark, onEn
   if (activeTab === "entities") {
     return <EntitiesTab dark={dark} onEntitySelect={onEntitySelect} onCandidatesChanged={onCandidatesChanged} onOpenMap={onOpenMap} />;
   }
-  if (activeTab === "newsfeed") return <NewsfeedTab dark={dark} onOpenMap={onOpenMap} />;
+  if (activeTab === "newsfeed") return <NewsfeedTab dark={dark} searchQuery={searchQuery} onOpenMap={onOpenMap} />;
   if (activeTab === "entitymap") return <EntityMapTab dark={dark} focus={mapFocus} />;
   if (items.length === 0) return null;
 

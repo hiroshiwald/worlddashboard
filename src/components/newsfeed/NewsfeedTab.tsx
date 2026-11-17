@@ -9,6 +9,7 @@ import {
   FILTER_LABELS,
   countByFilter,
   matchesFilter,
+  matchesSearch,
   rowEntities,
   isStale,
   formatAgo,
@@ -19,6 +20,7 @@ import {
 
 export interface NewsfeedTabProps {
   dark: boolean;
+  searchQuery: string;
   onOpenMap: (focus: MapFocus) => void;
 }
 
@@ -94,14 +96,15 @@ function FilterBar({ filter, counts, onFilter, paused, onPause, dark }: BarProps
   );
 }
 
-export default function NewsfeedTab({ dark, onOpenMap }: NewsfeedTabProps) {
+export default function NewsfeedTab({ dark, searchQuery, onOpenMap }: NewsfeedTabProps) {
   const feed = useNewsfeed();
   const now = useNow();
   const [filter, setFilter] = useState<FeedFilter>("all");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-  const counts = useMemo(() => countByFilter(feed.items, now), [feed.items, now]);
-  const visible = useMemo(() => feed.items.filter((a) => matchesFilter(a, filter, now)), [feed.items, filter, now]);
+  const searched = useMemo(() => feed.items.filter((a) => matchesSearch(a, searchQuery)), [feed.items, searchQuery]);
+  const counts = useMemo(() => countByFilter(searched, now), [searched, now]);
+  const visible = useMemo(() => searched.filter((a) => matchesFilter(a, filter, now)), [searched, filter, now]);
   const selected = findRow(feed.items, selectedKey);
 
   const track = (row: RowEntity) => {
@@ -148,7 +151,7 @@ export default function NewsfeedTab({ dark, onOpenMap }: NewsfeedTabProps) {
       )}
       <div className={`overflow-hidden rounded-xl border ${dark ? "border-slate-700" : "border-gray-200"}`}>
         {feed.items.length === 0 && <Message dark={dark}>No articles yet. The next ingest will fill this in.</Message>}
-        {feed.items.length > 0 && visible.length === 0 && <Message dark={dark}>Nothing in the loaded articles matches this filter.</Message>}
+        {feed.items.length > 0 && visible.length === 0 && <Message dark={dark}>Nothing in the loaded articles matches this search or filter.</Message>}
         {visible.map((article) => (
           <FeedRow key={article.id} article={article} h={handlers} />
         ))}

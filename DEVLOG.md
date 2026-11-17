@@ -2841,3 +2841,7 @@ All refactoring was purely structural. No UI changes, no functional changes, no 
 - What changed: `BACKFILL_FROM` = 2026-11-10 (operator decision). Nov 1 to 9 skipped for budget; noted in HANDOFF-PROMPT.md.
 - What it affected: `backfill.ts` and tests. Full window had 11,355 articles, estimate $7.38.
 - Gotchas: Pushed to `main`; the catch-up starts on the next scheduled ingest.
+
+## 2026-11-17
+- Newsfeed: removed blue left row accent; header search now filters Newsfeed rows (matchesSearch in feed-logic.ts, searchQuery plumbed DashboardTable -> TabContent -> NewsfeedTab).
+- Cause: searchQuery lived only in useDashboardTable and filtered the old items; NewsfeedTab never received it. Search covers loaded pages only.

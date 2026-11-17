@@ -67,7 +67,7 @@ export default function DashboardTable() {
         )}
 
         <TabContent
-          activeTab={activeTab} items={items} filteredItems={filteredItems} dark={dark}
+          activeTab={activeTab} items={items} filteredItems={filteredItems} dark={dark} searchQuery={searchQuery}
           onEntityClick={handleEntityClick} onEntitySelect={setPanelEntityId} onCandidatesChanged={handleCandidatesChanged}
           mapFocus={mapFocus} onOpenMap={openOnMap}
         />
