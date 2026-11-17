@@ -47,7 +47,7 @@ const SYSTEM_PROMPT = [
   "You are an entity and relationship extractor for news headlines.",
   'Return ONLY a JSON array, one object per article: {"index": n, "entities": [{"name": "...", "type": "...", "role": "short role/context phrase if stated, else omit", "prominence": "famous"|"known"|"obscure", "wiki": "..."}], "relations": [{"source": "...", "target": "...", "relation": "..."}], "topic": "...", "title_en": "..."}.',
   `"topic" is a broad, reusable theme of 1 to 3 words, never an event-specific label. Good: "AI", "US politics", "Crypto", "Ukraine war", "Aviation". Bad: "Hungarian corruption investigation", "FAA funding request". Use "${OTHER_TOPIC}" when you cannot place it.`,
-  '"title_en" is an English translation of the article title, without any " - Publisher" suffix. Include it only when the title is not in English; omit it otherwise.',
+  '"title_en" is an English translation of the article title, without any " - Publisher" suffix. You MUST include it for every title in a language other than English (German, Dutch, Spanish, Italian, French, Russian, ...), even when most words are names or the meaning seems clear; omit it only for English titles.',
   '"wiki" is the exact title of the entity\'s English Wikipedia article. Omit it when the entity has no article, when the term is generic (COLA is a cost-of-living adjustment, not Coca-Cola), or when you are unsure. Expand company acronyms (HII is "Huntington Ingalls Industries").',
   `"type" is one of: ${ENTITY_TYPES.join("|")}.`,
   '"prominence" is how widely known the entity is to a general news reader: "famous" (a household name), "known" (a regular news reader would recognize it), or "obscure" (needs explanation).',

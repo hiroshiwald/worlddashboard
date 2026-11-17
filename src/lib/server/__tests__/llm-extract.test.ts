@@ -177,6 +177,7 @@ describe("submitBatch: request shape", () => {
     expect(system).toContain("every named person, company, startup, product and organization");
     expect(system).toContain("Sen. Warren, Merkley");
     expect(system).toContain("non-English");
+    expect(system).toContain("MUST include it for every title in a language other than English");
     expect(system).toContain("broad, reusable theme of 1 to 3 words");
     expect(system).toContain('"Other"');
     expect(system).toContain("Prefer reusing one exactly");
