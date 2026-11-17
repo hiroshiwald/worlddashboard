@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EmergingItem } from "@/lib/emerging-types";
 import type { GraphEdge, GraphNode } from "@/lib/server/graph";
-import { buildUniverse, universeNodes, nodeRadius, showLabel , pickLabelled } from "../forcegraph";
+import { buildUniverse, centringForce, nodeRadius, pickLabelled, showLabel, universeNodes } from "../forcegraph";
 
 function node(id: string, mentions14d = 5): GraphNode {
   return { id, name: `N${id}`, type: "person", status: "tracked", role: "satellite", clusterIds: [], state: "Steady", ratio: 1, mentions14d, mergedInto: null };
@@ -86,5 +86,18 @@ describe("universeNodes", () => {
     expect(out).toContain("k49");
     expect(out).not.toContain("k5");
     expect(out).toHaveLength(41);
+  });
+});
+
+describe("centringForce", () => {
+  it("pulls a far node toward the origin in proportion to distance and alpha", () => {
+    const far = { x: 100, y: -50, vx: 0, vy: 0 };
+    const near: { x: number; y: number; vx?: number } = { x: 1, y: 0 };
+    const f = centringForce(0.1);
+    f.initialize([far, near]);
+    f(0.5);
+    expect(far.vx).toBeCloseTo(-5);
+    expect(far.vy).toBeCloseTo(2.5);
+    expect(near.vx).toBeCloseTo(-0.05);
   });
 });

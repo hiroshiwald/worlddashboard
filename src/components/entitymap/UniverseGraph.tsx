@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
-import { showLabel, type UniNode, type Universe } from "./forcegraph";
+import { centringForce, showLabel, type UniNode, type Universe } from "./forcegraph";
 
 const NEW_COLOR = "#0ea5e9";
 
@@ -48,6 +48,7 @@ export default function UniverseGraph({ dark, universe, selected, onSelect }: Pr
     if (!g) return;
     g.d3Force("charge")?.strength(-60);
     g.d3Force("link")?.distance(40);
+    g.d3Force("centring", centringForce(0.08));
   }, [graphData]);
   const lit = useMemo(() => {
     if (selected === null) return null;

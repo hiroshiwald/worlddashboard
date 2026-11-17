@@ -106,3 +106,20 @@ export function showLabel(node: UniNode, hovered: string | null, selected: strin
   if (node.labelled || node.id === hovered || node.id === selected) return true;
   return selected !== null && neighbours.get(selected)?.has(node.id) === true;
 }
+
+interface Moving { x?: number; y?: number; vx?: number; vy?: number }
+
+/** Pure d3-style force: pulls every node toward the origin. The built-in
+ * "center" force only moves the mean, so small disconnected pieces drift
+ * out and zoomToFit shrinks the core. This keeps them near the core. */
+export function centringForce(strength: number) {
+  let nodes: Moving[] = [];
+  const force = (alpha: number) => {
+    for (const n of nodes) {
+      n.vx = (n.vx ?? 0) - (n.x ?? 0) * strength * alpha;
+      n.vy = (n.vy ?? 0) - (n.y ?? 0) * strength * alpha;
+    }
+  };
+  force.initialize = (next: Moving[]) => { nodes = next; };
+  return force;
+}
