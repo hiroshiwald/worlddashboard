@@ -143,3 +143,8 @@ Read DEVLOG.md entries dated 2026-11-16 and 2026-11-17 for detail. State on 2026
 - Catch-up: `src/lib/server/backfill.ts`, window Nov 10 to 16 only. `GET /api/backfill` shows `{remaining, estimatedUsd}`. Delete the file, its call sites in `entity-ingest.ts` and `src/app/api/backfill` when remaining = 0.
 - SKIPPED, revisit with operator: Nov 1 to 9 catch-up. Full Nov 1 to 16 window was 11,355 articles, estimated $7.38 (300 in / 200 out tokens per article, batch rates) against the $10 monthly cap with $0.66 spent. To run it: set BACKFILL_FROM to 2026-11-01 after the Nov 10 to 16 run ends, ideally in December or with a higher cap.
 - Open: 32 of 106 feeds fail in ingest (not checked). Motion on the Entity map not checked in a real browser. Esri map tiles not checked in a real browser.
+
+### Open decision 2026-11-17: what "tracked" means
+- Fact: ingest creates every new dictionary hit and every LLM "famous" name with `status = 'tracked'` (`classifyCandidate`, `entity-ingest.ts` ~:259-263). So 1,625 "tracked" rows are mostly system-added. Robert Pattinson was added this way. No column records which rows the operator chose.
+- Proposed fix (needs operator yes + migration 011): `entities.followed BOOLEAN NOT NULL DEFAULT false`. Only the operator's Track sets it. UI "tracked"/"In your world" reads `followed`; status 'tracked' stays as "known to the system" so growth, graph and map keep working.
+- In flight at handoff: helper building Entity map single-view force graph (react-force-graph-2d, as in NetworkTab); helper removing the Newsfeed blue left border and fixing header search for the Newsfeed. Merge each to the branch, run tsc/tests/build, Playwright check, then push to `main` (operator approved pushes for this work).
