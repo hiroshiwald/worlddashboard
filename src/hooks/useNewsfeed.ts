@@ -11,6 +11,7 @@ import {
   type FeedCandidate,
   type FeedEntity,
 } from "@/components/newsfeed/feed-logic";
+import { useSnapshot } from "@/components/SnapshotContext";
 
 const PAGE_LIMIT = 50;
 const POLL_LIMIT = 100;
@@ -107,17 +108,24 @@ function parseGrowth(raw: unknown): Record<string, EntityGrowth> {
 /** Growth state per entity id, from the Entities list sorted by growth.
  * `unavailable` is true when that call failed; the feed still works. */
 function useGrowth() {
-  const [growth, setGrowth] = useState<Record<string, EntityGrowth>>({});
+  // The last growth map is drawn at once on return; the reload replaces it.
+  const [saved, save] = useSnapshot<Record<string, EntityGrowth>>("newsfeed-growth");
+  const [growth, setGrowth] = useState<Record<string, EntityGrowth>>(saved ?? {});
   const [unavailable, setUnavailable] = useState(false);
+  const fromCopy = useRef(saved !== undefined);
   const load = useCallback(async () => {
     try {
-      setGrowth(parseGrowth(await getJson(`/api/entities?sort=growth&limit=${GROWTH_LIMIT}`)));
+      const fresh = parseGrowth(await getJson(`/api/entities?sort=growth&limit=${GROWTH_LIMIT}`));
+      fromCopy.current = false;
+      setGrowth(fresh);
+      save(fresh);
       setUnavailable(false);
     } catch (err) {
       console.warn("newsfeed: growth unavailable", err);
-      setUnavailable(true);
+      // A copy still on screen stays without the "unavailable" notice.
+      if (!fromCopy.current) setUnavailable(true);
     }
-  }, []);
+  }, [save]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -138,31 +146,51 @@ interface Pages {
   setLastIngestAt: (iso: string | null) => void;
 }
 
+interface FeedSnapshot {
+  items: FeedArticle[];
+  nextCursor: string | null;
+  lastIngestAt: string | null;
+}
+
 function usePages(q: string | null): Pages {
-  const [items, setItems] = useState<FeedArticle[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [lastIngestAt, setLastIngestAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // One slot: what the plain feed (no search) showed, including the reader's own
+  // Track/Ignore changes. Everything loaded is saved; the reload on mount
+  // replaces it with page 1. Never used or written while a search is active.
+  const [saved, save] = useSnapshot<FeedSnapshot>("newsfeed");
+  const start = q === null ? saved : undefined;
+  const [items, setItems] = useState<FeedArticle[]>(start?.items ?? []);
+  const [nextCursor, setNextCursor] = useState<string | null>(start?.nextCursor ?? null);
+  const [lastIngestAt, setLastIngestAt] = useState<string | null>(start?.lastIngestAt ?? null);
+  const [loading, setLoading] = useState(start === undefined);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dbUnconfigured, setDbUnconfigured] = useState(false);
 
   // Each reload bumps this; a response for an older query or page is dropped.
   const generation = useRef(0);
+  // fromCopy: the saved copy is still on screen. itemsQuery: the query that
+  // produced the items on screen (undefined before the first load).
+  const fromCopy = useRef(start !== undefined);
+  const itemsQuery = useRef<string | null | undefined>(start === undefined ? undefined : null);
 
   const reload = useCallback(async () => {
     const mine = ++generation.current;
-    setLoading(true);
+    const background = q === null && fromCopy.current;
+    if (!background) setLoading(true);
     setError(null);
     try {
       const page = parseFeedResponse(await getJson(feedUrl({}, q)));
       if (mine !== generation.current) return;
+      fromCopy.current = false;
+      itemsQuery.current = q;
       setItems(page.items);
       setNextCursor(page.nextCursor);
       setLastIngestAt(page.lastIngestAt);
       setDbUnconfigured(false);
     } catch (err) {
-      if (err instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
+      if (background) {
+        console.warn("newsfeed: background reload failed, showing saved feed", err);
+      } else if (err instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
       else setError(err instanceof Error ? err.message : "Failed to load the feed");
     } finally {
       if (mine === generation.current) setLoading(false);
@@ -188,6 +216,11 @@ function usePages(q: string | null): Pages {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Save what is on screen, but only when it came from a no-search load.
+  useEffect(() => {
+    if (q === null && itemsQuery.current === null) save({ items, nextCursor, lastIngestAt });
+  }, [q, items, nextCursor, lastIngestAt, save]);
 
   return { items, setItems, nextCursor, lastIngestAt, loading, loadingMore, error, dbUnconfigured, reload, loadMore, setLastIngestAt };
 }
