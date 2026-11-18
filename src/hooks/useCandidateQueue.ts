@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useSnapshot } from "@/components/SnapshotContext";
 import { CandidateRowData, BulkItemResult, ENTITY_TYPES, ToastState } from "@/components/entities/types";
 
 const PAGE_SIZE = 100;
@@ -81,8 +82,12 @@ async function retrackEntityByName(displayName: string): Promise<void> {
 // the candidate queue is tightly coupled through one load() and one
 // selection set. Pure helpers are already extracted above.
 export function useCandidateQueue(onCountChange: (count: number) => void) {
-  const [candidates, setCandidates] = useState<CandidateRowData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [saved, save] = useSnapshot<CandidateRowData[]>("candidates");
+  // The copy awaiting its first fresh load; undefined once replaced (or none).
+  const copy = useRef(saved);
+  const hasShown = useRef(saved !== undefined);
+  const [candidates, setCandidates] = useState<CandidateRowData[]>(saved === undefined ? [] : saved);
+  const [loading, setLoading] = useState(saved === undefined);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [bulkErrors, setBulkErrors] = useState<BulkItemResult[]>([]);
@@ -95,14 +100,25 @@ export function useCandidateQueue(onCountChange: (count: number) => void) {
   const [bulkBusy, setBulkBusy] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setDbUnconfigured(false);
+    const background = copy.current !== undefined;
+    if (copy.current !== undefined) {
+      onCountChange(copy.current.length);
+    } else {
+      setLoading(true);
+      setError(null);
+      setDbUnconfigured(false);
+    }
     try {
       const list = await fetchCandidates();
+      copy.current = undefined;
+      hasShown.current = true;
       setCandidates(list);
       onCountChange(list.length);
     } catch (e) {
+      if (background) {
+        console.warn("candidates: background reload failed, showing saved data", e);
+        return;
+      }
       onCountChange(0);
       if (e instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
       else setError(e instanceof Error ? e.message : "Failed to load candidates");
@@ -110,6 +126,11 @@ export function useCandidateQueue(onCountChange: (count: number) => void) {
       setLoading(false);
     }
   }, [onCountChange]);
+
+  // Save what is on screen, including the reader's own accept/dismiss.
+  useEffect(() => {
+    if (hasShown.current) save(candidates);
+  }, [candidates, save]);
 
   useEffect(() => {
     // Fire-and-forget: load() owns its own try/catch and reports via state.

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useBusyIds } from "./useBusyIds";
+import { useSnapshot } from "@/components/SnapshotContext";
 import {
   EntityRowData, EntityStats, EntityPatch, EntityAdminPatchResponse, StatusFilter, FameFilter,
   FameCheckedFilter, EntitySort, DEFAULT_ENTITY_SORT,
@@ -115,6 +116,24 @@ function describePatch(before: EntityRowData, patch: EntityPatch): { message: st
   return null;
 }
 
+// Every query input; a saved copy is shown only for the same params.
+interface EntitiesParams {
+  debouncedQ: string; status: StatusFilter; fame: FameFilter; fameChecked: FameCheckedFilter;
+  fameLocked: boolean; sort: EntitySort; offset: number; pageSize: PageSizeOption;
+}
+
+interface EntitiesSnapshot { params: EntitiesParams; stats: EntityStats; entities: EntityRowData[]; total: number }
+
+const DEFAULT_PARAMS: EntitiesParams = {
+  debouncedQ: "", status: "tracked", fame: "all", fameChecked: "all", fameLocked: false,
+  sort: DEFAULT_ENTITY_SORT, offset: 0, pageSize: DEFAULT_PAGE_SIZE,
+};
+
+/** Pure. Params are flat primitives built in a fixed key order. */
+export function sameParams(a: EntitiesParams, b: EntitiesParams): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 // Exception to 50-line rule: search/filter/pagination/PATCH state for the
 // Entities tab is tightly coupled — the debounced query, the two filters,
 // and offset all drive the same load()'s sequence guard, and PATCH shares
@@ -122,9 +141,16 @@ function describePatch(before: EntityRowData, patch: EntityPatch): { message: st
 // one hook's state across files without improving readability (same
 // rationale useSignalsTab.ts already documents).
 export function useEntitiesTab() {
+  const [saved, save] = useSnapshot<EntitiesSnapshot>("entities");
+  // The copy on screen: used only if its params are the defaults we start with.
+  const start = saved !== undefined && sameParams(saved.params, DEFAULT_PARAMS) ? saved : undefined;
+  // Params of the copy still awaiting its first fresh load; null once replaced.
+  const copyParams = useRef<EntitiesParams | null>(start === undefined ? null : start.params);
+  // Params of the data on screen, for saving; null until there is any.
+  const shownParams = useRef<EntitiesParams | null>(copyParams.current);
   const [q, setQInternal] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
-  const [status, setStatusInternal] = useState<StatusFilter>("tracked");
+  const [status, setStatusInternal] = useState<StatusFilter>(DEFAULT_PARAMS.status);
   const [fame, setFameInternal] = useState<FameFilter>("all");
   const [fameChecked, setFameCheckedInternal] = useState<FameCheckedFilter>("all");
   const [fameLocked, setFameLockedInternal] = useState(false);
@@ -132,10 +158,10 @@ export function useEntitiesTab() {
   const [offset, setOffset] = useState(0);
   const [pageSize, setPageSizeInternal] = useState<PageSizeOption>(DEFAULT_PAGE_SIZE);
 
-  const [stats, setStats] = useState<EntityStats | null>(null);
-  const [entities, setEntities] = useState<EntityRowData[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<EntityStats | null>(start === undefined ? null : start.stats);
+  const [entities, setEntities] = useState<EntityRowData[]>(start === undefined ? [] : start.entities);
+  const [total, setTotal] = useState(start === undefined ? 0 : start.total);
+  const [loading, setLoading] = useState(start === undefined);
   const [error, setError] = useState<string | null>(null);
   // Separate from `error`: a PATCH failure must stay visible until the user
   // dismisses it, not get silently wiped by the refetch's own setError(null)
@@ -156,26 +182,40 @@ export function useEntitiesTab() {
   // and overwriting fresher data with stale data.
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
-    setLoading(true);
-    setError(null);
-    setDbUnconfigured(false);
+    const params: EntitiesParams = { debouncedQ, status, fame, fameChecked, fameLocked, sort, offset, pageSize };
+    // A saved copy for these params stays on screen: no spinner, no clearing.
+    const background = copyParams.current !== null && sameParams(copyParams.current, params);
+    if (!background) {
+      setLoading(true);
+      setError(null);
+      setDbUnconfigured(false);
+    }
     try {
       const [statsResult, listResult] = await Promise.all([
         fetchStats(),
         fetchEntitiesList(debouncedQ, status, fame, fameChecked, fameLocked, sort, offset, pageSize),
       ]);
       if (seq !== loadSeq.current) return;
+      copyParams.current = null;
+      shownParams.current = params;
       setStats(statsResult);
       setEntities(listResult.entities);
       setTotal(listResult.total);
     } catch (e) {
       if (seq !== loadSeq.current) return;
-      if (e instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
+      if (background) console.warn("entities: background reload failed, showing saved data", e);
+      else if (e instanceof DatabaseNotConfiguredError) setDbUnconfigured(true);
       else setError(e instanceof Error ? e.message : "Failed to load entities");
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
   }, [debouncedQ, status, fame, fameChecked, fameLocked, sort, offset, pageSize]);
+
+  // Save what is on screen, including the reader's own PATCH changes.
+  useEffect(() => {
+    if (shownParams.current === null || stats === null) return;
+    save({ params: shownParams.current, stats, entities, total });
+  }, [stats, entities, total, save]);
 
   useEffect(() => {
     // Fire-and-forget: load() owns its own try/catch and reports via state.
