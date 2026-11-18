@@ -2,6 +2,11 @@
 
 Older entries (2026-08-20 to 2026-11-16): DEVLOG-ARCHIVE.md. Do not read it at session start.
 
+## 2026-11-18 — Tabs draw their last loaded data at once on return
+- What changed: `SnapshotProvider` (DashboardTable state, one slot per hook, immutable updates) plus `useSnapshot`. Entity map, emerging names, Newsfeed (plain feed and growth), Entities list and candidate queue start from their saved copy, then reload in the background as before. Identical graph or emerging data keeps the old object, so the graph does not rebuild.
+- What it affected: return visits (local A/B, prod data): Entities 2.0-3.2 s to 57-71 ms, Entity map 2.1-3.3 s to 232-307 ms, Newsfeed 2.3-2.5 s to 57-68 ms. First visits unchanged. Same requests on every visit; no errors; heap about +5 MB. Gate: tsc, 1390 tests, build pass.
+- Gotchas: Keeping tabs mounted and hidden was tried first and rejected: Sigma threw "Container has no width" about 150 times, Leaflet lost its size after a resize, and cross-tab Track/Ignore went stale. Hooks save what is on screen (with the reader's own clicks), not only the server response. Entities uses its copy only for default params. A background reload failure keeps the copy and only warns. `useSnapshot` throws without the provider; hook tests need the wrapper. "Updated X ago" on the Entity map keeps the data's own time when fresh data is identical. Do not force-push this branch (blocked); fix commits with a follow-up commit. Helper tokens (Sonnet): A/B tests 123k, 92k, final 3-tab A/B (not counted), Newsfeed 92k, Entities 105k; audits 117k, 87k, 94k.
+
 ## 2026-11-18 — Server CPU fixes: lazy name regexes, indexed merge groups
 - What changed: `buildCandidateMatcher` builds each regex on first prefilter hit. `findComponents` in `soft-merge.ts` checks only pairs that share a type plus folded name, wiki title, or alias-to-name key, then runs the same `canJoin`.
 - What it affected: `/api/feed` (both fixes), `/api/graph`, `/api/entities`, `/api/entities/merges` (merge). Real data (1,659 entities, 18,787 aliases): matcher build 3,598 ms to 38 ms on a fresh process; merge 1,424 ms to 39 ms; groups identical in order. Gate: tsc, 1374 tests (57 skipped), build pass.
