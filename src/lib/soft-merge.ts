@@ -116,13 +116,58 @@ function findRoot(parent: number[], index: number): number {
   return node;
 }
 
+function addToBucket(buckets: Map<string, number[]>, key: string, index: number): void {
+  const bucket = buckets.get(key);
+  if (bucket === undefined) {
+    buckets.set(key, [index]);
+  } else {
+    bucket.push(index);
+  }
+}
+
+function bucketPairs(buckets: Map<string, number[]>): [number, number][] {
+  const pairs: [number, number][] = [];
+  for (const bucket of buckets.values()) {
+    for (let x = 0; x < bucket.length; x += 1) {
+      for (let y = x + 1; y < bucket.length; y += 1) {
+        pairs.push([bucket[x], bucket[y]]);
+      }
+    }
+  }
+  return pairs;
+}
+
+// Candidate pairs cover canJoin's link rules: same folded name, same wiki title,
+// or an alias of one equal to the name of the other. Keys include type.
+function candidatePairs(entities: MergeEntity[]): [number, number][] {
+  const names = new Map<string, number[]>();
+  const wikis = new Map<string, number[]>();
+  const foldedAliases = entities.map((e) => e.aliases.map((alias) => foldCountry(alias)));
+  entities.forEach((e, i) => {
+    addToBucket(names, `${e.type}\u0000${foldCountry(e.name)}`, i);
+    const title = e.wikiTitle === null ? "" : normalizeName(e.wikiTitle);
+    if (title.length > 0) {
+      addToBucket(wikis, `${e.type}\u0000${title}`, i);
+    }
+  });
+  const pairs = [...bucketPairs(names), ...bucketPairs(wikis)];
+  entities.forEach((e, i) => {
+    for (const alias of foldedAliases[i]) {
+      for (const j of names.get(`${e.type}\u0000${alias}`) ?? []) {
+        if (j !== i) {
+          pairs.push([i, j]);
+        }
+      }
+    }
+  });
+  return pairs;
+}
+
 function findComponents(entities: MergeEntity[]): MergeEntity[][] {
   const parent = entities.map((_, i) => i);
-  for (let i = 0; i < entities.length; i += 1) {
-    for (let j = i + 1; j < entities.length; j += 1) {
-      if (canJoin(entities[i], entities[j])) {
-        parent[findRoot(parent, i)] = findRoot(parent, j);
-      }
+  for (const [i, j] of candidatePairs(entities)) {
+    if (canJoin(entities[i], entities[j])) {
+      parent[findRoot(parent, i)] = findRoot(parent, j);
     }
   }
   const byRoot = new Map<number, MergeEntity[]>();

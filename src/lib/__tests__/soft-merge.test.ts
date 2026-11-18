@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   buildMergeGroups,
   namesDifferOnlyByNumber,
+  sharesNameOrAlias,
+  sharesWikiTitle,
   type MergeEntity,
+  type MergeGroup,
 } from "../soft-merge";
 
 function makeEntity(overrides: Partial<MergeEntity> & { id: string }): MergeEntity {
@@ -250,5 +253,133 @@ describe("namesDifferOnlyByNumber", () => {
     expect(() => namesDifferOnlyByNumber(1 as unknown as string, "a")).toThrow(
       "soft-merge: names must be strings",
     );
+  });
+});
+
+// Reference: the pre-optimisation pairwise path (O(n^2)), kept to prove equivalence.
+function refNormalize(name: string): string {
+  return name.replace(/\./g, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function refFold(name: string): string {
+  const n = refNormalize(name);
+  if (n === "us" || n === "usa" || n === "u s") return "united states";
+  if (n === "uk") return "united kingdom";
+  return n.replace(/^(?:us|u s) /, "united states ").replace(/^uk /, "united kingdom ");
+}
+
+function refCanJoin(a: MergeEntity, b: MergeEntity): boolean {
+  if (a.type !== b.type) return false;
+  const linked =
+    refFold(a.name) === refFold(b.name) || sharesNameOrAlias(a, b) || sharesWikiTitle(a, b);
+  return linked && !namesDifferOnlyByNumber(a.name, b.name);
+}
+
+function refCompare(a: MergeEntity, b: MergeEntity): number {
+  if (a.mentions !== b.mentions) return b.mentions - a.mentions;
+  if (a.id < b.id) return -1;
+  if (a.id > b.id) return 1;
+  return 0;
+}
+
+function referenceGroups(entities: MergeEntity[]): MergeGroup[] {
+  const parent = entities.map((_, i) => i);
+  const root = (i: number): number => {
+    let n = i;
+    while (parent[n] !== n) {
+      parent[n] = parent[parent[n]];
+      n = parent[n];
+    }
+    return n;
+  };
+  for (let i = 0; i < entities.length; i += 1) {
+    for (let j = i + 1; j < entities.length; j += 1) {
+      if (refCanJoin(entities[i], entities[j])) parent[root(i)] = root(j);
+    }
+  }
+  const byRoot = new Map<number, MergeEntity[]>();
+  entities.forEach((e, i) => {
+    const members = byRoot.get(root(i)) ?? [];
+    members.push(e);
+    byRoot.set(root(i), members);
+  });
+  const consistent = (m: MergeEntity[]) =>
+    m.every((x, i) => m.slice(i + 1).every((y) => !namesDifferOnlyByNumber(x.name, y.name)));
+  return [...byRoot.values()]
+    .filter((m) => m.length >= 2 && consistent(m))
+    .map((m) => [...m].sort(refCompare))
+    .sort((a, b) => refCompare(a[0], b[0]))
+    .map(([canonical, ...rest]) => ({
+      canonicalId: canonical.id,
+      memberIds: [canonical.id, ...rest.map((e) => e.id).sort()],
+      otherNames: rest.map((e) => e.name).sort(),
+    }));
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const POOL = [
+  "US", "USA", "U.S.", "u s navy", "US Navy", "United States", "United States Navy",
+  "UK", "United Kingdom", "Henry VIII", "Henry VII", "Henry", "Apollo 11", "Apollo 12",
+  "Apollo", "  Spaced  Name ", "spaced name", "Navy",
+];
+const TYPES = ["org", "person", "country"];
+
+function randomEntities(rand: () => number, count: number, maxAliases: number): MergeEntity[] {
+  const pick = <T,>(items: T[]): T => items[Math.floor(rand() * items.length)];
+  return Array.from({ length: count }, (_, i) => ({
+    id: `e${i}`,
+    name: pick(POOL),
+    type: pick(TYPES),
+    aliases: Array.from({ length: Math.floor(rand() * (maxAliases + 1)) }, () => pick(POOL)),
+    wikiTitle: rand() < 0.4 ? null : pick(POOL),
+    mentions: Math.floor(rand() * 4),
+  }));
+}
+
+describe("buildMergeGroups equivalence with pairwise reference", () => {
+  it("matches the reference on 500 seeded random inputs", () => {
+    const rand = mulberry32(12345);
+    for (let run = 0; run < 500; run += 1) {
+      const entities = randomEntities(rand, 3 + Math.floor(rand() * 28), 3);
+      expect(buildMergeGroups(entities)).toEqual(referenceGroups(entities));
+    }
+  });
+
+  it("joins a chain: A alias = B name, B alias = C name", () => {
+    const entities = [
+      makeEntity({ id: "a", name: "Alpha", aliases: ["Beta"] }),
+      makeEntity({ id: "b", name: "Beta", aliases: ["Gamma"] }),
+      makeEntity({ id: "c", name: "Gamma" }),
+    ];
+    const groups = buildMergeGroups(entities);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].memberIds).toHaveLength(3);
+  });
+
+  it("does not join entities of different types with the same name", () => {
+    const entities = [
+      makeEntity({ id: "a", name: "Mercury", type: "person" }),
+      makeEntity({ id: "b", name: "Mercury", type: "org" }),
+    ];
+    expect(buildMergeGroups(entities)).toEqual([]);
+  });
+
+  it("handles 5,000 entities with 10 aliases each in under 500 ms", () => {
+    const entities = Array.from({ length: 5000 }, (_, i) => ({
+      ...makeEntity({ id: `e${i}`, name: `Entity ${i} Alpha`, type: "org" }),
+      aliases: Array.from({ length: 10 }, (_, k) => `Alias ${i}-${k} Beta`),
+    }));
+    const start = performance.now();
+    buildMergeGroups(entities);
+    expect(performance.now() - start).toBeLessThan(500);
   });
 });

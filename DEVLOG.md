@@ -2,6 +2,11 @@
 
 Older entries (2026-08-20 to 2026-11-16): DEVLOG-ARCHIVE.md. Do not read it at session start.
 
+## 2026-11-18 — Server CPU fixes: lazy name regexes, indexed merge groups
+- What changed: `buildCandidateMatcher` builds each regex on first prefilter hit. `findComponents` in `soft-merge.ts` checks only pairs that share a type plus folded name, wiki title, or alias-to-name key, then runs the same `canJoin`.
+- What it affected: `/api/feed` (both fixes), `/api/graph`, `/api/entities`, `/api/entities/merges` (merge). Real data (1,659 entities, 18,787 aliases): matcher build 3,598 ms to 38 ms on a fresh process; merge 1,424 ms to 39 ms; groups identical in order. Gate: tsc, 1374 tests (57 skipped), build pass.
+- Gotchas: Live before: feed 15 s on most requests, 4 to 6 s on some (V8 caches compiled regexes, so only fresh processes paid it). Vercel CPU about 2x slower than local. First guess (merge only) explained about 3 s of 15 s; measure each part before fixing. `/api/graph` still has about 5 s unexplained, likely `loadLifetimeSourceBreadth` called with all tracked ids (its comment forbids that); not verified. Opening a preview page starts a passive `/api/tick` on the production database: test previews with curl on API routes only. Helper tokens (Sonnet): regex 79k, merge 84k.
+
 ## 2026-11-17 — main updated; growth cause found; topics merged; budget cap $10
 - What changed: Operator said go. `main` fast-forwarded to `130686d` (Phase 4 tabs). Temporary route `GET /api/debug-counts` (preview only) gave live daily counts. Growth coverage weighting reverted. Growth now computed on display-merge groups (`groupMembersById` in `entity-facts.ts`). Merged topic storage (migration 009, `llm-extract.ts`, `entity-ingest.ts`) and topic clusters in `/api/graph`. `llm_monthly_budget_usd` default raised from 5 to 10 (no `settings` row overrides it).
 - What it affected: `entity-facts.ts` adds one query (all non-dismissed entities for merge groups). Gate: tsc clean, 1192 tests pass (57 skipped), build passes.
