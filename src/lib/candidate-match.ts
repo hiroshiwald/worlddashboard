@@ -69,18 +69,18 @@ export interface CandidateMatcher<T extends CandidateName> {
   match(text: string, exclude: Set<string>): T[];
 }
 
-/** Builds one pattern per name once, so a page of articles reuses them.
- * Names that fail isMatchableName are dropped. */
+/** Builds each name's pattern on first use (compiling ~20k up front is slow),
+ * then reuses it, so a page of articles shares them. Names that fail isMatchableName are dropped. */
 export function buildCandidateMatcher<T extends CandidateName>(candidates: T[]): CandidateMatcher<T> {
   // One-word names match with their own capitals ("EAST" must not match
   // "Middle East"); longer names ignore case.
-  const compiled: { candidate: T; folded: string; exact: boolean; pattern: RegExp }[] = [];
+  const compiled: { candidate: T; folded: string; exact: boolean; source: string; pattern: RegExp | null }[] = [];
   for (const candidate of candidates) {
     const name = candidate.displayName.trim();
     const folded = foldText(name);
     const exact = isSingleWord(name);
     if (isMatchableName(name)) {
-      compiled.push({ candidate, folded, exact, pattern: wholeWordPattern(exact ? stripAccents(name) : folded) });
+      compiled.push({ candidate, folded, exact, source: exact ? stripAccents(name) : folded, pattern: null });
     }
   }
   return {
@@ -91,6 +91,7 @@ export function buildCandidateMatcher<T extends CandidateName>(candidates: T[]):
       for (const entry of compiled) {
         if (exclude.has(entry.folded)) continue;
         if (!haystack.includes(entry.folded)) continue;
+        entry.pattern ??= wholeWordPattern(entry.source);
         if (entry.pattern.test(entry.exact ? caseKept : haystack)) found.push(entry);
       }
       return keepLongest(found, exclude);

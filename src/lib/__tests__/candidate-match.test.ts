@@ -88,3 +88,30 @@ describe("publisherSuffix", () => {
     expect(publisherSuffix("No suffix here")).toBeNull();
   });
 });
+
+describe("lazy patterns", () => {
+  it("a name that never appears does not break matching", () => {
+    const m = buildCandidateMatcher([c("Never Seen Anywhere"), c("Port Said")]);
+    expect(m.match("Ships wait at Port Said", new Set()).map((x) => x.displayName)).toEqual(["Port Said"]);
+  });
+
+  it("gives the same results when one matcher is reused across texts", () => {
+    const m = buildCandidateMatcher([c("EAST"), c("Port Said"), c("Okonjo")]);
+    const names = (text: string, exclude = new Set<string>()) => m.match(text, exclude).map((x) => x.displayName);
+    for (let round = 0; round < 2; round++) {
+      expect(names("Ships wait at Port Said")).toEqual(["Port Said"]);
+      expect(names("Okonjoism spreads")).toEqual([]);
+      expect(names("Tensions in the Middle East")).toEqual([]);
+      expect(names("Talks in EAST Berlin")).toEqual(["EAST"]);
+      expect(names("Ships wait at Port Said", new Set(["port said"]))).toEqual([]);
+    }
+  });
+
+  it("builds a matcher from 20,000 distinct names in under 500 ms", () => {
+    const names = Array.from({ length: 20000 }, (_, i) => c(`Alpha${i} Beta${i * 7} Gamma`));
+    const start = performance.now();
+    const m = buildCandidateMatcher(names);
+    expect(performance.now() - start).toBeLessThan(500);
+    expect(m.match("Report on Alpha5 Beta35 Gamma today", new Set())).toHaveLength(1);
+  });
+});
