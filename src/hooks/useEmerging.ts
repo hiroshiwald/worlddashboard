@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EmergingItem, EmergingResponse } from "@/lib/emerging-types";
 import { nameRequest, parseEmerging, type NameAction } from "@/components/entitymap/universe";
 import { sendJson } from "@/hooks/useNewsfeed";
+import { useSnapshot } from "@/components/SnapshotContext";
 
 export type EmergingLoad =
   | { status: "loading" }
@@ -19,22 +20,51 @@ async function fetchEmerging(days: number): Promise<EmergingResponse> {
   return parseEmerging(await res.json());
 }
 
+interface EmergingSnapshot { data: EmergingResponse; resolved: Record<string, Resolution> }
+
+/** Pure. True when two responses list the same names; keeping the old object
+ * then avoids a graph rebuild on the Entity map. */
+export function sameEmerging(a: EmergingResponse, b: EmergingResponse): boolean {
+  return a.days === b.days && JSON.stringify(a.items) === JSON.stringify(b.items);
+}
+
 /** days: the look-back window, 1..30 (the API rejects anything else). */
 export function useEmerging(days = 7) {
-  const [load, setLoad] = useState<EmergingLoad>({ status: "loading" });
-  const [resolved, setResolved] = useState<Record<string, Resolution>>({});
+  // One slot: the last window shown, with the reader's own Track/Ignore marks.
+  const [saved, save] = useSnapshot<EmergingSnapshot>("emerging");
+  const start = saved !== undefined && saved.data.days === days ? saved : undefined;
+  const [load, setLoad] = useState<EmergingLoad>(() => (start === undefined ? { status: "loading" } : { status: "ready", data: start.data }));
+  const [resolved, setResolved] = useState<Record<string, Resolution>>(() => (start === undefined ? {} : start.resolved));
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const shown = useRef(load);
+  shown.current = load;
 
+  // A copy for this window stays on screen while the reload runs; see useEntityMap.
   const reload = useCallback(() => {
-    setLoad({ status: "loading" });
-    setResolved({});
+    setLoad((prev) => (prev.status === "ready" && prev.data.days === days ? prev : { status: "loading" }));
     fetchEmerging(days).then(
-      (data) => setLoad({ status: "ready", data }),
-      (e: Error) => setLoad({ status: "error", message: e.message }),
+      (data) => {
+        const prev = shown.current;
+        if (prev.status === "ready" && sameEmerging(prev.data, data)) return;
+        setResolved({});
+        setLoad({ status: "ready", data });
+      },
+      (e: Error) => {
+        const prev = shown.current;
+        if (prev.status === "ready" && prev.data.days === days) {
+          console.warn("emerging: background reload failed, showing saved data", e);
+          return;
+        }
+        setLoad({ status: "error", message: e.message });
+      },
     );
   }, [days]);
   useEffect(reload, [reload]);
+
+  useEffect(() => {
+    if (load.status === "ready") save({ data: load.data, resolved });
+  }, [load, resolved, save]);
 
   const resolve = useCallback(async (item: EmergingItem, action: NameAction) => {
     const { method, url, body } = nameRequest(item, action);

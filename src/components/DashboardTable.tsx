@@ -7,6 +7,7 @@ import { EntityFilterBanner, FeedTable, FeedCardList, TabContent } from "./dashb
 import { TabKey } from "@/hooks/useDashboardTable";
 import { useSession } from "@/hooks/useSession";
 import { AdminProvider } from "./AdminContext";
+import { SnapshotProvider } from "./SnapshotContext";
 
 // Brief, Developments, and Entities are DB-backed and render independently
 // of the live feed items array (see TabContent.tsx) — every other tab needs
@@ -33,6 +34,7 @@ export default function DashboardTable() {
 
   return (
     <AdminProvider value={session.role === "admin"}>
+    <SnapshotProvider>
     <div className={`h-screen flex flex-col ${t.bg} transition-colors duration-200 ${dark ? "dark-scrollbar" : ""}`}>
       <HeaderBar
         dark={dark} toggleTheme={toggleTheme} searchQuery={searchQuery}
@@ -109,6 +111,7 @@ export default function DashboardTable() {
         />
       )}
     </div>
+    </SnapshotProvider>
     </AdminProvider>
   );
 }

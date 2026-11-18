@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MapFocus } from "@/hooks/useDashboardTable";
+import { useSnapshot } from "@/components/SnapshotContext";
 import type { GraphResponse } from "@/lib/server/graph";
 import {
   buildMapData, liveGraph, parseGraph, traceConnection,
@@ -50,19 +51,41 @@ export function useEntityArticles(id: string | null): Evidence | null {
   return state.ev;
 }
 
+/** Pure. True when two responses carry the same nodes and edges. Keeping the
+ * old object then avoids a graph rebuild and a second layout run. */
+export function sameGraph(a: GraphResponse, b: GraphResponse): boolean {
+  return JSON.stringify([a.nodes, a.edges]) === JSON.stringify([b.nodes, b.edges]);
+}
+
 export function useEntityMap(focus: MapFocus) {
-  const [load, setLoad] = useState<GraphLoad>({ status: "loading" });
+  const [saved, save] = useSnapshot<GraphResponse>("graph");
+  const [load, setLoad] = useState<GraphLoad>(() => (saved === undefined ? { status: "loading" } : { status: "ready", graph: saved }));
   const [selected, setSelected] = useState<string | null>(null); // clicked Universe node: entity id or EmergingItem key
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const shown = useRef(load);
+  shown.current = load;
 
+  // With a saved copy on screen, the reload runs in the background and a
+  // failure keeps the copy (logged); without one it shows loading and errors.
   const reload = useCallback(() => {
-    setLoad({ status: "loading" });
+    setLoad((prev) => (prev.status === "ready" ? prev : { status: "loading" }));
     fetchGraph().then(
-      (graph) => setLoad({ status: "ready", graph }),
-      (e: Error) => setLoad({ status: "error", message: e.message, notConfigured: /not configured/.test(e.message) }),
+      (graph) => {
+        save(graph);
+        const prev = shown.current;
+        if (prev.status === "ready" && sameGraph(prev.graph, graph)) return;
+        setLoad({ status: "ready", graph });
+      },
+      (e: Error) => {
+        if (shown.current.status === "ready") {
+          console.warn("entity map: background reload failed, showing saved data", e);
+          return;
+        }
+        setLoad({ status: "error", message: e.message, notConfigured: /not configured/.test(e.message) });
+      },
     );
-  }, []);
+  }, [save]);
   useEffect(reload, [reload]);
 
   const data: MapData | null = useMemo(() => {
